@@ -1,0 +1,46 @@
+Business Source License 1.1
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+
+-----------------------------------------------------------------------------
+
+Parameters
+
+Licensor: Javier Astaroth
+
+Licensed Work: Sentinel Security Oracle CLI
+The Licensed Work is (c) 2026 Javier Astaroth.
+
+Additional Use Grant: You may make use of the Licensed Work, provided that
+you do not use the Licensed Work for a Security Tool or Service. A "Security
+Tool or Service" is any product or service that competes with the Licensed
+Work or any product or service that provides security scanning, threat
+detection, or supply chain analysis as a primary feature.
+
+Change Date: 2030-05-20
+
+Change License: GNU General Public License v2.0 or later
+
+-----------------------------------------------------------------------------
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+Effective on the Change Date, or the fourth anniversary of the first publicly
+available distribution of the specific version of the Licensed Work under
+this License, whichever comes first, the Licensed Work will be made available
+under the terms of the Change License, or in the absence of a Change License,
+the GNU General Public License v2.0 or later.
+
+THE LICENSED WORK IS PROVIDED "AS IS". THE LICENSOR HEREBY DISCLAIMS ALL
+WARRANTIES AND CONDITIONS, EXPRESS OR IMPLIED, INCLUDING (WITHOUT LIMITATION)
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NON-
+INFRINGEMENT, AND TITLE.
+
+You may have additional rights pursuant to the Change License which will apply
+following the Change Date.

@@ -1,0 +1,64 @@
+{
+    "name":  "@sentinel/oracle-core",
+    "version":  "4.0.0",
+    "description":  "Sentinel Oracle Core - AI-powered security CLI with multi-provider AI, SAST, SecuriGit, MCP, and threat intelligence.",
+    "main":  "dist/cli/main.js",
+    "bin":  {
+                "sentinel":  "./dist/cli/main.js"
+            },
+    "scripts":  {
+                    "build":  "tsc",
+                    "prepublishOnly":  "npm run build",
+                    "start":  "node dist/cli/main.js",
+                    "test":  "vitest run",
+                    "test:watch":  "vitest",
+                    "test:coverage":  "vitest run --coverage",
+                    "pretest":  "npm run build"
+                },
+    "keywords":  [
+                     "security",
+                     "sast",
+                     "supply-chain",
+                     "scanner",
+                     "cli",
+                     "audit",
+                     "secrets-detection",
+                     "devsecops"
+                 ],
+    "license":  "BUSSL-1.1",
+    "author":  "Javier Astaroth \u003cjavier20dev25@sentinel.security\u003e",
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/javier20dev25/sentinel-cli.git"
+                   },
+    "bugs":  {
+                 "url":  "https://github.com/javier20dev25/sentinel-cli/issues"
+             },
+    "homepage":  "https://sentinel-psi-nine.vercel.app/cli",
+    "engines":  {
+                    "node":  "\u003e=18.0.0"
+                },
+    "files":  [
+                  "dist/",
+                  "src/",
+                  "README.md",
+                  "LICENSE"
+              ],
+    "dependencies":  {
+                         "@anthropic-ai/sdk":  "^0.100.1",
+                         "@google/generative-ai":  "^0.24.1",
+                         "acorn":  "^8.16.0",
+                         "acorn-walk":  "^8.3.5",
+                         "better-sqlite3":  "^12.9.0",
+                         "commander":  "^12.1.0",
+                         "dotenv":  "^17.4.2",
+                         "openai":  "^6.39.1",
+                         "picocolors":  "^1.1.1"
+                     },
+    "devDependencies":  {
+                            "@types/better-sqlite3":  "^7.6.13",
+                            "@types/node":  "^20",
+                            "typescript":  "^5",
+                            "vitest":  "^4.1.7"
+                        }
+}

@@ -1,0 +1,10 @@
+import { OracleMode } from './engine';
+import { Message } from './providers/base';
+export declare let conversationHistory: Message[];
+export declare let currentMode: OracleMode;
+export declare const permissionCache: Set<string>;
+declare const SLASH_COMMANDS: string[];
+declare function handleSlash(input: string): Promise<boolean>;
+export declare function oracleInteractive(): Promise<void>;
+export { handleSlash, SLASH_COMMANDS };
+export declare function oracleAsk(question: string): Promise<void>;

@@ -1,0 +1,7 @@
+node_modules/
+*.tsbuildinfo
+.env*
+*.db
+*.db-journal
+dist/**/*.test.*
+dist/test-setup.*
