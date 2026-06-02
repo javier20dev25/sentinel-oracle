@@ -124,12 +124,11 @@ oracle
     await oracleAsk(question.join(' '));
   });
 
-oracle
+const auth = oracle
   .command('auth')
   .description('Manage provider API keys');
 
-oracle.command('auth')
-  .command('set')
+auth.command('set')
   .description('Set API key for a provider')
   .argument('<provider>', 'Provider name (gemini, claude, openai, ollama)')
   .argument('<key>', 'API key')
@@ -138,8 +137,7 @@ oracle.command('auth')
     console.log(`\u2705 API key set for ${provider}`);
   });
 
-oracle.command('auth')
-  .command('remove')
+auth.command('remove')
   .description('Remove API key for a provider')
   .argument('<provider>', 'Provider name')
   .action((provider: string) => {
@@ -147,8 +145,7 @@ oracle.command('auth')
     console.log(`\u2705 API key removed for ${provider}`);
   });
 
-oracle.command('auth')
-  .command('list')
+auth.command('list')
   .description('List configured providers')
   .action(() => {
     const providers = listProviders();
