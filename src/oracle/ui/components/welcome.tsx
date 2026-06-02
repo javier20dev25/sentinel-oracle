@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { execFileSync } from 'child_process';
 import { oauthLogin } from '../oauth.js';
 import { setApiKey as storeApiKey, setConfig as storeConfig } from '../../auth.js';
 
@@ -64,6 +65,13 @@ export function Welcome({ onComplete }: WelcomeProps) {
     }
   }, [selectedIndex, onComplete, tryOAuth, finishSetup]);
 
+  const pasteFromClipboard = useCallback(() => {
+    try {
+      const clipboard = execFileSync('powershell', ['-command', 'Get-Clipboard'], { timeout: 2000, encoding: 'utf-8' });
+      if (clipboard) setApiKey(prev => prev + clipboard.trim());
+    } catch {}
+  }, []);
+
   const handleApiInput = useCallback((input: string, key: any) => {
     if (key.return) {
       if (apiKey.trim().length > 0 && chosenProvider) {
@@ -75,10 +83,12 @@ export function Welcome({ onComplete }: WelcomeProps) {
       setPhase('select');
     } else if (key.backspace || key.delete) {
       setApiKey(prev => prev.slice(0, -1));
-    } else if (input && input.length === 1 && input.charCodeAt(0) >= 32) {
+    } else if (key.ctrl && key.name === 'v') {
+      pasteFromClipboard();
+    } else if (input && input.charCodeAt(0) >= 32) {
       setApiKey(prev => prev + input);
     }
-  }, [apiKey, chosenProvider, finishSetup]);
+  }, [apiKey, chosenProvider, finishSetup, pasteFromClipboard]);
 
   useInput(
     phase === 'select' ? handleSelectProvider :

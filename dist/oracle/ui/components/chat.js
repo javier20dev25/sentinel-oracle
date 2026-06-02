@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useApp, useWindowSize } from 'ink';
+import { execFileSync } from 'child_process';
 import { Message } from './message.js';
 import { StatusBar } from './status-bar.js';
 const MAX_VISIBLE_MESSAGES = 50;
@@ -110,17 +111,33 @@ export function Chat({ bridge, provider, onExit }) {
             setIsThinking(false);
         }
     }), [inputValue, addMessage, bridge, isThinking]);
+    const pasteText = useCallback(() => {
+        try {
+            const clipboard = execFileSync('powershell', ['-command', 'Get-Clipboard'], { timeout: 2000, encoding: 'utf-8' });
+            if (clipboard) {
+                setInputValue(prev => prev.slice(0, inputCursor) + clipboard + prev.slice(inputCursor));
+                setInputCursor(c => c + clipboard.length);
+            }
+        }
+        catch (_a) { }
+    }, [inputCursor]);
     const handleInput = useCallback((input, key) => {
         if (!inputFocused)
             return;
-        if (key.ctrl && input === 'c') {
+        if (key.ctrl && (input === 'c' || key.name === 'c')) {
+            if (key.name === 'c' && !input)
+                return; // ignore empty ctrl+c from some terminals
             onExit();
             exit();
             return;
         }
-        if (key.ctrl && input === 'l') {
+        if (key.ctrl && (input === 'l' || key.name === 'l')) {
             setMessages([]);
             bridge.clearHistory();
+            return;
+        }
+        if (key.ctrl && key.name === 'v') {
+            pasteText();
             return;
         }
         if (key.escape) {
@@ -242,7 +259,7 @@ export function Chat({ bridge, provider, onExit }) {
             setInputValue(prev => prev.slice(0, inputCursor) + input + prev.slice(inputCursor));
             setInputCursor(c => c + input.length);
         }
-    }, [inputFocused, inputValue, inputCursor, messageHistory, historyIndex, isMultiLine, handleSubmit, onExit, exit, bridge, mode]);
+    }, [inputFocused, inputValue, inputCursor, messageHistory, historyIndex, isMultiLine, handleSubmit, onExit, exit, bridge, mode, pasteText]);
     useInput(handleInput);
     const headerHeight = 1;
     const statusHeight = 1;

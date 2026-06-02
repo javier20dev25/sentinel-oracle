@@ -10,6 +10,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
+import { execFileSync } from 'child_process';
 import { oauthLogin } from '../oauth.js';
 import { setApiKey as storeApiKey, setConfig as storeConfig } from '../../auth.js';
 const PROVIDERS = [
@@ -66,6 +67,14 @@ export function Welcome({ onComplete }) {
             onComplete(null);
         }
     }, [selectedIndex, onComplete, tryOAuth, finishSetup]);
+    const pasteFromClipboard = useCallback(() => {
+        try {
+            const clipboard = execFileSync('powershell', ['-command', 'Get-Clipboard'], { timeout: 2000, encoding: 'utf-8' });
+            if (clipboard)
+                setApiKey(prev => prev + clipboard.trim());
+        }
+        catch (_a) { }
+    }, []);
     const handleApiInput = useCallback((input, key) => {
         if (key.return) {
             if (apiKey.trim().length > 0 && chosenProvider) {
@@ -80,10 +89,13 @@ export function Welcome({ onComplete }) {
         else if (key.backspace || key.delete) {
             setApiKey(prev => prev.slice(0, -1));
         }
-        else if (input && input.length === 1 && input.charCodeAt(0) >= 32) {
+        else if (key.ctrl && key.name === 'v') {
+            pasteFromClipboard();
+        }
+        else if (input && input.charCodeAt(0) >= 32) {
             setApiKey(prev => prev + input);
         }
-    }, [apiKey, chosenProvider, finishSetup]);
+    }, [apiKey, chosenProvider, finishSetup, pasteFromClipboard]);
     useInput(phase === 'select' ? handleSelectProvider :
         phase === 'input' ? handleApiInput :
             () => { });
