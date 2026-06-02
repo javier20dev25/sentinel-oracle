@@ -96,7 +96,7 @@ export const tools: Tool[] = [
       type: 'object',
       properties: {
         path: { type: 'string', description: 'Project path to scan (default: current dir)' },
-        deep: { type: 'string', enum: ['--deep', ''], description: 'Pass --deep for full dependency tree scan' },
+        deep: { type: 'string', enum: ['--deep'], description: 'Pass --deep for full dependency tree scan' },
       },
       required: [],
     },
@@ -379,7 +379,7 @@ export const tools: Tool[] = [
       type: 'object',
       properties: {
         package: { type: 'string', description: 'npm package name to install' },
-        global: { type: 'string', enum: ['--global', ''], description: '--global for global install' },
+        global: { type: 'string', enum: ['--global'], description: '--global for global install' },
       },
       required: ['package'],
     },
