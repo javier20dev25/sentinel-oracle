@@ -10,7 +10,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'url';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { IntegrityChain } from './integrity_chain.js';
 
 const __filename = fileURLToPath(import.meta.url);

@@ -1,5 +1,5 @@
 import * as readline from 'readline';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { BORDERS, muted } from './styles.js';
 const CHAT_BORDER_CHARS = BORDERS.chat;
 export class ChatInput {

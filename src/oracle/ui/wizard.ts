@@ -1,5 +1,5 @@
 import * as readline from 'readline';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { setApiKey, setConfig, getApiKey, getConfig } from '../auth.js';
 
 export interface WizardResult {

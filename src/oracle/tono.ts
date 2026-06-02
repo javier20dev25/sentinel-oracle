@@ -3,7 +3,7 @@
  * Includes a terminal modal selector (arrow keys + Enter).
  */
 
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 export interface Tone {
   id: string;

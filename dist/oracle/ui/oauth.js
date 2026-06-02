@@ -14,7 +14,7 @@ import { execFile } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 export const PROVIDER_OAUTH_CONFIGS = {
     gemini: {
         clientId: 'SENTINEL_GEMINI_CLIENT_ID',

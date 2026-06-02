@@ -2,7 +2,7 @@
  * Visualization module — behavior maps, attack chains, severity charts
  * No emojis — pure ASCII/Unicode + terminal colors.
  */
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 // ─── Severity colors ──────────────────────────────────────────
 export function sevColor(sev) {
     const s = sev.toUpperCase();

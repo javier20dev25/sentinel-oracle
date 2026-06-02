@@ -1,4 +1,3 @@
-import * as readline from 'readline';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync } from 'child_process';
@@ -9,7 +8,7 @@ import { createProvider, ProviderName } from './providers/index.js';
 import { Message } from './providers/base.js';
 import { runGuard, formatGuardReport, ghLogin } from './gh_guard.js';
 import {
-  addRule, removeRule, toggleRule, listRules, getDefaultRules, ensureDefaultRules
+  addRule, removeRule, toggleRule, listRules
 } from './rules.js';
 import {
   addThreat, getThreatsByAuthor, getRecentThreats, getHighRiskAuthors,
@@ -26,9 +25,8 @@ import { setTone, getCurrentTone, TONES, selectToneModal } from './tono.js';
 import { setAgent, getCurrentAgent, AGENTS } from './agents/index.js';
 import { detectCli1, formatCli1Report, importCli1Classified } from './cli1_bridge.js';
 import { exportConfig, exportConfigToFile, importConfigFromFile } from './config_migration.js';
-import { welcomeSequence } from './ui/welcome.js';
 import { startUI } from './ui/renderer.js';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 export let conversationHistory: Message[] = [];
 export let currentMode: OracleMode = 'execute';
@@ -722,13 +720,7 @@ function captureOutput<T>(fn: () => Promise<T>): { result: Promise<T>; captured:
 }
 
 export async function oracleInteractive(): Promise<void> {
-  await preFlightCheck();
-  await ensureDefaultRules();
-
-  // Run GitHub check (non-blocking, fire and forget)
-  welcomeSequence().catch(() => {});
-
-  // Launch Ink UI
+  // Launch Ink UI (handles splash, GitHub check, provider setup, and chat)
   const { waitUntilExit } = startUI();
   await waitUntilExit;
 }

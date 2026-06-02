@@ -14,7 +14,7 @@ import { oracleChat, getDefaultProvider } from './engine.js';
 import { listProviders, getConfig } from './auth.js';
 import { getToolDefs } from './tools.js';
 import { runGuard, formatGuardReport, ghLogin } from './gh_guard.js';
-import { addRule, removeRule, toggleRule, listRules, ensureDefaultRules } from './rules.js';
+import { addRule, removeRule, toggleRule, listRules } from './rules.js';
 import { getThreatsByAuthor, getRecentThreats, getHighRiskAuthors, getThreatAuthor, correlateFindings } from './threat_db.js';
 import { permissionBannerText, modeBanner, findingsBox, } from './viz.js';
 import { generateMarkdown, generateJSON, saveReport, parseFindingsFromOutput } from './reports.js';
@@ -23,9 +23,8 @@ import { getCurrentTone, selectToneModal } from './tono.js';
 import { setAgent, getCurrentAgent, AGENTS } from './agents/index.js';
 import { detectCli1, formatCli1Report, importCli1Classified } from './cli1_bridge.js';
 import { exportConfigToFile, importConfigFromFile } from './config_migration.js';
-import { welcomeSequence } from './ui/welcome.js';
 import { startUI } from './ui/renderer.js';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 export let conversationHistory = [];
 export let currentMode = 'execute';
 export const permissionCache = new Set();
@@ -736,11 +735,7 @@ function captureOutput(fn) {
 }
 export function oracleInteractive() {
     return __awaiter(this, void 0, void 0, function* () {
-        yield preFlightCheck();
-        yield ensureDefaultRules();
-        // Run GitHub check (non-blocking, fire and forget)
-        welcomeSequence().catch(() => { });
-        // Launch Ink UI
+        // Launch Ink UI (handles splash, GitHub check, provider setup, and chat)
         const { waitUntilExit } = startUI();
         yield waitUntilExit;
     });
