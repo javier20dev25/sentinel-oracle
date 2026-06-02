@@ -26,6 +26,9 @@ import { setTone, getCurrentTone, TONES, selectToneModal } from './tono';
 import { setAgent, getCurrentAgent, AGENTS } from './agents';
 import { detectCli1, formatCli1Report, importCli1Classified } from './cli1_bridge';
 import { exportConfig, exportConfigToFile, importConfigFromFile } from './config_migration';
+import { welcomeSequence } from './ui/welcome';
+import { ChatInput } from './ui/chat-input';
+import { MessageRenderer } from './ui/messages';
 import * as pc from 'picocolors';
 
 export let conversationHistory: Message[] = [];
@@ -696,103 +699,149 @@ async function handleSlash(input: string): Promise<boolean> {
 
 // ─── Interactive Mode ─────────────────────────────────────────
 
+function captureOutput<T>(fn: () => Promise<T>): { result: Promise<T>; captured: () => string } {
+  const chunks: string[] = [];
+  const origLog = console.log;
+  const origWrite = process.stdout.write.bind(process.stdout);
+
+  console.log = (...args: any[]) => {
+    chunks.push(args.map(a => String(a)).join(' ') + '\n');
+  };
+  (process.stdout as any).write = (chunk: any, ...rest: any[]) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+
+  const restore = () => {
+    console.log = origLog;
+    (process.stdout as any).write = origWrite;
+  };
+
+  const result = fn().finally(restore);
+
+  return { result, captured: () => chunks.join('').trim() };
+}
+
 export async function oracleInteractive(): Promise<void> {
   ensureDefaultRules();
   const ruleCount = listRules().length;
 
-  const provider = getDefaultProvider();
-  console.log(welcomeBanner(provider?.name, provider?.model));
-  console.log(modeBanner(currentMode));
-  const agent = getCurrentAgent();
-  console.log(`  ${pc.gray('Tone:')} ${pc.bold(getCurrentTone().label)}  ${pc.gray('|')}  ${agent.icon} ${pc.bold(agent.name)}  ${pc.gray('|')}  Rules: ${ruleCount} active  ${pc.gray('|')}  Tools: ${getToolDefs().length} available`);
-  console.log(pc.gray('  Type "exit" to quit  |  Tab for commands  |  /help for guide\n'));
+  await welcomeSequence();
 
-  if (!provider) {
-    console.log(pc.yellow('  [!] No provider configured.'));
-    console.log(pc.gray('     Run: sentinel oracle auth set <gemini|claude|openai|ollama> <key>\n'));
-  } else {
-    console.log(pc.gray(`  ${pc.bold(provider.name)} | Model: ${pc.bold(provider.model || 'default')}\n`));
+  const renderer = new MessageRenderer();
+
+  renderer.addMessage({ type: 'system', content: modeBanner(currentMode), timestamp: new Date() });
+
+  const provider = getDefaultProvider();
+  const agent = getCurrentAgent();
+  const infoLine = `Tone: ${getCurrentTone().label} | ${agent.icon} ${agent.name} | Rules: ${ruleCount} active | Tools: ${getToolDefs().length} available`;
+  renderer.addMessage({ type: 'system', content: infoLine, timestamp: new Date() });
+
+  if (provider) {
+    renderer.addMessage({ type: 'system', content: `${provider.name} | Model: ${provider.model || 'default'}`, timestamp: new Date() });
   }
 
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: pc.cyan('oracle> '),
-    completer,
-  });
+  renderer.renderAll();
 
-  rl.prompt();
+  function fullRefresh(): void {
+    renderer.renderAll();
+    chatInput.setMessageLineCount(renderer.renderedLineCount);
+    chatInput.render();
+  }
 
-  rl.on('line', async (line) => {
-    const input = line.trim();
-    if (!input) { rl.prompt(); return; }
-    if (input === 'exit' || input === 'quit') { rl.close(); return; }
-
-    if (input.startsWith('/')) {
-      const handled = await handleSlash(input);
-      if (handled) { rl.prompt(); return; }
-      console.log(pc.yellow(`  Unknown command: ${input}. Try /help\n`));
-      rl.prompt();
-      return;
-    }
-
-    const p = provider || getDefaultProvider();
-    if (!p) {
-      console.log(pc.yellow('  No provider configured. Try /help\n'));
-      rl.prompt();
-      return;
-    }
-
-    try {
-      spinner.start('Thinking...', 'thinking');
-
-      const stream = oracleChatStream(
-        input,
-        conversationHistory.filter(m => m.role !== 'system'),
-        p,
-        permissionPrompt,
-        currentMode
-      );
-
-      let started = false;
-      for await (const chunk of stream) {
-        if (!started) {
-          spinner.stop();
-          started = true;
-        }
-        process.stdout.write(chunk);
+  const chatInput = new ChatInput({
+    placeholder: 'Ask Sentinel Oracle anything... (Ctrl+Enter to send)',
+    onSubmit: async (text) => {
+      if (text === 'exit' || text === 'quit') {
+        chatInput.stop();
+        renderer.addMessage({ type: 'system', content: 'Oracle session ended.', timestamp: new Date() });
+        fullRefresh();
+        closeDb();
+        process.exit(0);
+        return;
       }
-      spinner.stop();
 
-      if (!started) {
-        const { response, history } = await oracleChat(
-          input,
+      renderer.addMessage({ type: 'user', content: text, timestamp: new Date() });
+      fullRefresh();
+
+      if (text.startsWith('/')) {
+        const { result, captured } = captureOutput(() => handleSlash(text));
+        await result;
+        const output = captured();
+        if (output) {
+          renderer.addMessage({ type: 'system', content: output, timestamp: new Date() });
+        } else {
+          renderer.addMessage({ type: 'system', content: pc.gray('Command executed.'), timestamp: new Date() });
+        }
+        fullRefresh();
+        return;
+      }
+
+      const p = provider || getDefaultProvider();
+      if (!p) {
+        renderer.addMessage({ type: 'error', content: 'No provider configured. Use /help for setup.', timestamp: new Date() });
+        fullRefresh();
+        return;
+      }
+
+      try {
+        spinner.start('Thinking...', 'thinking');
+
+        const stream = oracleChatStream(
+          text,
           conversationHistory.filter(m => m.role !== 'system'),
           p,
           permissionPrompt,
           currentMode
         );
-        conversationHistory = history;
-        if (response) console.log('\n' + response + '\n');
-      } else if (streamingResult.history.length > 0) {
-        conversationHistory = streamingResult.history;
+
+        let started = false;
+        let assistantContent = '';
+        for await (const chunk of stream) {
+          if (!started) {
+            spinner.stop();
+            started = true;
+            assistantContent = chunk;
+            renderer.addMessage({ type: 'assistant', content: chunk, timestamp: new Date() });
+            fullRefresh();
+          } else {
+            assistantContent += chunk;
+            renderer.updateLastAssistantContent(assistantContent);
+            fullRefresh();
+          }
+        }
+        spinner.stop();
+
+        if (!started) {
+          const { response, history } = await oracleChat(
+            text,
+            conversationHistory.filter(m => m.role !== 'system'),
+            p,
+            permissionPrompt,
+            currentMode
+          );
+          conversationHistory = history;
+          if (response) {
+            renderer.addMessage({ type: 'assistant', content: response, timestamp: new Date() });
+            fullRefresh();
+          }
+        } else if (streamingResult.history.length > 0) {
+          conversationHistory = streamingResult.history;
+        }
+      } catch (e: any) {
+        spinner.stop();
+        renderer.addMessage({ type: 'error', content: e.message, timestamp: new Date() });
+        fullRefresh();
       }
-    } catch (e: any) {
-      spinner.stop();
-      console.log(pc.red(`\n  Error: ${e.message}\n`));
-    }
-    rl.prompt();
+    },
+    onCancel: () => {
+      chatInput.stop();
+      closeDb();
+      process.exit(0);
+    },
   });
 
-  rl.on('close', () => {
-    spinner.stop();
-    console.log(pc.cyan('\n  Oracle session ended.'));
-    if (conversationHistory.length > 5) {
-      console.log(pc.gray('  Tip: Run /report md to save this session.\n'));
-    }
-    closeDb();
-    process.exit(0);
-  });
+  chatInput.start();
 }
 
 // ─── One-Shot Ask ──────────────────────────────────────────────

@@ -1,0 +1,55 @@
+export interface ChatInputOptions {
+    placeholder?: string;
+    onSubmit: (text: string) => void;
+    onCancel?: () => void;
+    maxVisibleLines?: number;
+    stdin?: NodeJS.ReadStream;
+    stdout?: NodeJS.WriteStream;
+}
+export declare class ChatInput {
+    lines: string[];
+    cursorX: number;
+    cursorY: number;
+    private history;
+    private historyIndex;
+    private active;
+    private onSubmit;
+    private onCancel?;
+    private stdin;
+    private stdout;
+    private placeholder;
+    private maxVisibleLines;
+    private scrollTop;
+    private scrollLeft;
+    private messageLineCount;
+    private _previousRenderedHeight;
+    constructor(options: ChatInputOptions);
+    setMessageLineCount(count: number): void;
+    get renderedHeight(): number;
+    start(): void;
+    stop(): void;
+    private handleKeypressEvent;
+    private handleResize;
+    render(): void;
+    private handleKeypress;
+    getText(): string;
+    private insertChar;
+    private deleteChar;
+    private deleteForward;
+    private newLine;
+    private sendLine;
+    private historyUp;
+    private historyDown;
+    private loadHistoryItem;
+    private moveLeft;
+    private moveRight;
+    private moveUp;
+    private moveDown;
+    private moveHome;
+    private moveEnd;
+    private clearLine;
+    private deleteToEnd;
+    private deleteWordBackward;
+    private ensureCursorVisible;
+    private renderInput;
+}
