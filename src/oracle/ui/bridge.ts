@@ -25,6 +25,13 @@ export interface BridgeCallbacks {
   onRestart?: () => void;
 }
 
+const PROVIDER_NAMES = ['gemini', 'claude', 'openai', 'ollama'];
+
+interface PendingKeyCommand {
+  step: 'waiting_provider' | 'waiting_key';
+  provider?: string;
+}
+
 export class ChatBridge {
   private provider: any;
   private providerName: string = '';
@@ -33,6 +40,7 @@ export class ChatBridge {
   private mode: 'execute' | 'plan' | 'auto' = 'execute';
   private pendingPermission: { resolve: (value: boolean) => void } | null = null;
   private activeToolNames: Set<string> = new Set();
+  private pendingCmd: PendingKeyCommand | null = null;
 
   constructor(callbacks?: BridgeCallbacks) {
     this.callbacks = callbacks || {
@@ -64,6 +72,50 @@ export class ChatBridge {
     }
   }
 
+  private matchProvider(input: string): string | null {
+    const n = parseInt(input, 10);
+    if (!isNaN(n) && n >= 1 && n <= PROVIDER_NAMES.length) return PROVIDER_NAMES[n - 1];
+    const match = PROVIDER_NAMES.find(p => p.startsWith(input.toLowerCase()));
+    return match || null;
+  }
+
+  private async handlePendingCmd(text: string): Promise<void> {
+    const cmd = this.pendingCmd!;
+    if (cmd.step === 'waiting_provider') {
+      const provider = this.matchProvider(text.trim());
+      if (!provider) {
+        this.callbacks.onError(`Invalid provider. Choose: ${PROVIDER_NAMES.join(', ')}`);
+        this.pendingCmd = null;
+        return;
+      }
+      this.pendingCmd = { step: 'waiting_key', provider };
+      this.callbacks.onMessage({
+        id: `cmd-${Date.now()}`, type: 'system',
+        content: `Paste your ${provider} API key:`,
+        timestamp: new Date(),
+      });
+      return;
+    }
+    if (cmd.step === 'waiting_key' && cmd.provider) {
+      const key = text.trim();
+      if (!key) {
+        this.callbacks.onError('API key cannot be empty');
+        this.pendingCmd = null;
+        return;
+      }
+      storeApiKey(cmd.provider, key);
+      storeConfig(cmd.provider);
+      const p = createProvider(cmd.provider as any, key);
+      if (p) { this.provider = p; this.providerName = cmd.provider; }
+      this.pendingCmd = null;
+      this.callbacks.onMessage({
+        id: `cmd-${Date.now()}`, type: 'system',
+        content: `✓ ${cmd.provider} configured successfully`,
+        timestamp: new Date(),
+      });
+    }
+  }
+
   private getOrCreateProvider(): any {
     if (this.provider) return this.provider;
 
@@ -78,6 +130,12 @@ export class ChatBridge {
   }
 
   async sendMessage(text: string): Promise<void> {
+    // Handle pending interactive commands (key setup)
+    if (this.pendingCmd) {
+      await this.handlePendingCmd(text);
+      return;
+    }
+
     if (text.startsWith('/')) {
       const parts = text.slice(1).split(/\s+/);
       const cmd = parts[0].toLowerCase();
@@ -94,17 +152,31 @@ export class ChatBridge {
       if (cmd === 'key') {
         const provider = parts[1];
         const key = parts.slice(2).join(' ');
-        if (!provider || !key) {
-          this.callbacks.onError('Usage: /key <provider> <api_key>');
-          return;
+        if (provider && key) {
+          storeApiKey(provider, key);
+          storeConfig(provider);
+          const p = createProvider(provider as any, key);
+          if (p) { this.provider = p; this.providerName = provider; }
+          this.callbacks.onMessage({
+            id: `cmd-${Date.now()}`, type: 'system',
+            content: `✓ ${provider} configured successfully`,
+            timestamp: new Date(),
+          });
+        } else if (provider) {
+          this.pendingCmd = { step: 'waiting_key', provider };
+          this.callbacks.onMessage({
+            id: `cmd-${Date.now()}`, type: 'system',
+            content: `Paste your ${provider} API key:`,
+            timestamp: new Date(),
+          });
+        } else {
+          this.pendingCmd = { step: 'waiting_provider' };
+          this.callbacks.onMessage({
+            id: `cmd-${Date.now()}`, type: 'system',
+            content: `Select a provider:\n  ${PROVIDER_NAMES.map((p, i) => `${i + 1}) ${p}`).join('\n  ')}\n\nType the name or number:`,
+            timestamp: new Date(),
+          });
         }
-        storeApiKey(provider, key);
-        this.callbacks.onMessage({
-          id: `cmd-${Date.now()}`,
-          type: 'system',
-          content: `✓ API key saved for ${provider}`,
-          timestamp: new Date(),
-        });
         return;
       }
 

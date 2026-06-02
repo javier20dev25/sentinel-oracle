@@ -26,9 +26,12 @@ export declare class ChatBridge {
     private mode;
     private pendingPermission;
     private activeToolNames;
+    private pendingCmd;
     constructor(callbacks?: BridgeCallbacks);
     setCallbacks(callbacks: BridgeCallbacks): void;
     initialize(): Promise<boolean>;
+    private matchProvider;
+    private handlePendingCmd;
     private getOrCreateProvider;
     sendMessage(text: string): Promise<void>;
     configureProvider(provider: string, apiKey: string): Promise<boolean>;
