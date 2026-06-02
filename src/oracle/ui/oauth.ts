@@ -271,6 +271,11 @@ export async function oauthLogin(
     return null;
   }
 
+  // Skip OAuth when using placeholder client IDs (no real OAuth app registered)
+  if (cfg.clientId.startsWith('SENTINEL_') && !process.env[cfg.clientId]) {
+    return null;
+  }
+
   const pkce = generatePKCE();
   const port = cfg.redirectPort || 8742;
   const redirectPath = 'callback';
