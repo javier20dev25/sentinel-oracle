@@ -14,7 +14,7 @@ import { execFileSync } from 'child_process';
 import { Message } from './message.js';
 import { StatusBar } from './status-bar.js';
 const MAX_VISIBLE_MESSAGES = 50;
-export function Chat({ bridge, provider, onExit }) {
+export function Chat({ bridge, provider, onExit, onRestart }) {
     const { exit } = useApp();
     const { columns, rows } = useWindowSize();
     const [messages, setMessages] = useState([]);
@@ -83,8 +83,9 @@ export function Chat({ bridge, provider, onExit }) {
                     timestamp: new Date(),
                 });
             },
+            onRestart: () => onRestart(),
         });
-    }, [bridge, addMessage]);
+    }, [bridge, addMessage, onRestart]);
     const handleSubmit = useCallback(() => __awaiter(this, void 0, void 0, function* () {
         const text = inputValue.trim();
         if (!text || isThinking)

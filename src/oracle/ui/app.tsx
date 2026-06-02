@@ -43,6 +43,12 @@ export function App({ onExit, existingProvider }: AppProps) {
     // Splash timeout finished; bridge init already drove phase transition
   }, []);
 
+  const handleRestart = useCallback(() => {
+    setPhase('setup');
+    setProvider('');
+    setBridge(null);
+  }, []);
+
   const handleWelcomeComplete = useCallback((result: { provider: string; apiKey: string } | null) => {
     if (result && bridgeRef.current) {
       bridgeRef.current.configureProvider(result.provider, result.apiKey);
@@ -67,6 +73,7 @@ export function App({ onExit, existingProvider }: AppProps) {
         bridge={bridge}
         provider={provider}
         onExit={onExit}
+        onRestart={handleRestart}
       />
     );
   }

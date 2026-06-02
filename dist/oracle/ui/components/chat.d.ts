@@ -4,6 +4,7 @@ interface ChatProps {
     bridge: ChatBridge;
     provider: string;
     onExit: () => void;
+    onRestart: () => void;
 }
-export declare function Chat({ bridge, provider, onExit }: ChatProps): React.JSX.Element;
+export declare function Chat({ bridge, provider, onExit, onRestart }: ChatProps): React.JSX.Element;
 export {};

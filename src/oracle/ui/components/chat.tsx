@@ -9,11 +9,12 @@ interface ChatProps {
   bridge: ChatBridge;
   provider: string;
   onExit: () => void;
+  onRestart: () => void;
 }
 
 const MAX_VISIBLE_MESSAGES = 50;
 
-export function Chat({ bridge, provider, onExit }: ChatProps) {
+export function Chat({ bridge, provider, onExit, onRestart }: ChatProps) {
   const { exit } = useApp();
   const { columns, rows } = useWindowSize();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -90,8 +91,9 @@ export function Chat({ bridge, provider, onExit }: ChatProps) {
           timestamp: new Date(),
         });
       },
+      onRestart: () => onRestart(),
     });
-  }, [bridge, addMessage]);
+  }, [bridge, addMessage, onRestart]);
 
   const handleSubmit = useCallback(async () => {
     const text = inputValue.trim();

@@ -1,5 +1,5 @@
 import { oracleChatStream, getDefaultProvider, streamingResult } from '../engine.js';
-import { getApiKey, setApiKey as storeApiKey, setConfig as storeConfig } from '../auth.js';
+import { getApiKey, setApiKey as storeApiKey, setConfig as storeConfig, removeApiKey } from '../auth.js';
 import { createProvider } from '../providers/index.js';
 import type { Message as ProviderMessage } from '../providers/base.js';
 
@@ -22,6 +22,7 @@ export interface BridgeCallbacks {
   onToolEnd: (toolName: string, result: string) => void;
   onError: (error: string) => void;
   onPermissionRequest?: (toolName: string, args: Record<string, any>) => void;
+  onRestart?: () => void;
 }
 
 export class ChatBridge {
@@ -77,6 +78,59 @@ export class ChatBridge {
   }
 
   async sendMessage(text: string): Promise<void> {
+    if (text.startsWith('/')) {
+      const parts = text.slice(1).split(/\s+/);
+      const cmd = parts[0].toLowerCase();
+
+      if (cmd === 'logout') {
+        if (this.providerName) {
+          removeApiKey(this.providerName);
+          storeConfig('');
+        }
+        this.callbacks.onRestart?.();
+        return;
+      }
+
+      if (cmd === 'key') {
+        const provider = parts[1];
+        const key = parts.slice(2).join(' ');
+        if (!provider || !key) {
+          this.callbacks.onError('Usage: /key <provider> <api_key>');
+          return;
+        }
+        storeApiKey(provider, key);
+        this.callbacks.onMessage({
+          id: `cmd-${Date.now()}`,
+          type: 'system',
+          content: `✓ API key saved for ${provider}`,
+          timestamp: new Date(),
+        });
+        return;
+      }
+
+      if (cmd === 'provider') {
+        const name = parts[1];
+        if (!name) {
+          this.callbacks.onError('Usage: /provider <name> (gemini, claude, openai, ollama)');
+          return;
+        }
+        storeConfig(name);
+        const key = getApiKey(name);
+        const p = createProvider(name as any, key);
+        if (p) {
+          this.provider = p;
+          this.providerName = name;
+        }
+        this.callbacks.onMessage({
+          id: `cmd-${Date.now()}`,
+          type: 'system',
+          content: `✓ Switched to provider: ${name}`,
+          timestamp: new Date(),
+        });
+        return;
+      }
+    }
+
     this.conversationHistory.push({ role: 'user', content: text });
 
     const userMsgId = `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

@@ -15,7 +15,7 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 import { oracleChatStream, getDefaultProvider, streamingResult } from '../engine.js';
-import { setApiKey as storeApiKey, setConfig as storeConfig } from '../auth.js';
+import { getApiKey, setApiKey as storeApiKey, setConfig as storeConfig, removeApiKey } from '../auth.js';
 import { createProvider } from '../providers/index.js';
 export class ChatBridge {
     constructor(callbacks) {
@@ -67,6 +67,56 @@ export class ChatBridge {
     sendMessage(text) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, e_1, _b, _c;
+            var _d, _e;
+            if (text.startsWith('/')) {
+                const parts = text.slice(1).split(/\s+/);
+                const cmd = parts[0].toLowerCase();
+                if (cmd === 'logout') {
+                    if (this.providerName) {
+                        removeApiKey(this.providerName);
+                        storeConfig('');
+                    }
+                    (_e = (_d = this.callbacks).onRestart) === null || _e === void 0 ? void 0 : _e.call(_d);
+                    return;
+                }
+                if (cmd === 'key') {
+                    const provider = parts[1];
+                    const key = parts.slice(2).join(' ');
+                    if (!provider || !key) {
+                        this.callbacks.onError('Usage: /key <provider> <api_key>');
+                        return;
+                    }
+                    storeApiKey(provider, key);
+                    this.callbacks.onMessage({
+                        id: `cmd-${Date.now()}`,
+                        type: 'system',
+                        content: `✓ API key saved for ${provider}`,
+                        timestamp: new Date(),
+                    });
+                    return;
+                }
+                if (cmd === 'provider') {
+                    const name = parts[1];
+                    if (!name) {
+                        this.callbacks.onError('Usage: /provider <name> (gemini, claude, openai, ollama)');
+                        return;
+                    }
+                    storeConfig(name);
+                    const key = getApiKey(name);
+                    const p = createProvider(name, key);
+                    if (p) {
+                        this.provider = p;
+                        this.providerName = name;
+                    }
+                    this.callbacks.onMessage({
+                        id: `cmd-${Date.now()}`,
+                        type: 'system',
+                        content: `✓ Switched to provider: ${name}`,
+                        timestamp: new Date(),
+                    });
+                    return;
+                }
+            }
             this.conversationHistory.push({ role: 'user', content: text });
             const userMsgId = `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             this.callbacks.onMessage({
@@ -105,9 +155,9 @@ export class ChatBridge {
             try {
                 const stream = oracleChatStream(text, this.conversationHistory.filter(m => m.role !== 'system'), p, permissionCb, mode);
                 try {
-                    for (var _d = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _d = true) {
+                    for (var _f = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _f = true) {
                         _c = stream_1_1.value;
-                        _d = false;
+                        _f = false;
                         const chunk = _c;
                         if (firstChunk) {
                             this.callbacks.onStreamingStart(asstMsgId);
@@ -119,7 +169,7 @@ export class ChatBridge {
                 catch (e_1_1) { e_1 = { error: e_1_1 }; }
                 finally {
                     try {
-                        if (!_d && !_a && (_b = stream_1.return)) yield _b.call(stream_1);
+                        if (!_f && !_a && (_b = stream_1.return)) yield _b.call(stream_1);
                     }
                     finally { if (e_1) throw e_1.error; }
                 }

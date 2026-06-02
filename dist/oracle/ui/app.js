@@ -32,6 +32,11 @@ export function App({ onExit, existingProvider }) {
     const handleSplashComplete = useCallback(() => {
         // Splash timeout finished; bridge init already drove phase transition
     }, []);
+    const handleRestart = useCallback(() => {
+        setPhase('setup');
+        setProvider('');
+        setBridge(null);
+    }, []);
     const handleWelcomeComplete = useCallback((result) => {
         if (result && bridgeRef.current) {
             bridgeRef.current.configureProvider(result.provider, result.apiKey);
@@ -49,7 +54,7 @@ export function App({ onExit, existingProvider }) {
         return _jsx(Welcome, { onComplete: handleWelcomeComplete });
     }
     if (phase === 'ready' && bridge) {
-        return (_jsx(Chat, { bridge: bridge, provider: provider, onExit: onExit }));
+        return (_jsx(Chat, { bridge: bridge, provider: provider, onExit: onExit, onRestart: handleRestart }));
     }
     return null;
 }
