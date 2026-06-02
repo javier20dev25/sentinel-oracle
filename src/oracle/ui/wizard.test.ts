@@ -15,8 +15,8 @@ vi.mock('readline', () => ({
   createInterface: mockCreateInterface,
 }));
 
-import { providerWizard } from './wizard';
-import type { WizardResult } from './wizard';
+import { providerWizard } from './wizard.js';
+import type { WizardResult } from './wizard.js';
 
 beforeEach(() => {
   vi.clearAllMocks();

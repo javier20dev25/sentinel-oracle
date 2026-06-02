@@ -2,7 +2,7 @@ import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { ToolDef } from './providers/base';
+import { ToolDef } from './providers/base.js';
 
 export interface Tool {
   name: string;

@@ -1,7 +1,7 @@
 import * as pc from 'picocolors';
-import { getConfig } from '../auth';
-import { checkGitHubLogin } from './github';
-import { providerWizard } from './wizard';
+import { getConfig } from '../auth.js';
+import { checkGitHubLogin } from './github.js';
+import { providerWizard } from './wizard.js';
 
 function clearScreen(): void {
   process.stdout.write('\x1Bc');

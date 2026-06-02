@@ -1,4 +1,4 @@
-import { ToolDef } from './providers/base';
+import { ToolDef } from './providers/base.js';
 export interface Tool {
     name: string;
     description: string;

@@ -67,8 +67,8 @@ describe('CLI commander setup', () => {
     expect(mod).toBeDefined();
   });
 
-  it('should not throw for each command registration', () => {
-    const { Command } = require('commander');
+  it('should not throw for each command registration', async () => {
+    const { Command } = await import('commander');
     const program = new Command();
 
     expect(() => {

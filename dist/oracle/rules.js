@@ -1,47 +1,5 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.addRule = addRule;
-exports.removeRule = removeRule;
-exports.toggleRule = toggleRule;
-exports.listRules = listRules;
-exports.getActiveRulesText = getActiveRulesText;
-exports.getDefaultRules = getDefaultRules;
-exports.ensureDefaultRules = ensureDefaultRules;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
+import * as fs from 'fs';
+import * as path from 'path';
 const RULES_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.sentinel');
 const RULES_FILE = path.join(RULES_DIR, 'rules.json');
 function ensureFile() {
@@ -63,7 +21,7 @@ function writeRules(rules) {
     ensureFile();
     fs.writeFileSync(RULES_FILE, JSON.stringify(rules, null, 2), 'utf-8');
 }
-function addRule(name, instruction) {
+export function addRule(name, instruction) {
     const rules = readRules();
     const existing = rules.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
     if (existing >= 0) {
@@ -74,7 +32,7 @@ function addRule(name, instruction) {
     }
     writeRules(rules);
 }
-function removeRule(name) {
+export function removeRule(name) {
     const rules = readRules();
     const idx = rules.findIndex(r => r.name.toLowerCase() === name.toLowerCase());
     if (idx < 0)
@@ -83,7 +41,7 @@ function removeRule(name) {
     writeRules(rules);
     return true;
 }
-function toggleRule(name, enabled) {
+export function toggleRule(name, enabled) {
     const rules = readRules();
     const rule = rules.find(r => r.name.toLowerCase() === name.toLowerCase());
     if (!rule)
@@ -92,16 +50,16 @@ function toggleRule(name, enabled) {
     writeRules(rules);
     return true;
 }
-function listRules() {
+export function listRules() {
     return readRules();
 }
-function getActiveRulesText() {
+export function getActiveRulesText() {
     const rules = readRules().filter(r => r.enabled);
     if (rules.length === 0)
         return '';
     return rules.map(r => `[Custom Rule: ${r.name}] ${r.instruction}`).join('\n');
 }
-function getDefaultRules() {
+export function getDefaultRules() {
     return [
         {
             name: 'no-code-modification',
@@ -129,7 +87,7 @@ function getDefaultRules() {
         },
     ];
 }
-function ensureDefaultRules() {
+export function ensureDefaultRules() {
     const rules = readRules();
     for (const def of getDefaultRules()) {
         if (!rules.find(r => r.name === def.name)) {

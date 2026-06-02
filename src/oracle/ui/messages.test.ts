@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { MessageRenderer, type ChatMessage } from './messages';
+import { MessageRenderer, type ChatMessage } from './messages.js';
 
 describe('MessageRenderer', () => {
   let renderer: MessageRenderer;

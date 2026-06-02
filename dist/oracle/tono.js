@@ -1,41 +1,7 @@
-"use strict";
 /**
  * Tone/Mood system for AI responses.
  * Includes a terminal modal selector (arrow keys + Enter).
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -45,14 +11,8 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.TONES = void 0;
-exports.getCurrentTone = getCurrentTone;
-exports.setTone = setTone;
-exports.getToneSystemPrompt = getToneSystemPrompt;
-exports.selectToneModal = selectToneModal;
-const pc = __importStar(require("picocolors"));
-exports.TONES = [
+import * as pc from 'picocolors';
+export const TONES = [
     {
         id: 'neutral',
         label: 'Neutral',
@@ -97,17 +57,17 @@ exports.TONES = [
     },
 ];
 let currentToneIndex = 0;
-function getCurrentTone() {
-    return exports.TONES[currentToneIndex];
+export function getCurrentTone() {
+    return TONES[currentToneIndex];
 }
-function setTone(id) {
-    const idx = exports.TONES.findIndex(t => t.id === id);
+export function setTone(id) {
+    const idx = TONES.findIndex(t => t.id === id);
     if (idx === -1)
         return false;
     currentToneIndex = idx;
     return true;
 }
-function getToneSystemPrompt() {
+export function getToneSystemPrompt() {
     return getCurrentTone().systemInstruction;
 }
 // ─── Terminal Modal Selector ──────────────────────────────────
@@ -116,7 +76,7 @@ function getToneSystemPrompt() {
  * Arrow keys to move, Enter to select, Esc to cancel.
  * Returns the selected tone id, or null if cancelled.
  */
-function selectToneModal() {
+export function selectToneModal() {
     return __awaiter(this, void 0, void 0, function* () {
         let selected = currentToneIndex;
         const render = () => {
@@ -124,7 +84,7 @@ function selectToneModal() {
             lines.push('');
             lines.push(pc.cyan('  Select response tone (arrows + enter, esc to cancel):'));
             lines.push('');
-            exports.TONES.forEach((t, i) => {
+            TONES.forEach((t, i) => {
                 const pointer = i === selected ? pc.cyan(' \u25B6') : '  ';
                 const label = i === selected ? pc.bold(pc.cyan(t.label)) : pc.gray(t.label);
                 const desc = i === selected ? pc.white(t.description) : pc.gray(t.description);
@@ -145,7 +105,7 @@ function selectToneModal() {
             rawEntered = true;
         }
         catch (_a) {
-            return exports.TONES[currentToneIndex].id; // fallback
+            return TONES[currentToneIndex].id; // fallback
         }
         return new Promise(resolve => {
             const cleanup = () => {
@@ -170,15 +130,15 @@ function selectToneModal() {
                             // Up arrow
                             selected = Math.max(0, selected - 1);
                             // Move cursor up by 3 lines per option (roughly)
-                            const totalLines = exports.TONES.length * 3 + 3;
+                            const totalLines = TONES.length * 3 + 3;
                             process.stdout.write(`\x1b[${totalLines}A`); // move up
                             process.stdout.write('\x1b[J'); // clear to end
                             process.stdout.write(render());
                         }
                         else if (data[2] === 0x42) {
                             // Down arrow
-                            selected = Math.min(exports.TONES.length - 1, selected + 1);
-                            const totalLines = exports.TONES.length * 3 + 3;
+                            selected = Math.min(TONES.length - 1, selected + 1);
+                            const totalLines = TONES.length * 3 + 3;
                             process.stdout.write(`\x1b[${totalLines}A`);
                             process.stdout.write('\x1b[J');
                             process.stdout.write(render());
@@ -191,17 +151,17 @@ function selectToneModal() {
                     cleanup();
                     currentToneIndex = selected;
                     // Clear the modal from screen
-                    const totalLines = exports.TONES.length * 3 + 4;
+                    const totalLines = TONES.length * 3 + 4;
                     process.stdout.write(`\x1b[${totalLines}A`);
                     process.stdout.write('\x1b[J');
-                    console.log(`  ${pc.green('Tone set:')} ${pc.bold(exports.TONES[selected].label)} — ${exports.TONES[selected].description}`);
-                    resolve(exports.TONES[selected].id);
+                    console.log(`  ${pc.green('Tone set:')} ${pc.bold(TONES[selected].label)} — ${TONES[selected].description}`);
+                    resolve(TONES[selected].id);
                     return;
                 }
                 // Esc
                 if (b === 0x1b && data.length === 1) {
                     cleanup();
-                    const totalLines = exports.TONES.length * 3 + 4;
+                    const totalLines = TONES.length * 3 + 4;
                     process.stdout.write(`\x1b[${totalLines}A`);
                     process.stdout.write('\x1b[J');
                     resolve(null);

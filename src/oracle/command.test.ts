@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Message, ToolDef, BaseProvider } from './providers/base';
+import { Message, ToolDef, BaseProvider } from './providers/base.js';
 
 // ─── Hoisted mocks ────────────────────────────────────────────
 

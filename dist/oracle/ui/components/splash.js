@@ -1,15 +1,12 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Splash = Splash;
-const jsx_runtime_1 = require("react/jsx-runtime");
-const react_1 = require("react");
-const ink_1 = require("ink");
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useEffect, useState } from 'react';
+import { Box, Text, useAnimation } from 'ink';
 const dots = ['', '.', '..', '...'];
-function Splash({ onComplete }) {
-    const [dotIndex, setDotIndex] = (0, react_1.useState)(0);
-    const { frame } = (0, ink_1.useAnimation)({ interval: 120 });
+export function Splash({ onComplete }) {
+    const [dotIndex, setDotIndex] = useState(0);
+    const { frame } = useAnimation({ interval: 120 });
     const spinner = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'][frame % 10];
-    (0, react_1.useEffect)(() => {
+    useEffect(() => {
         const dotTimer = setInterval(() => {
             setDotIndex(i => (i + 1) % dots.length);
         }, 400);
@@ -21,5 +18,5 @@ function Splash({ onComplete }) {
             clearTimeout(exitTimer);
         };
     }, [onComplete]);
-    return ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { bold: true, color: "#00d4aa", children: "\u2726 Sentinel Oracle" }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "AI-Powered Security Assistant" }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "v4.0.0" }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { children: (0, jsx_runtime_1.jsxs)(ink_1.Text, { color: "#6b7280", children: ["Initializing", dots[dotIndex]] }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginTop: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#00d4aa", children: spinner }) })] }));
+    return (_jsxs(Box, { flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 1, children: [_jsx(Box, { marginBottom: 1, children: _jsx(Text, { bold: true, color: "#00d4aa", children: "\u2726 Sentinel Oracle" }) }), _jsx(Box, { marginBottom: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "AI-Powered Security Assistant" }) }), _jsx(Box, { marginBottom: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "v4.0.0" }) }), _jsx(Box, { children: _jsxs(Text, { color: "#6b7280", children: ["Initializing", dots[dotIndex]] }) }), _jsx(Box, { marginTop: 1, children: _jsx(Text, { color: "#00d4aa", children: spinner }) })] }));
 }

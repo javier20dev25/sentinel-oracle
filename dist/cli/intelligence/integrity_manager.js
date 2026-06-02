@@ -1,43 +1,9 @@
-"use strict";
 /**
  * Sentinel Integrity Manager (v1.0)
  *
  * Ensures the CLI and its environment are not tampered with.
  * Levels: TRUSTED | SUSPECT | COMPROMISED
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -47,19 +13,20 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.IntegrityManager = void 0;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const os = __importStar(require("os"));
-const crypto = __importStar(require("crypto"));
-const pc = __importStar(require("picocolors"));
-const integrity_chain_1 = require("./integrity_chain");
-class IntegrityManager {
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+import * as os from 'os';
+import * as crypto from 'crypto';
+import * as pc from 'picocolors';
+import { IntegrityChain } from './integrity_chain.js';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+export class IntegrityManager {
     constructor() {
         this.cliRoot = path.join(__dirname, '..', '..', '..');
         this.vaultPath = path.join(os.homedir(), '.sentinel', 'vault.db');
-        this.chain = new integrity_chain_1.IntegrityChain();
+        this.chain = new IntegrityChain();
     }
     calculateRulesHash() {
         const distPaths = [
@@ -201,4 +168,3 @@ class IntegrityManager {
         }
     }
 }
-exports.IntegrityManager = IntegrityManager;

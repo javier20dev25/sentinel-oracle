@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -15,12 +14,10 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChatBridge = void 0;
-const engine_js_1 = require("../engine.js");
-const auth_js_1 = require("../auth.js");
-const index_js_1 = require("../providers/index.js");
-class ChatBridge {
+import { oracleChatStream, getDefaultProvider, streamingResult } from '../engine.js';
+import { setApiKey as storeApiKey, setConfig as storeConfig } from '../auth.js';
+import { createProvider } from '../providers/index.js';
+export class ChatBridge {
     constructor(callbacks) {
         this.providerName = '';
         this.conversationHistory = [];
@@ -43,7 +40,7 @@ class ChatBridge {
     initialize() {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                const p = (0, engine_js_1.getDefaultProvider)();
+                const p = getDefaultProvider();
                 if (p) {
                     this.provider = p;
                     this.providerName = p.name;
@@ -59,7 +56,7 @@ class ChatBridge {
     getOrCreateProvider() {
         if (this.provider)
             return this.provider;
-        const config = (0, engine_js_1.getDefaultProvider)();
+        const config = getDefaultProvider();
         if (config) {
             this.provider = config;
             this.providerName = config.name;
@@ -106,7 +103,7 @@ class ChatBridge {
             });
             let firstChunk = true;
             try {
-                const stream = (0, engine_js_1.oracleChatStream)(text, this.conversationHistory.filter(m => m.role !== 'system'), p, permissionCb, mode);
+                const stream = oracleChatStream(text, this.conversationHistory.filter(m => m.role !== 'system'), p, permissionCb, mode);
                 try {
                     for (var _d = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _d = true) {
                         _c = stream_1_1.value;
@@ -127,8 +124,8 @@ class ChatBridge {
                     finally { if (e_1) throw e_1.error; }
                 }
                 this.callbacks.onStreamingEnd(asstMsgId);
-                if (engine_js_1.streamingResult.history.length > 0) {
-                    this.conversationHistory = engine_js_1.streamingResult.history;
+                if (streamingResult.history.length > 0) {
+                    this.conversationHistory = streamingResult.history;
                 }
                 for (const tn of this.activeToolNames) {
                     this.callbacks.onToolEnd(tn, '');
@@ -143,9 +140,9 @@ class ChatBridge {
     configureProvider(provider, apiKey) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
-                (0, auth_js_1.setApiKey)(provider, apiKey);
-                (0, auth_js_1.setConfig)(provider);
-                const p = (0, index_js_1.createProvider)(provider, apiKey);
+                storeApiKey(provider, apiKey);
+                storeConfig(provider);
+                const p = createProvider(provider, apiKey);
                 if (p) {
                     this.provider = p;
                     this.providerName = provider;
@@ -183,4 +180,3 @@ class ChatBridge {
         }
     }
 }
-exports.ChatBridge = ChatBridge;

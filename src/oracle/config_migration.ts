@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { getConfig, setConfig, listProviders } from './auth';
-import { listRules, addRule } from './rules';
-import { getCurrentAgent, setAgent } from './agents/index';
-import { getCurrentTone, setTone } from './tono';
+import { getConfig, setConfig, listProviders } from './auth.js';
+import { listRules, addRule } from './rules.js';
+import { getCurrentAgent, setAgent } from './agents/index.js';
+import { getCurrentTone, setTone } from './tono.js';
 
 export interface ConfigExport {
   version: string;

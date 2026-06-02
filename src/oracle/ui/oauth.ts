@@ -367,9 +367,11 @@ export async function storeTokenInKeychain(
   token: string
 ): Promise<boolean> {
   try {
-    const keytar = require('keytar');
-    await keytar.setPassword(service, account, token);
-    return true;
+    const { default: keytar } = await import('keytar').catch(() => ({ default: null }));
+    if (keytar) {
+      await keytar.setPassword(service, account, token);
+      return true;
+    }
   } catch {
     // keytar unavailable — fall through to encrypted file
   }
@@ -389,9 +391,11 @@ export async function getTokenFromKeychain(
   account: string
 ): Promise<string | null> {
   try {
-    const keytar = require('keytar');
-    const pw = await keytar.getPassword(service, account);
-    if (pw) return pw;
+    const { default: keytar } = await import('keytar').catch(() => ({ default: null }));
+    if (keytar) {
+      const pw = await keytar.getPassword(service, account);
+      if (pw) return pw;
+    }
   } catch {
     // fallback
   }
@@ -409,9 +413,11 @@ export async function removeTokenFromKeychain(
   account: string
 ): Promise<boolean> {
   try {
-    const keytar = require('keytar');
-    await keytar.deletePassword(service, account);
-    return true;
+    const { default: keytar } = await import('keytar').catch(() => ({ default: null }));
+    if (keytar) {
+      await keytar.deletePassword(service, account);
+      return true;
+    }
   } catch {
     // fallback
   }

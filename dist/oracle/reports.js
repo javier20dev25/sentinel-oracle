@@ -1,50 +1,11 @@
-"use strict";
 /**
  * Report generation — Markdown and JSON output.
  * Used by /report command and automatically by the engine.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.generateMarkdown = generateMarkdown;
-exports.generateJSON = generateJSON;
-exports.saveReport = saveReport;
-exports.parseFindingsFromOutput = parseFindingsFromOutput;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
+import * as fs from 'fs';
+import * as path from 'path';
 // ─── Markdown Report ──────────────────────────────────────────
-function generateMarkdown(data) {
+export function generateMarkdown(data) {
     const lines = [];
     lines.push(`# [ Sentinel Oracle ] — ${data.title}`);
     lines.push('');
@@ -107,11 +68,11 @@ function generateMarkdown(data) {
     return lines.join('\n');
 }
 // ─── JSON Report ──────────────────────────────────────────────
-function generateJSON(data) {
+export function generateJSON(data) {
     return JSON.stringify(data, null, 2);
 }
 // ─── Save report to file ─────────────────────────────────────
-function saveReport(content, filename) {
+export function saveReport(content, filename) {
     const reportDir = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.sentinel', 'reports');
     if (!fs.existsSync(reportDir))
         fs.mkdirSync(reportDir, { recursive: true });
@@ -120,7 +81,7 @@ function saveReport(content, filename) {
     return filePath;
 }
 // ─── Extract findings from scan output ───────────────────────
-function parseFindingsFromOutput(output, type) {
+export function parseFindingsFromOutput(output, type) {
     var _a, _b;
     const findings = [];
     const lines = output.split('\n');

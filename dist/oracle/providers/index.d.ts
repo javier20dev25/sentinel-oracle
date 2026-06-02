@@ -1,8 +1,8 @@
-import { BaseProvider } from './base';
-export { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base';
-export { GeminiProvider } from './gemini';
-export { ClaudeProvider } from './claude';
-export { OpenAIProvider } from './openai';
-export { OllamaProvider } from './ollama';
+import { BaseProvider } from './base.js';
+export { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base.js';
+export { GeminiProvider } from './gemini.js';
+export { ClaudeProvider } from './claude.js';
+export { OpenAIProvider } from './openai.js';
+export { OllamaProvider } from './ollama.js';
 export type ProviderName = 'gemini' | 'claude' | 'openai' | 'ollama';
 export declare function createProvider(name: ProviderName, apiKey: string, model?: string): BaseProvider;

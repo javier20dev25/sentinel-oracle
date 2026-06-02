@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Box, Text, useInput, useApp, useWindowSize } from 'ink';
-import { Message, ChatMessage } from './message';
-import { StatusBar } from './status-bar';
-import { ChatBridge } from '../bridge';
+import { Message, ChatMessage } from './message.js';
+import { StatusBar } from './status-bar.js';
+import { ChatBridge } from '../bridge.js';
 
 interface ChatProps {
   bridge: ChatBridge;

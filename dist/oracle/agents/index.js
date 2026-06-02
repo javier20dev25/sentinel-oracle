@@ -1,14 +1,8 @@
-"use strict";
 /**
  * Agent definitions — Blue Team, Red Team, Auditor, Default.
  * Each agent modifies the system prompt and tool preferences.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.AGENTS = void 0;
-exports.getCurrentAgent = getCurrentAgent;
-exports.setAgent = setAgent;
-exports.getAgentSystemPrompt = getAgentSystemPrompt;
-exports.AGENTS = [
+export const AGENTS = [
     {
         id: 'default',
         name: 'Default',
@@ -81,17 +75,17 @@ When analyzing findings, always include:
     },
 ];
 let currentAgentIndex = 0;
-function getCurrentAgent() {
-    return exports.AGENTS[currentAgentIndex];
+export function getCurrentAgent() {
+    return AGENTS[currentAgentIndex];
 }
-function setAgent(id) {
-    const idx = exports.AGENTS.findIndex(a => a.id === id);
+export function setAgent(id) {
+    const idx = AGENTS.findIndex(a => a.id === id);
     if (idx === -1)
         return false;
     currentAgentIndex = idx;
     return true;
 }
-function getAgentSystemPrompt() {
+export function getAgentSystemPrompt() {
     const agent = getCurrentAgent();
     return agent.systemPromptAddendum;
 }

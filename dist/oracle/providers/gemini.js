@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -28,10 +27,8 @@ var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _ar
     function reject(value) { resume("throw", value); }
     function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.GeminiProvider = void 0;
-const generative_ai_1 = require("@google/generative-ai");
-const base_1 = require("./base");
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { BaseProvider } from './base.js';
 function toGeminiTools(tools) {
     if (!tools || tools.length === 0)
         return undefined;
@@ -76,10 +73,10 @@ function extractToolCalls(parts) {
     }
     return calls.length > 0 ? calls : undefined;
 }
-class GeminiProvider extends base_1.BaseProvider {
+export class GeminiProvider extends BaseProvider {
     constructor(apiKey, model = 'gemini-2.0-flash') {
         super('gemini', model, apiKey);
-        this.client = new generative_ai_1.GoogleGenerativeAI(apiKey);
+        this.client = new GoogleGenerativeAI(apiKey);
         this.modelInst = this.client.getGenerativeModel({ model });
     }
     chat(messages, tools) {
@@ -147,4 +144,3 @@ class GeminiProvider extends base_1.BaseProvider {
         });
     }
 }
-exports.GeminiProvider = GeminiProvider;

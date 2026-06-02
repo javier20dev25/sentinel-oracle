@@ -1,7 +1,7 @@
 import * as readline from 'readline';
 import * as http from 'http';
-import { runTool } from './tools';
-import { correlateFindings, getThreatsByAuthor } from './threat_db';
+import { runTool } from './tools.js';
+import { correlateFindings, getThreatsByAuthor } from './threat_db.js';
 
 interface JsonRpcMessage {
   jsonrpc: '2.0';

@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef } from './base';
+import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef } from './base.js';
 export declare class OpenAIProvider extends BaseProvider {
     protected client: OpenAI;
     constructor(apiKey: string, model?: string, baseURL?: string);

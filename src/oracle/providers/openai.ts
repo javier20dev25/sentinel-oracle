@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base';
+import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base.js';
 
 function toOpenAITools(tools?: ToolDef[]) {
   if (!tools || tools.length === 0) return undefined;

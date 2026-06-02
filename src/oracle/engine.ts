@@ -1,13 +1,13 @@
-import { BaseProvider, Message, ToolCall } from './providers/base';
-import { getToolDefs, runTool } from './tools';
-import { getConfig, getApiKey } from './auth';
-import { createProvider } from './providers';
-import { getActiveRulesText, ensureDefaultRules } from './rules';
-import { correlateFindings, addThreat } from './threat_db';
-import { ANTI_INJECTION_RULES, wrapToolOutput, validateResponse, detectPromptInjection, formatInjections } from './prompt_guard';
-import { toolCard } from './viz';
-import { getCurrentTone, getToneSystemPrompt } from './tono';
-import { getCurrentAgent, getAgentSystemPrompt } from './agents';
+import { BaseProvider, Message, ToolCall } from './providers/base.js';
+import { getToolDefs, runTool } from './tools.js';
+import { getConfig, getApiKey } from './auth.js';
+import { createProvider } from './providers/index.js';
+import { getActiveRulesText, ensureDefaultRules } from './rules.js';
+import { correlateFindings, addThreat } from './threat_db.js';
+import { ANTI_INJECTION_RULES, wrapToolOutput, validateResponse, detectPromptInjection, formatInjections } from './prompt_guard.js';
+import { toolCard } from './viz.js';
+import { getCurrentTone, getToneSystemPrompt } from './tono.js';
+import { getCurrentAgent, getAgentSystemPrompt } from './agents/index.js';
 import * as pc from 'picocolors';
 
 export function buildSystemPrompt(): string {

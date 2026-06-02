@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base';
+import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base.js';
 
 function toClaudeTools(tools?: ToolDef[]) {
   if (!tools || tools.length === 0) return undefined;

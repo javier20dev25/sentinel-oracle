@@ -1,63 +1,14 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.addThreat = addThreat;
-exports.getThreatsByAuthor = getThreatsByAuthor;
-exports.getThreatsBySignature = getThreatsBySignature;
-exports.getRecentThreats = getRecentThreats;
-exports.getThreatAuthor = getThreatAuthor;
-exports.getHighRiskAuthors = getHighRiskAuthors;
-exports.setAuthorRiskLevel = setAuthorRiskLevel;
-exports.addThreatPattern = addThreatPattern;
-exports.getThreatPatterns = getThreatPatterns;
-exports.correlateFindings = correlateFindings;
-exports.closeDb = closeDb;
-const path = __importStar(require("path"));
-const better_sqlite3_1 = __importDefault(require("better-sqlite3"));
+import * as path from 'path';
+import * as fs from 'fs';
+import Database from 'better-sqlite3';
 const DB_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.sentinel');
 const DB_FILE = path.join(DB_DIR, 'threats.db');
 let db = null;
 function getDb() {
     if (!db) {
-        const fs = require('fs');
         if (!fs.existsSync(DB_DIR))
             fs.mkdirSync(DB_DIR, { recursive: true });
-        db = new better_sqlite3_1.default(DB_FILE);
+        db = new Database(DB_FILE);
         db.pragma('journal_mode = WAL');
         initSchema();
     }
@@ -105,7 +56,7 @@ function initSchema() {
     );
   `);
 }
-function addThreat(t) {
+export function addThreat(t) {
     const d = getDb();
     const stmt = d.prepare(`
     INSERT INTO threats (type, source, author, author_email, title, severity, findings, signature, diff_hash, notes)
@@ -124,32 +75,32 @@ function addThreat(t) {
     }
     return Number(result.lastInsertRowid);
 }
-function getThreatsByAuthor(author) {
+export function getThreatsByAuthor(author) {
     const d = getDb();
     return d.prepare('SELECT * FROM threats WHERE author = ? ORDER BY detected_at DESC').all(author);
 }
-function getThreatsBySignature(sig) {
+export function getThreatsBySignature(sig) {
     const d = getDb();
     return d.prepare('SELECT * FROM threats WHERE signature = ? ORDER BY detected_at DESC').all(sig);
 }
-function getRecentThreats(limit = 20) {
+export function getRecentThreats(limit = 20) {
     const d = getDb();
     return d.prepare('SELECT * FROM threats ORDER BY detected_at DESC LIMIT ?').all(limit);
 }
-function getThreatAuthor(author) {
+export function getThreatAuthor(author) {
     const d = getDb();
     return d.prepare('SELECT * FROM threat_authors WHERE author = ?').get(author);
 }
-function getHighRiskAuthors() {
+export function getHighRiskAuthors() {
     const d = getDb();
     return d.prepare("SELECT * FROM threat_authors WHERE risk_level IN ('HIGH', 'CRITICAL') ORDER BY threat_count DESC").all();
 }
-function setAuthorRiskLevel(author, level) {
+export function setAuthorRiskLevel(author, level) {
     const d = getDb();
     d.prepare('UPDATE threat_authors SET risk_level = ? WHERE author = ?').run(level, author);
 }
 // --- Threat patterns ---
-function addThreatPattern(pattern, description, severity = 'MEDIUM') {
+export function addThreatPattern(pattern, description, severity = 'MEDIUM') {
     const d = getDb();
     const existing = d.prepare('SELECT * FROM threat_patterns WHERE pattern = ?').get(pattern);
     if (existing) {
@@ -159,14 +110,14 @@ function addThreatPattern(pattern, description, severity = 'MEDIUM') {
         d.prepare('INSERT INTO threat_patterns (pattern, description, severity) VALUES (?, ?, ?)').run(pattern, description, severity);
     }
 }
-function getThreatPatterns(severity) {
+export function getThreatPatterns(severity) {
     const d = getDb();
     if (severity) {
         return d.prepare('SELECT * FROM threat_patterns WHERE severity = ? ORDER BY occurrence_count DESC').all(severity);
     }
     return d.prepare('SELECT * FROM threat_patterns ORDER BY occurrence_count DESC').all();
 }
-function correlateFindings(author, findings, diffHash) {
+export function correlateFindings(author, findings, diffHash) {
     const result = {
         threatCount: 0,
         knownAuthor: false,
@@ -200,7 +151,7 @@ function correlateFindings(author, findings, diffHash) {
     }
     return result;
 }
-function closeDb() {
+export function closeDb() {
     if (db) {
         db.close();
         db = null;

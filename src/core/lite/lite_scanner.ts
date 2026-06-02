@@ -7,7 +7,7 @@
  * v2.0 adds SECRET_DETECTION rules for credential exfiltration.
  */
 
-import { SignalVault, ScanSignal } from '../../cli/intelligence/signal_vault';
+import { SignalVault, ScanSignal } from '../../cli/intelligence/signal_vault.js';
 import * as crypto from 'crypto';
 
 export interface LiteFinding {

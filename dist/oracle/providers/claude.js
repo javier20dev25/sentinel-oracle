@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -28,13 +27,8 @@ var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _ar
     function reject(value) { resume("throw", value); }
     function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.ClaudeProvider = void 0;
-const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
-const base_1 = require("./base");
+import Anthropic from '@anthropic-ai/sdk';
+import { BaseProvider } from './base.js';
 function toClaudeTools(tools) {
     if (!tools || tools.length === 0)
         return undefined;
@@ -44,10 +38,10 @@ function toClaudeTools(tools) {
         input_schema: t.parameters,
     }));
 }
-class ClaudeProvider extends base_1.BaseProvider {
+export class ClaudeProvider extends BaseProvider {
     constructor(apiKey, model = 'claude-sonnet-4-20250514') {
         super('claude', model, apiKey);
-        this.client = new sdk_1.default({ apiKey });
+        this.client = new Anthropic({ apiKey });
     }
     chat(messages, tools) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -165,4 +159,3 @@ class ClaudeProvider extends base_1.BaseProvider {
         });
     }
 }
-exports.ClaudeProvider = ClaudeProvider;

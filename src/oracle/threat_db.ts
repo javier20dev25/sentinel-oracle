@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import Database from 'better-sqlite3';
 
 const DB_DIR = path.join(process.env.HOME || process.env.USERPROFILE || '.', '.sentinel');
@@ -8,7 +9,6 @@ let db: Database.Database | null = null;
 
 function getDb(): Database.Database {
   if (!db) {
-    const fs = require('fs');
     if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
     db = new Database(DB_FILE);
     db.pragma('journal_mode = WAL');

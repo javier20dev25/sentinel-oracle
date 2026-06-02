@@ -35,7 +35,7 @@ vi.mock('path', () => ({
   resolve: mockResolve,
 }));
 
-import { getToolDefs, runTool, tools } from './tools';
+import { getToolDefs, runTool, tools } from './tools.js';
 
 beforeEach(() => {
   vi.clearAllMocks();

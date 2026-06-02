@@ -1,45 +1,7 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.tools = void 0;
-exports.getToolDefs = getToolDefs;
-exports.runTool = runTool;
-const child_process_1 = require("child_process");
-const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
+import { execFileSync } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 // Resolve sentinel binary safely — no shell interpolation
 function sentinelCmd() {
     const argv1 = process.argv[1] || '';
@@ -53,7 +15,7 @@ function runSentinel(subcmd, ...params) {
     var _a, _b;
     const { cmd, args } = sentinelCmd();
     try {
-        return (0, child_process_1.execFileSync)(cmd, [...args, subcmd, ...params], {
+        return execFileSync(cmd, [...args, subcmd, ...params], {
             timeout: 60000,
             encoding: 'utf-8',
             maxBuffer: 10 * 1024 * 1024,
@@ -67,7 +29,7 @@ function runSentinel(subcmd, ...params) {
 function runGh(ghArgs) {
     var _a, _b;
     try {
-        return (0, child_process_1.execFileSync)('gh', ghArgs, {
+        return execFileSync('gh', ghArgs, {
             timeout: 30000,
             encoding: 'utf-8',
             maxBuffer: 10 * 1024 * 1024,
@@ -85,7 +47,7 @@ function sanitizePkg(input) {
     const match = input.match(/^@?[a-zA-Z0-9._\-\/]+(@\d+\.\d+\.\d+(-[a-zA-Z0-9.]+)?)?$/);
     return match ? match[0] : input.replace(/[^a-zA-Z0-9._\-@\/]/g, '');
 }
-exports.tools = [
+export const tools = [
     {
         name: 'scan',
         description: 'Scan a directory or file for security threats using LiteScanner (30 SAST rules including secrets, eval, network, env access)',
@@ -244,7 +206,7 @@ exports.tools = [
             if (repo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo))
                 args.push('--repo', repo);
             try {
-                return (0, child_process_1.execFileSync)('gh', args, {
+                return execFileSync('gh', args, {
                     timeout: 30000, encoding: 'utf-8',
                     maxBuffer: 50 * 1024 * 1024, windowsHide: true,
                 }).trim();
@@ -282,7 +244,7 @@ exports.tools = [
                 if (repo && /^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repo))
                     args.push('--repo', repo);
                 args.push('--body-file', tempFile);
-                return (0, child_process_1.execFileSync)('gh', args, {
+                return execFileSync('gh', args, {
                     timeout: 15000, encoding: 'utf-8', windowsHide: true,
                 }).trim();
             }
@@ -385,7 +347,7 @@ exports.tools = [
                 return 'Error: invalid package name';
             const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sentinel-dl-'));
             try {
-                const packResult = (0, child_process_1.execFileSync)('npm', ['pack', safePkg, '--pack-destination', tmpDir], {
+                const packResult = execFileSync('npm', ['pack', safePkg, '--pack-destination', tmpDir], {
                     timeout: 30000,
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
@@ -445,7 +407,7 @@ exports.tools = [
                 return 'Error: invalid package name';
             try {
                 const args = global === '--global' ? ['install', '--global', safePkg] : ['install', safePkg];
-                return (0, child_process_1.execFileSync)('npm', args, {
+                return execFileSync('npm', args, {
                     timeout: 60000,
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
@@ -475,7 +437,7 @@ exports.tools = [
                 return 'Error: invalid package name';
             try {
                 const args = global === '--global' ? ['uninstall', '--global', safePkg] : ['uninstall', safePkg];
-                return (0, child_process_1.execFileSync)('npm', args, {
+                return execFileSync('npm', args, {
                     timeout: 30000,
                     encoding: 'utf-8',
                     maxBuffer: 10 * 1024 * 1024,
@@ -488,15 +450,15 @@ exports.tools = [
         },
     },
 ];
-function getToolDefs() {
-    return exports.tools.map(t => ({
+export function getToolDefs() {
+    return tools.map(t => ({
         name: t.name,
         description: t.description,
         parameters: t.parameters,
     }));
 }
-function runTool(name, args) {
-    const tool = exports.tools.find(t => t.name === name);
+export function runTool(name, args) {
+    const tool = tools.find(t => t.name === name);
     if (!tool)
         return `Unknown tool: ${name}`;
     return tool.run(args);

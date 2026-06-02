@@ -1,20 +1,15 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.runGuard = runGuard;
-exports.ghLogin = ghLogin;
-exports.formatGuardReport = formatGuardReport;
-const child_process_1 = require("child_process");
+import { execSync, spawn } from 'child_process';
 function run(cmd) {
     var _a, _b;
     try {
-        const out = (0, child_process_1.execSync)(cmd, { timeout: 10000, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+        const out = execSync(cmd, { timeout: 10000, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
         return { ok: true, out: out.trim(), err: '' };
     }
     catch (e) {
         return { ok: false, out: ((_a = e.stdout) === null || _a === void 0 ? void 0 : _a.trim()) || '', err: ((_b = e.stderr) === null || _b === void 0 ? void 0 : _b.trim()) || e.message };
     }
 }
-function runGuard() {
+export function runGuard() {
     const report = {
         passed: false,
         machine: { status: '❌', detail: '' },
@@ -80,11 +75,11 @@ function runGuard() {
     report.passed = report.machine.status === '✅' && report.gh.status === '✅' && report.auth.status === '✅';
     return report;
 }
-function ghLogin() {
+export function ghLogin() {
     return new Promise((resolve) => {
         var _a, _b;
         const ghCmd = process.platform === 'win32' ? 'gh.exe' : 'gh';
-        const child = (0, child_process_1.spawn)(ghCmd, ['auth', 'login', '-w', '-p', 'https', '--skip-ssh-key'], {
+        const child = spawn(ghCmd, ['auth', 'login', '-w', '-p', 'https', '--skip-ssh-key'], {
             shell: false,
             stdio: ['pipe', 'pipe', 'pipe']
         });
@@ -133,7 +128,7 @@ function ghLogin() {
         });
     });
 }
-function formatGuardReport(report) {
+export function formatGuardReport(report) {
     const lines = [
         '🔐 Guarda de Conexión — Máquina ⇄ gh ⇄ GitHub',
         '',

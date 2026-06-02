@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -8,37 +7,35 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Welcome = Welcome;
-const jsx_runtime_1 = require("react/jsx-runtime");
-const react_1 = require("react");
-const ink_1 = require("ink");
-const oauth_js_1 = require("../oauth.js");
-const auth_js_1 = require("../../auth.js");
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useState, useCallback } from 'react';
+import { Box, Text, useInput } from 'ink';
+import { oauthLogin } from '../oauth.js';
+import { setApiKey as storeApiKey, setConfig as storeConfig } from '../../auth.js';
 const PROVIDERS = [
     { id: 'gemini', icon: '☀️', name: 'Gemini', desc: 'Google AI models', needsKey: true },
     { id: 'claude', icon: '🧠', name: 'Claude', desc: 'Anthropic AI assistant', needsKey: true },
     { id: 'openai', icon: '⚡', name: 'OpenAI', desc: 'GPT-4 and GPT models', needsKey: true },
     { id: 'ollama', icon: '💻', name: 'Ollama', desc: 'Local open-source models', needsKey: false },
 ];
-function Welcome({ onComplete }) {
-    const [phase, setPhase] = (0, react_1.useState)('select');
-    const [selectedIndex, setSelectedIndex] = (0, react_1.useState)(0);
-    const [chosenProvider, setChosenProvider] = (0, react_1.useState)(null);
-    const [apiKey, setApiKey] = (0, react_1.useState)('');
-    const [oauthStatus, setOauthStatus] = (0, react_1.useState)('');
-    const [oauthError, setOauthError] = (0, react_1.useState)('');
-    const finishSetup = (0, react_1.useCallback)((provider, key) => {
-        (0, auth_js_1.setApiKey)(provider, key);
-        (0, auth_js_1.setConfig)(provider);
+export function Welcome({ onComplete }) {
+    const [phase, setPhase] = useState('select');
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [chosenProvider, setChosenProvider] = useState(null);
+    const [apiKey, setApiKey] = useState('');
+    const [oauthStatus, setOauthStatus] = useState('');
+    const [oauthError, setOauthError] = useState('');
+    const finishSetup = useCallback((provider, key) => {
+        storeApiKey(provider, key);
+        storeConfig(provider);
         setPhase('done');
         onComplete({ provider, apiKey: key });
     }, [onComplete]);
-    const tryOAuth = (0, react_1.useCallback)((prov) => __awaiter(this, void 0, void 0, function* () {
+    const tryOAuth = useCallback((prov) => __awaiter(this, void 0, void 0, function* () {
         setPhase('oauth');
         setOauthStatus(`Opening browser for ${prov.name} authentication...`);
         setOauthError('');
-        const token = yield (0, oauth_js_1.oauthLogin)(prov.id);
+        const token = yield oauthLogin(prov.id);
         if (token) {
             finishSetup(prov.id, token);
         }
@@ -48,7 +45,7 @@ function Welcome({ onComplete }) {
             setPhase('input');
         }
     }), [finishSetup]);
-    const handleSelectProvider = (0, react_1.useCallback)((input, key) => {
+    const handleSelectProvider = useCallback((input, key) => {
         if (key.upArrow) {
             setSelectedIndex(i => (i > 0 ? i - 1 : PROVIDERS.length - 1));
         }
@@ -69,7 +66,7 @@ function Welcome({ onComplete }) {
             onComplete(null);
         }
     }, [selectedIndex, onComplete, tryOAuth, finishSetup]);
-    const handleApiInput = (0, react_1.useCallback)((input, key) => {
+    const handleApiInput = useCallback((input, key) => {
         if (key.return) {
             if (apiKey.trim().length > 0 && chosenProvider) {
                 finishSetup(chosenProvider.id, apiKey.trim());
@@ -87,16 +84,16 @@ function Welcome({ onComplete }) {
             setApiKey(prev => prev + input);
         }
     }, [apiKey, chosenProvider, finishSetup]);
-    (0, ink_1.useInput)(phase === 'select' ? handleSelectProvider :
+    useInput(phase === 'select' ? handleSelectProvider :
         phase === 'input' ? handleApiInput :
             () => { });
     if (phase === 'done') {
-        return ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", alignItems: "center", padding: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#22c55e", bold: true, children: "\u2713 Connected" }) }), (0, jsx_runtime_1.jsxs)(ink_1.Box, { children: [(0, jsx_runtime_1.jsxs)(ink_1.Text, { color: "#e0e0e0", children: [chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.icon, " "] }), (0, jsx_runtime_1.jsx)(ink_1.Text, { bold: true, color: "#00d4aa", children: chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.name })] })] }));
+        return (_jsxs(Box, { flexDirection: "column", alignItems: "center", padding: 1, children: [_jsx(Box, { marginBottom: 1, children: _jsx(Text, { color: "#22c55e", bold: true, children: "\u2713 Connected" }) }), _jsxs(Box, { children: [_jsxs(Text, { color: "#e0e0e0", children: [chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.icon, " "] }), _jsx(Text, { bold: true, color: "#00d4aa", children: chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.name })] })] }));
     }
-    return ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", padding: 1, paddingX: 2, children: [(0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { bold: true, color: "#00d4aa", children: "\u2726 Sentinel Oracle" }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "AI Security Assistant" }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#e0e0e0", children: "Let's connect your AI provider." }) }), phase === 'select' && ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", marginBottom: 1, children: [PROVIDERS.map((prov, i) => {
+    return (_jsxs(Box, { flexDirection: "column", padding: 1, paddingX: 2, children: [_jsx(Box, { marginBottom: 1, children: _jsx(Text, { bold: true, color: "#00d4aa", children: "\u2726 Sentinel Oracle" }) }), _jsx(Box, { marginBottom: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "AI Security Assistant" }) }), _jsx(Box, { marginBottom: 1, children: _jsx(Text, { color: "#e0e0e0", children: "Let's connect your AI provider." }) }), phase === 'select' && (_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [PROVIDERS.map((prov, i) => {
                         const isSelected = i === selectedIndex;
-                        return ((0, jsx_runtime_1.jsxs)(ink_1.Box, Object.assign({ paddingX: 1, paddingY: 0 }, (isSelected ? { backgroundColor: '#1a1a2e' } : {}), { children: [(0, jsx_runtime_1.jsx)(ink_1.Text, { color: isSelected ? '#00d4aa' : '#6b7280', children: isSelected ? '▸ ' : '  ' }), (0, jsx_runtime_1.jsxs)(ink_1.Text, { color: "#e0e0e0", children: [prov.icon, " ", prov.name] }), (0, jsx_runtime_1.jsxs)(ink_1.Text, { dimColor: true, color: "#6b7280", children: [" \u2014 ", prov.desc] })] }), prov.id));
-                    }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginTop: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "  \u2191\u2193 Navigate \u00B7 Enter select \u00B7 Esc cancel" }) })] })), phase === 'oauth' && ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", marginBottom: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#a78bfa", children: oauthStatus }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Waiting for browser authentication..." }) })] })), phase === 'input' && ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", marginBottom: 1, children: [oauthError && ((0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#ef4444", children: oauthError }) })), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginBottom: 1, children: (0, jsx_runtime_1.jsxs)(ink_1.Text, { color: "#e0e0e0", children: ["Paste your ", chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.name, " API key:"] }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { borderStyle: "round", borderColor: "#00d4aa", paddingX: 1, minWidth: 40, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#e0e0e0", children: apiKey.length === 0
-                                ? (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Enter API key..." })
-                                : apiKey.split('').map((ch, i) => i < apiKey.length - 4 ? '•' : ch).join('') }) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { marginTop: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "  Enter confirm \u00B7 Esc back" }) })] }))] }));
+                        return (_jsxs(Box, Object.assign({ paddingX: 1, paddingY: 0 }, (isSelected ? { backgroundColor: '#1a1a2e' } : {}), { children: [_jsx(Text, { color: isSelected ? '#00d4aa' : '#6b7280', children: isSelected ? '▸ ' : '  ' }), _jsxs(Text, { color: "#e0e0e0", children: [prov.icon, " ", prov.name] }), _jsxs(Text, { dimColor: true, color: "#6b7280", children: [" \u2014 ", prov.desc] })] }), prov.id));
+                    }), _jsx(Box, { marginTop: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "  \u2191\u2193 Navigate \u00B7 Enter select \u00B7 Esc cancel" }) })] })), phase === 'oauth' && (_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [_jsx(Box, { marginBottom: 1, children: _jsx(Text, { color: "#a78bfa", children: oauthStatus }) }), _jsx(Box, { children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "Waiting for browser authentication..." }) })] })), phase === 'input' && (_jsxs(Box, { flexDirection: "column", marginBottom: 1, children: [oauthError && (_jsx(Box, { marginBottom: 1, children: _jsx(Text, { color: "#ef4444", children: oauthError }) })), _jsx(Box, { marginBottom: 1, children: _jsxs(Text, { color: "#e0e0e0", children: ["Paste your ", chosenProvider === null || chosenProvider === void 0 ? void 0 : chosenProvider.name, " API key:"] }) }), _jsx(Box, { borderStyle: "round", borderColor: "#00d4aa", paddingX: 1, minWidth: 40, children: _jsx(Text, { color: "#e0e0e0", children: apiKey.length === 0
+                                ? _jsx(Text, { dimColor: true, color: "#6b7280", children: "Enter API key..." })
+                                : apiKey.split('').map((ch, i) => i < apiKey.length - 4 ? '•' : ch).join('') }) }), _jsx(Box, { marginTop: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "  Enter confirm \u00B7 Esc back" }) })] }))] }));
 }

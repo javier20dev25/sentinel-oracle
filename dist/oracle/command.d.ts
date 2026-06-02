@@ -1,5 +1,5 @@
-import { OracleMode } from './engine';
-import { Message } from './providers/base';
+import { OracleMode } from './engine.js';
+import { Message } from './providers/base.js';
 export declare let conversationHistory: Message[];
 export declare let currentMode: OracleMode;
 export declare const permissionCache: Set<string>;

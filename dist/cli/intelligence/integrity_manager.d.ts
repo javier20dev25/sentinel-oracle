@@ -4,7 +4,7 @@
  * Ensures the CLI and its environment are not tampered with.
  * Levels: TRUSTED | SUSPECT | COMPROMISED
  */
-import { IntegrityChain } from './integrity_chain';
+import { IntegrityChain } from './integrity_chain.js';
 export type IntegrityLevel = 'TRUSTED' | 'SUSPECT' | 'COMPROMISED';
 export declare class IntegrityManager {
     private cliRoot;

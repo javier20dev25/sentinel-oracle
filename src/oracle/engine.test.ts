@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Message, ChatResponse, ToolDef } from './providers/base';
+import { Message, ChatResponse, ToolDef } from './providers/base.js';
 
 const mockGetConfig = vi.hoisted(() => vi.fn());
 const mockGetApiKey = vi.hoisted(() => vi.fn());

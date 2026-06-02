@@ -1,13 +1,13 @@
-import { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base';
-import { GeminiProvider } from './gemini';
-import { ClaudeProvider } from './claude';
-import { OpenAIProvider } from './openai';
-import { OllamaProvider } from './ollama';
-export { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base';
-export { GeminiProvider } from './gemini';
-export { ClaudeProvider } from './claude';
-export { OpenAIProvider } from './openai';
-export { OllamaProvider } from './ollama';
+import { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base.js';
+import { GeminiProvider } from './gemini.js';
+import { ClaudeProvider } from './claude.js';
+import { OpenAIProvider } from './openai.js';
+import { OllamaProvider } from './ollama.js';
+export { BaseProvider, Message, ChatResponse, ToolDef, ToolCall } from './base.js';
+export { GeminiProvider } from './gemini.js';
+export { ClaudeProvider } from './claude.js';
+export { OpenAIProvider } from './openai.js';
+export { OllamaProvider } from './ollama.js';
 
 export type ProviderName = 'gemini' | 'claude' | 'openai' | 'ollama';
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChatBridge } from '../bridge';
+import { ChatBridge } from '../bridge.js';
 interface ChatProps {
     bridge: ChatBridge;
     provider: string;

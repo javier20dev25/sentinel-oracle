@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { LiteScanner } from './lite_scanner';
-import { SignalVault } from '../../cli/intelligence/signal_vault';
+import { LiteScanner } from './lite_scanner.js';
+import { SignalVault } from '../../cli/intelligence/signal_vault.js';
 
 vi.mock('../../cli/intelligence/signal_vault', () => {
   const mockVault = {

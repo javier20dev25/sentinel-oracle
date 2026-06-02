@@ -1,7 +1,4 @@
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.BaseProvider = void 0;
-class BaseProvider {
+export class BaseProvider {
     constructor(name, model, apiKey) {
         this.name = name;
         this.model = model;
@@ -11,4 +8,3 @@ class BaseProvider {
         return !!this.apiKey;
     }
 }
-exports.BaseProvider = BaseProvider;

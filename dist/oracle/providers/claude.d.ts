@@ -1,4 +1,4 @@
-import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef } from './base';
+import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef } from './base.js';
 export declare class ClaudeProvider extends BaseProvider {
     private client;
     constructor(apiKey: string, model?: string);

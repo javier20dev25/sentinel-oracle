@@ -1,59 +1,10 @@
-"use strict";
 /**
  * Visualization module — behavior maps, attack chains, severity charts
  * No emojis — pure ASCII/Unicode + terminal colors.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.sevColor = sevColor;
-exports.sevColorFn = sevColorFn;
-exports.capabilityTag = capabilityTag;
-exports.attackChain = attackChain;
-exports.capabilityBars = capabilityBars;
-exports.severityPie = severityPie;
-exports.fileHeatmap = fileHeatmap;
-exports.summaryBox = summaryBox;
-exports.welcomeBanner = welcomeBanner;
-exports.toolCard = toolCard;
-exports.insight = insight;
-exports.permissionBannerText = permissionBannerText;
-exports.findingsBox = findingsBox;
-exports.modeBanner = modeBanner;
-const pc = __importStar(require("picocolors"));
+import * as pc from 'picocolors';
 // ─── Severity colors ──────────────────────────────────────────
-function sevColor(sev) {
+export function sevColor(sev) {
     const s = sev.toUpperCase();
     if (s === 'CRITICAL')
         return pc.red(sev);
@@ -65,7 +16,7 @@ function sevColor(sev) {
         return pc.gray(sev);
     return sev;
 }
-function sevColorFn(sev) {
+export function sevColorFn(sev) {
     const s = sev.toUpperCase();
     if (s === 'CRITICAL')
         return pc.red;
@@ -107,7 +58,7 @@ const CAPABILITY_TAGS = {
     RCE_CHAIN: '[RCE]',
     SUPPLY_CHAIN_EXECUTION: '[SC]',
 };
-function capabilityTag(type) {
+export function capabilityTag(type) {
     return CAPABILITY_TAGS[type] || '[?]';
 }
 /**
@@ -115,7 +66,7 @@ function capabilityTag(type) {
  * Example:
  *   [ENV] ENV_ACCESS [CRITICAL] ──→ [NET] NETWORK_ACTIVITY [HIGH] ──→ [EXFIL] EXFILTRATION_CHAIN [CRITICAL]
  */
-function attackChain(nodes) {
+export function attackChain(nodes) {
     if (nodes.length === 0)
         return '';
     const parts = nodes.map(n => {
@@ -129,7 +80,7 @@ function attackChain(nodes) {
  * Horizontal bar chart of capabilities sorted by count.
  * █ blocks represent relative frequency.
  */
-function capabilityBars(caps, maxWidth = 30) {
+export function capabilityBars(caps, maxWidth = 30) {
     if (caps.length === 0)
         return ['(no capabilities detected)'];
     const maxCount = Math.max(...caps.map(c => c.count), 1);
@@ -142,7 +93,7 @@ function capabilityBars(caps, maxWidth = 30) {
     });
 }
 // ─── Severity Distribution ────────────────────────────────────
-function severityPie(severities) {
+export function severityPie(severities) {
     const total = Object.values(severities).reduce((a, b) => a + b, 0);
     if (total === 0)
         return ['(no findings)'];
@@ -161,7 +112,7 @@ function severityPie(severities) {
     }
     return lines;
 }
-function fileHeatmap(files, maxRows = 10) {
+export function fileHeatmap(files, maxRows = 10) {
     if (files.length === 0)
         return ['(no files with findings)'];
     const sorted = [...files].sort((a, b) => b.count - a.count).slice(0, maxRows);
@@ -174,7 +125,7 @@ function fileHeatmap(files, maxRows = 10) {
         return `  ${bar} ${pc.bold(String(f.count).padStart(3))} ${pc.gray(fileShort)}`;
     });
 }
-function summaryBox(summary) {
+export function summaryBox(summary) {
     const width = 56;
     const line = pc.gray('\u2500'.repeat(width));
     const verdictStr = ` ${summary.verdict} `;
@@ -206,7 +157,7 @@ function summaryBox(summary) {
     return lines.join('\n');
 }
 // ─── Welcome Banner ───────────────────────────────────────────
-function welcomeBanner(provider, model) {
+export function welcomeBanner(provider, model) {
     const banner = `
 ${pc.cyan('\u2554' + '\u2550'.repeat(52) + '\u2557')}
 ${pc.cyan('\u2551')}  ${pc.bold('[ Sentinel Oracle Core ]')} ${pc.gray('AI Security Assistant')}  ${pc.cyan('\u2551')}
@@ -218,7 +169,7 @@ ${pc.cyan('\u255A' + '\u2550'.repeat(52) + '\u255D')}`;
     return `${banner}\n\n${info}`;
 }
 // ─── Tool Execution Card ──────────────────────────────────────
-function toolCard(name, params, status) {
+export function toolCard(name, params, status) {
     const icon = status === 'running' ? pc.cyan('\u27F3')
         : status === 'done' ? pc.green('\u2713')
             : status === 'error' ? pc.red('\u2717')
@@ -230,7 +181,7 @@ function toolCard(name, params, status) {
     return `  ${icon} ${pc.bold(name)} ${pc.gray(params)} ${statusText}`;
 }
 // ─── Insight Callout ──────────────────────────────────────────
-function insight(type, title, body) {
+export function insight(type, title, body) {
     const labels = { tip: '[i]', warning: '[!]', danger: '[!!!]', info: '(i)' };
     const colors = { tip: pc.cyan, warning: pc.yellow, danger: pc.red, info: pc.gray };
     return [
@@ -239,7 +190,7 @@ function insight(type, title, body) {
     ].join('\n');
 }
 // ─── Permission Banner ────────────────────────────────────────
-function permissionBannerText(toolName, params, mode) {
+export function permissionBannerText(toolName, params, mode) {
     const w = 56;
     const top = pc.cyan('\u250C' + '\u2500'.repeat(w) + '\u2510');
     const mid = pc.cyan('\u2502') + '  ' + pc.bold(toolName) + '  ' + pc.gray(params.length > 48 ? params.slice(0, 45) + '...' : params) + ' '.repeat(Math.max(1, w - 6 - toolName.length - Math.min(params.length, 48))) + pc.cyan('\u2502');
@@ -249,7 +200,7 @@ function permissionBannerText(toolName, params, mode) {
     return ['', top, mid, sep, keys, bot, ''].join('\n');
 }
 // ─── Findings Box ────────────────────────────────────────────
-function findingsBox(title, lines, severity) {
+export function findingsBox(title, lines, severity) {
     const w = 58;
     const sevColor = !severity ? pc.green
         : severity === 'CRITICAL' ? pc.red
@@ -267,7 +218,7 @@ function findingsBox(title, lines, severity) {
     return ['', top, header, sep, ...contents, bot, ''].join('\n');
 }
 // ─── Mode Indicator ──────────────────────────────────────────
-function modeBanner(mode) {
+export function modeBanner(mode) {
     const labels = {
         execute: 'Execute — AI runs tools, you approve each',
         plan: 'Plan — AI suggests tools, you decide',

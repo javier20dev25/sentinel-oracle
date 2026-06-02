@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base';
+import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base.js';
 
 function toGeminiTools(tools?: ToolDef[]) {
   if (!tools || tools.length === 0) return undefined;

@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { Splash } from './components/splash';
-import { Welcome } from './components/welcome';
-import { Chat } from './components/chat';
-import { ChatBridge } from './bridge';
+import { Splash } from './components/splash.js';
+import { Welcome } from './components/welcome.js';
+import { Chat } from './components/chat.js';
+import { ChatBridge } from './bridge.js';
 
 type AppPhase = 'loading' | 'setup' | 'ready';
 

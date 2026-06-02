@@ -1,9 +1,6 @@
-"use strict";
 /**
  * Terminal spinner with different animation patterns.
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Spinner = void 0;
 const CONFIGS = {
     thinking: {
         frames: ['\u25D0', '\u25D3', '\u25D1', '\u25D2'],
@@ -21,7 +18,7 @@ const CONFIGS = {
         prefix: '[*]',
     },
 };
-class Spinner {
+export class Spinner {
     constructor() {
         this.frame = 0;
         this.interval = null;
@@ -63,4 +60,3 @@ class Spinner {
         return `\x1b[35m${f}\x1b[0m`; // magenta
     }
 }
-exports.Spinner = Spinner;

@@ -1,41 +1,5 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.MessageRenderer = void 0;
-const pc = __importStar(require("picocolors"));
-const styles_1 = require("./styles");
+import * as pc from 'picocolors';
+import { BORDERS, COLORS } from './styles.js';
 function wordWrap(text, width) {
     const lines = [];
     const paragraphs = text.split('\n');
@@ -65,7 +29,7 @@ function boxedContent(opts) {
     var _a;
     const indentStr = ' '.repeat((_a = opts.indent) !== null && _a !== void 0 ? _a : 0);
     const innerWidth = opts.boxWidth - 4;
-    const b = styles_1.BORDERS.chat;
+    const b = BORDERS.chat;
     const result = [];
     const titleStr = opts.titleColor(` ${opts.title} `);
     const hFillCount = Math.max(1, opts.boxWidth - 2 - titleStr.length);
@@ -88,7 +52,7 @@ function centerText(text, width) {
     const rightPad = padTotal - leftPad;
     return ' '.repeat(leftPad) + text + ' '.repeat(rightPad);
 }
-class MessageRenderer {
+export class MessageRenderer {
     constructor() {
         this.messages = [];
         this.maxMessages = 100;
@@ -165,9 +129,9 @@ class MessageRenderer {
         return boxedContent({
             lines: contentLines,
             boxWidth: bw,
-            borderColor: styles_1.COLORS.user,
+            borderColor: COLORS.user,
             title: 'You',
-            titleColor: styles_1.COLORS.user,
+            titleColor: COLORS.user,
         });
     }
     renderAssistantMessage(msg) {
@@ -176,9 +140,9 @@ class MessageRenderer {
         const rendered = boxedContent({
             lines: contentLines,
             boxWidth: bw,
-            borderColor: styles_1.COLORS.assistant,
+            borderColor: COLORS.assistant,
             title: '\u2726 Sentinel',
-            titleColor: styles_1.COLORS.assistant,
+            titleColor: COLORS.assistant,
         });
         return rendered.map(l => `  ${l}`);
     }
@@ -192,24 +156,24 @@ class MessageRenderer {
         const rendered = boxedContent({
             lines: contentLines,
             boxWidth: bw,
-            borderColor: styles_1.COLORS.tool,
+            borderColor: COLORS.tool,
             title: `\uD83D\uDD27 ${toolName}`,
-            titleColor: styles_1.COLORS.tool,
+            titleColor: COLORS.tool,
         });
         return rendered.map(l => `  ${l}`);
     }
     renderSystemMessage(msg) {
         const bw = this.getBoxWidth();
         const text = ` ${msg.content} `;
-        const line = styles_1.COLORS.textDim('\u2500'.repeat(Math.max(1, Math.floor((bw - 2 - text.length) / 2))));
-        const lineEnd = styles_1.COLORS.textDim('\u2500'.repeat(Math.max(1, bw - 2 - text.length - line.length)));
+        const line = COLORS.textDim('\u2500'.repeat(Math.max(1, Math.floor((bw - 2 - text.length) / 2))));
+        const lineEnd = COLORS.textDim('\u2500'.repeat(Math.max(1, bw - 2 - text.length - line.length)));
         return [`  ${line}${text}${lineEnd}`];
     }
     renderErrorMessage(msg) {
         const bw = this.getBoxWidth();
         const contentLines = msg.content.split('\n');
-        const b = styles_1.BORDERS.box;
-        const color = styles_1.COLORS.error;
+        const b = BORDERS.box;
+        const color = COLORS.error;
         const indentStr = '  ';
         const innerWidth = bw - 4;
         const result = [];
@@ -228,4 +192,3 @@ class MessageRenderer {
         return result;
     }
 }
-exports.MessageRenderer = MessageRenderer;

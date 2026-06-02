@@ -25,19 +25,19 @@ export declare const BORDERS: {
     };
 };
 export declare const COLORS: {
-    accent: import("picocolors/types").Formatter;
-    accentDim: import("picocolors/types").Formatter;
-    surface: import("picocolors/types").Formatter;
-    surface2: import("picocolors/types").Formatter;
-    text: import("picocolors/types").Formatter;
-    textDim: import("picocolors/types").Formatter;
-    user: import("picocolors/types").Formatter;
-    assistant: import("picocolors/types").Formatter;
-    tool: import("picocolors/types").Formatter;
-    error: import("picocolors/types").Formatter;
-    success: import("picocolors/types").Formatter;
-    warning: import("picocolors/types").Formatter;
-    info: import("picocolors/types").Formatter;
+    accent: import("picocolors/types.js").Formatter;
+    accentDim: import("picocolors/types.js").Formatter;
+    surface: import("picocolors/types.js").Formatter;
+    surface2: import("picocolors/types.js").Formatter;
+    text: import("picocolors/types.js").Formatter;
+    textDim: import("picocolors/types.js").Formatter;
+    user: import("picocolors/types.js").Formatter;
+    assistant: import("picocolors/types.js").Formatter;
+    tool: import("picocolors/types.js").Formatter;
+    error: import("picocolors/types.js").Formatter;
+    success: import("picocolors/types.js").Formatter;
+    warning: import("picocolors/types.js").Formatter;
+    info: import("picocolors/types.js").Formatter;
 };
 export declare const SPACING: {
     padX: number;

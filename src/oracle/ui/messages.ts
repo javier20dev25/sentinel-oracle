@@ -1,5 +1,5 @@
 import * as pc from 'picocolors';
-import { BORDERS, COLORS } from './styles';
+import { BORDERS, COLORS } from './styles.js';
 
 export type MessageType = 'user' | 'assistant' | 'tool' | 'system' | 'error';
 

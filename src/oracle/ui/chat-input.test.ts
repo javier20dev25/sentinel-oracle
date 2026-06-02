@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { ChatInput } from './chat-input';
+import { ChatInput } from './chat-input.js';
 
 interface MockKeyEvent {
   name?: string;

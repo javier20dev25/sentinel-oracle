@@ -1,38 +1,4 @@
 #!/usr/bin/env node
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -42,20 +8,19 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-const commander_1 = require("commander");
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-const lite_scanner_1 = require("../core/lite/lite_scanner");
-const integrity_manager_1 = require("./intelligence/integrity_manager");
-const system_auditor_1 = require("./intelligence/system_auditor");
-const pc = __importStar(require("picocolors"));
-const command_1 = require("../oracle/command");
-const auth_1 = require("../oracle/auth");
-const program = new commander_1.Command();
-const scanner = new lite_scanner_1.LiteScanner();
-const auditor = new system_auditor_1.SystemAuditor();
-const integrity = new integrity_manager_1.IntegrityManager();
+import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
+import { LiteScanner } from '../core/lite/lite_scanner.js';
+import { IntegrityManager } from './intelligence/integrity_manager.js';
+import { SystemAuditor } from './intelligence/system_auditor.js';
+import * as pc from 'picocolors';
+import { oracleInteractive, oracleAsk } from '../oracle/command.js';
+import { setApiKey, removeApiKey, listProviders, setConfig } from '../oracle/auth.js';
+const program = new Command();
+const scanner = new LiteScanner();
+const auditor = new SystemAuditor();
+const integrity = new IntegrityManager();
 function preFlightCheck() {
     return __awaiter(this, void 0, void 0, function* () {
         const status = yield integrity.checkIntegrity();
@@ -152,14 +117,14 @@ program
 const oracle = program.command('oracle')
     .description('🧿 Oracle Core — AI-powered security assistant')
     .action(() => __awaiter(void 0, void 0, void 0, function* () {
-    yield (0, command_1.oracleInteractive)();
+    yield oracleInteractive();
 }));
 oracle
     .command('ask')
     .description('Ask a one-shot security question')
     .argument('<question...>', 'Your question')
     .action((question) => __awaiter(void 0, void 0, void 0, function* () {
-    yield (0, command_1.oracleAsk)(question.join(' '));
+    yield oracleAsk(question.join(' '));
 }));
 const auth = oracle
     .command('auth')
@@ -169,20 +134,20 @@ auth.command('set')
     .argument('<provider>', 'Provider name (gemini, claude, openai, ollama)')
     .argument('<key>', 'API key')
     .action((provider, key) => {
-    (0, auth_1.setApiKey)(provider, key);
+    setApiKey(provider, key);
     console.log(`\u2705 API key set for ${provider}`);
 });
 auth.command('remove')
     .description('Remove API key for a provider')
     .argument('<provider>', 'Provider name')
     .action((provider) => {
-    (0, auth_1.removeApiKey)(provider);
+    removeApiKey(provider);
     console.log(`\u2705 API key removed for ${provider}`);
 });
 auth.command('list')
     .description('List configured providers')
     .action(() => {
-    const providers = (0, auth_1.listProviders)();
+    const providers = listProviders();
     if (providers.length === 0) {
         console.log('No providers configured.');
         return;
@@ -196,7 +161,7 @@ oracle
     .argument('<provider>', 'Provider name')
     .argument('[model]', 'Model name')
     .action((provider, model) => {
-    (0, auth_1.setConfig)(provider, model);
+    setConfig(provider, model);
     console.log(`\u2705 Default provider set to ${provider}${model ? ` (model: ${model})` : ''}`);
 });
 oracle
@@ -204,7 +169,7 @@ oracle
     .alias('chat')
     .description('Start interactive oracle session')
     .action(() => __awaiter(void 0, void 0, void 0, function* () {
-    yield (0, command_1.oracleInteractive)();
+    yield oracleInteractive();
 }));
 // --- Utilities ---
 function walkDir(dir) {
@@ -230,7 +195,7 @@ function walkDir(dir) {
 }
 // --- Default: launch Oracle interactive ---
 if (!process.argv.slice(2).length) {
-    (0, command_1.oracleInteractive)().catch(console.error);
+    oracleInteractive().catch(console.error);
 }
 else {
     program.parse(process.argv);

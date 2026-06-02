@@ -16,6 +16,13 @@ const mockUserInfo = vi.hoisted(
 );
 const mockHomedir = vi.hoisted(() => vi.fn(() => '/home/testuser'));
 
+vi.mock('keytar', () => ({
+  default: null,
+  setPassword: vi.fn(),
+  getPassword: vi.fn(),
+  deletePassword: vi.fn(),
+}));
+
 vi.mock('http', () => ({
   createServer: mockCreateServer,
 }));

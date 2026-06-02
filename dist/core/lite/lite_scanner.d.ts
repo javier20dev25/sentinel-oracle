@@ -6,7 +6,7 @@
  *
  * v2.0 adds SECRET_DETECTION rules for credential exfiltration.
  */
-import { ScanSignal } from '../../cli/intelligence/signal_vault';
+import { ScanSignal } from '../../cli/intelligence/signal_vault.js';
 export interface LiteFinding {
     type: string;
     intent: string;

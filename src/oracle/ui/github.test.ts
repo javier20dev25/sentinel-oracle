@@ -11,7 +11,7 @@ vi.mock('readline', () => ({
   createInterface: mockCreateInterface,
 }));
 
-import { checkGitHubLogin } from './github';
+import { checkGitHubLogin } from './github.js';
 
 beforeEach(() => {
   vi.clearAllMocks();

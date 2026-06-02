@@ -1,37 +1,3 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -41,28 +7,15 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.PROVIDER_OAUTH_CONFIGS = void 0;
-exports.generatePKCE = generatePKCE;
-exports.startLocalhostServer = startLocalhostServer;
-exports.openBrowser = openBrowser;
-exports.exchangeCodeForTokens = exchangeCodeForTokens;
-exports.oauthLogin = oauthLogin;
-exports.storeTokenInKeychain = storeTokenInKeychain;
-exports.getTokenFromKeychain = getTokenFromKeychain;
-exports.removeTokenFromKeychain = removeTokenFromKeychain;
-exports.encryptData = encryptData;
-exports.decryptData = decryptData;
-exports.deviceCodeFlow = deviceCodeFlow;
-const http = __importStar(require("http"));
-const https = __importStar(require("https"));
-const crypto = __importStar(require("crypto"));
-const child_process_1 = require("child_process");
-const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
-const os = __importStar(require("os"));
-const pc = __importStar(require("picocolors"));
-exports.PROVIDER_OAUTH_CONFIGS = {
+import * as http from 'http';
+import * as https from 'https';
+import * as crypto from 'crypto';
+import { execFile } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as pc from 'picocolors';
+export const PROVIDER_OAUTH_CONFIGS = {
     gemini: {
         clientId: 'SENTINEL_GEMINI_CLIENT_ID',
         authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -162,13 +115,13 @@ function getDeviceAuthUrl(authorizationUrl) {
         .replace(/\/auth(?:\/|$)/, '/device/code')
         .replace(/\/authorize(?:\/|$)/, '/device/code');
 }
-function generatePKCE() {
+export function generatePKCE() {
     const verifier = base64URLEncode(crypto.randomBytes(32));
     const hash = crypto.createHash('sha256').update(verifier).digest();
     const challenge = base64URLEncode(hash);
     return { verifier, challenge };
 }
-function startLocalhostServer(port, redirectPath) {
+export function startLocalhostServer(port, redirectPath) {
     const cbPath = `/${redirectPath || 'callback'}`;
     return new Promise((resolve, reject) => {
         const server = http.createServer((req, res) => {
@@ -214,11 +167,11 @@ function startLocalhostServer(port, redirectPath) {
         timer.unref();
     });
 }
-function openBrowser(url) {
+export function openBrowser(url) {
     const platform = process.platform;
     return new Promise((resolve, reject) => {
         if (platform === 'win32') {
-            (0, child_process_1.execFile)('cmd', ['/c', 'start', '""', url], (err) => {
+            execFile('cmd', ['/c', 'start', '""', url], (err) => {
                 if (err)
                     reject(err);
                 else
@@ -226,7 +179,7 @@ function openBrowser(url) {
             });
         }
         else if (platform === 'darwin') {
-            (0, child_process_1.execFile)('open', [url], (err) => {
+            execFile('open', [url], (err) => {
                 if (err)
                     reject(err);
                 else
@@ -234,7 +187,7 @@ function openBrowser(url) {
             });
         }
         else {
-            (0, child_process_1.execFile)('xdg-open', [url], (err) => {
+            execFile('xdg-open', [url], (err) => {
                 if (err)
                     reject(err);
                 else
@@ -243,7 +196,7 @@ function openBrowser(url) {
         }
     });
 }
-function exchangeCodeForTokens(tokenUrl, clientId, code, codeVerifier, redirectUri) {
+export function exchangeCodeForTokens(tokenUrl, clientId, code, codeVerifier, redirectUri) {
     return __awaiter(this, void 0, void 0, function* () {
         const body = new URLSearchParams({
             grant_type: 'authorization_code',
@@ -280,9 +233,9 @@ function exchangeCodeForTokens(tokenUrl, clientId, code, codeVerifier, redirectU
         throw new Error('Token exchange failed: no access token in response');
     });
 }
-function oauthLogin(provider, config) {
+export function oauthLogin(provider, config) {
     return __awaiter(this, void 0, void 0, function* () {
-        const cfg = config || exports.PROVIDER_OAUTH_CONFIGS[provider];
+        const cfg = config || PROVIDER_OAUTH_CONFIGS[provider];
         if (!cfg) {
             console.error(`  ${pc.red(`No OAuth configuration for provider "${provider}"`)}`);
             return null;
@@ -366,12 +319,14 @@ function writeCredentialsFile(data) {
 function credentialKey(service, account) {
     return `${service}:${account}`;
 }
-function storeTokenInKeychain(service, account, token) {
+export function storeTokenInKeychain(service, account, token) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const keytar = require('keytar');
-            yield keytar.setPassword(service, account, token);
-            return true;
+            const { default: keytar } = yield import('keytar').catch(() => ({ default: null }));
+            if (keytar) {
+                yield keytar.setPassword(service, account, token);
+                return true;
+            }
         }
         catch (_a) {
             // keytar unavailable — fall through to encrypted file
@@ -387,13 +342,15 @@ function storeTokenInKeychain(service, account, token) {
         }
     });
 }
-function getTokenFromKeychain(service, account) {
+export function getTokenFromKeychain(service, account) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const keytar = require('keytar');
-            const pw = yield keytar.getPassword(service, account);
-            if (pw)
-                return pw;
+            const { default: keytar } = yield import('keytar').catch(() => ({ default: null }));
+            if (keytar) {
+                const pw = yield keytar.getPassword(service, account);
+                if (pw)
+                    return pw;
+            }
         }
         catch (_a) {
             // fallback
@@ -407,12 +364,14 @@ function getTokenFromKeychain(service, account) {
         }
     });
 }
-function removeTokenFromKeychain(service, account) {
+export function removeTokenFromKeychain(service, account) {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const keytar = require('keytar');
-            yield keytar.deletePassword(service, account);
-            return true;
+            const { default: keytar } = yield import('keytar').catch(() => ({ default: null }));
+            if (keytar) {
+                yield keytar.deletePassword(service, account);
+                return true;
+            }
         }
         catch (_a) {
             // fallback
@@ -441,7 +400,7 @@ function removeTokenFromKeychain(service, account) {
         }
     });
 }
-function encryptData(data, key) {
+export function encryptData(data, key) {
     const keyBuf = crypto.createHash('sha256').update(key).digest();
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-gcm', keyBuf, iv);
@@ -450,7 +409,7 @@ function encryptData(data, key) {
     const authTag = cipher.getAuthTag();
     return `${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted}`;
 }
-function decryptData(encrypted, key) {
+export function decryptData(encrypted, key) {
     try {
         const parts = encrypted.split(':');
         if (parts.length !== 3)
@@ -469,7 +428,7 @@ function decryptData(encrypted, key) {
         return null;
     }
 }
-function deviceCodeFlow(provider, config) {
+export function deviceCodeFlow(provider, config) {
     return __awaiter(this, void 0, void 0, function* () {
         const deviceAuthUrl = getDeviceAuthUrl(config.authorizationUrl);
         let resolvedClientId = config.clientId;

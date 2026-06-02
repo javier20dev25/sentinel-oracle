@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -8,28 +7,26 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.Chat = Chat;
-const jsx_runtime_1 = require("react/jsx-runtime");
-const react_1 = require("react");
-const ink_1 = require("ink");
-const message_1 = require("./message");
-const status_bar_1 = require("./status-bar");
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { useState, useEffect, useCallback } from 'react';
+import { Box, Text, useInput, useApp, useWindowSize } from 'ink';
+import { Message } from './message.js';
+import { StatusBar } from './status-bar.js';
 const MAX_VISIBLE_MESSAGES = 50;
-function Chat({ bridge, provider, onExit }) {
-    const { exit } = (0, ink_1.useApp)();
-    const { columns, rows } = (0, ink_1.useWindowSize)();
-    const [messages, setMessages] = (0, react_1.useState)([]);
-    const [inputValue, setInputValue] = (0, react_1.useState)('');
-    const [inputCursor, setInputCursor] = (0, react_1.useState)(0);
-    const [messageHistory, setMessageHistory] = (0, react_1.useState)([]);
-    const [historyIndex, setHistoryIndex] = (0, react_1.useState)(-1);
-    const [isThinking, setIsThinking] = (0, react_1.useState)(false);
-    const [mode, setMode] = (0, react_1.useState)('execute');
-    const [inputFocused, setInputFocused] = (0, react_1.useState)(true);
-    const [scrollOffset, setScrollOffset] = (0, react_1.useState)(0);
-    const [isMultiLine, setIsMultiLine] = (0, react_1.useState)(false);
-    const addMessage = (0, react_1.useCallback)((msg) => {
+export function Chat({ bridge, provider, onExit }) {
+    const { exit } = useApp();
+    const { columns, rows } = useWindowSize();
+    const [messages, setMessages] = useState([]);
+    const [inputValue, setInputValue] = useState('');
+    const [inputCursor, setInputCursor] = useState(0);
+    const [messageHistory, setMessageHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
+    const [isThinking, setIsThinking] = useState(false);
+    const [mode, setMode] = useState('execute');
+    const [inputFocused, setInputFocused] = useState(true);
+    const [scrollOffset, setScrollOffset] = useState(0);
+    const [isMultiLine, setIsMultiLine] = useState(false);
+    const addMessage = useCallback((msg) => {
         setMessages(prev => {
             const next = [...prev, msg];
             if (next.length > MAX_VISIBLE_MESSAGES * 2) {
@@ -38,7 +35,7 @@ function Chat({ bridge, provider, onExit }) {
             return next;
         });
     }, []);
-    (0, react_1.useEffect)(() => {
+    useEffect(() => {
         var _a;
         (_a = bridge.setCallbacks) === null || _a === void 0 ? void 0 : _a.call(bridge, {
             onMessage: (msg) => {
@@ -87,7 +84,7 @@ function Chat({ bridge, provider, onExit }) {
             },
         });
     }, [bridge, addMessage]);
-    const handleSubmit = (0, react_1.useCallback)(() => __awaiter(this, void 0, void 0, function* () {
+    const handleSubmit = useCallback(() => __awaiter(this, void 0, void 0, function* () {
         const text = inputValue.trim();
         if (!text || isThinking)
             return;
@@ -113,7 +110,7 @@ function Chat({ bridge, provider, onExit }) {
             setIsThinking(false);
         }
     }), [inputValue, addMessage, bridge, isThinking]);
-    const handleInput = (0, react_1.useCallback)((input, key) => {
+    const handleInput = useCallback((input, key) => {
         if (!inputFocused)
             return;
         if (key.ctrl && input === 'c') {
@@ -246,10 +243,10 @@ function Chat({ bridge, provider, onExit }) {
             setInputCursor(c => c + input.length);
         }
     }, [inputFocused, inputValue, inputCursor, messageHistory, historyIndex, isMultiLine, handleSubmit, onExit, exit, bridge, mode]);
-    (0, ink_1.useInput)(handleInput);
+    useInput(handleInput);
     const headerHeight = 1;
     const statusHeight = 1;
     const inputAreaHeight = isMultiLine ? Math.min(inputValue.split('\n').length + 2, 6) : 3;
     const visibleMessages = messages.slice(-Math.min(messages.length, MAX_VISIBLE_MESSAGES));
-    return ((0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", height: rows, width: columns, children: [(0, jsx_runtime_1.jsxs)(ink_1.Box, { width: "100%", paddingX: 1, paddingY: 0, backgroundColor: "#0d0d1a", children: [(0, jsx_runtime_1.jsxs)(ink_1.Box, { flexGrow: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#00d4aa", bold: true, children: "\u2726 Sentinel Oracle" }), (0, jsx_runtime_1.jsxs)(ink_1.Text, { color: "#22c55e", children: [" \u25CF ", provider] }), (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: " \u25CF GitHub" })] }), (0, jsx_runtime_1.jsxs)(ink_1.Box, { children: [(0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Mode: " }), (0, jsx_runtime_1.jsx)(ink_1.Text, { color: mode === 'auto' ? '#22c55e' : '#3b82f6', bold: true, children: mode === 'auto' ? 'Auto' : 'Execute' })] })] }), (0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", flexGrow: 1, paddingX: 1, paddingY: 1, children: [visibleMessages.length === 0 && !isThinking && ((0, jsx_runtime_1.jsx)(ink_1.Box, { justifyContent: "center", marginTop: 1, children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Ask Sentinel Oracle anything to get started." }) })), visibleMessages.map((msg) => ((0, jsx_runtime_1.jsx)(message_1.Message, { message: msg, terminalWidth: columns }, msg.id))), bridge.hasPendingPermission() && ((0, jsx_runtime_1.jsx)(ink_1.Box, { marginLeft: 2, marginTop: 1, paddingX: 1, borderStyle: "round", borderColor: "#f59e0b", children: (0, jsx_runtime_1.jsxs)(ink_1.Box, { flexDirection: "column", children: [(0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#f59e0b", bold: true, children: "\u26A0 Tool requires approval" }), (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Enter: Approve \u00B7 Esc: Deny" })] }) })), isThinking && !bridge.hasPendingPermission() && ((0, jsx_runtime_1.jsxs)(ink_1.Box, { marginLeft: 2, marginTop: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#a78bfa", children: "\u2726 Thinking" }), (0, jsx_runtime_1.jsx)(ink_1.Text, { color: "#a78bfa", children: "..." })] }))] }), (0, jsx_runtime_1.jsxs)(ink_1.Box, { borderStyle: "round", borderColor: inputFocused ? '#00d4aa' : '#6b7280', marginX: 1, marginBottom: 0, paddingX: 1, children: [(0, jsx_runtime_1.jsx)(ink_1.Box, { flexGrow: 1, flexDirection: "column", children: inputValue.length === 0 && !isMultiLine ? ((0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: "Ask Sentinel Oracle anything..." })) : ((0, jsx_runtime_1.jsx)(ink_1.Text, { wrap: "wrap", color: "#e0e0e0", children: inputValue })) }), (0, jsx_runtime_1.jsx)(ink_1.Box, { children: (0, jsx_runtime_1.jsx)(ink_1.Text, { dimColor: true, color: "#6b7280", children: inputValue.length }) })] }), (0, jsx_runtime_1.jsx)(status_bar_1.StatusBar, { provider: provider, isConnected: true })] }));
+    return (_jsxs(Box, { flexDirection: "column", height: rows, width: columns, children: [_jsxs(Box, { width: "100%", paddingX: 1, paddingY: 0, backgroundColor: "#0d0d1a", children: [_jsxs(Box, { flexGrow: 1, children: [_jsx(Text, { color: "#00d4aa", bold: true, children: "\u2726 Sentinel Oracle" }), _jsxs(Text, { color: "#22c55e", children: [" \u25CF ", provider] }), _jsx(Text, { dimColor: true, color: "#6b7280", children: " \u25CF GitHub" })] }), _jsxs(Box, { children: [_jsx(Text, { dimColor: true, color: "#6b7280", children: "Mode: " }), _jsx(Text, { color: mode === 'auto' ? '#22c55e' : '#3b82f6', bold: true, children: mode === 'auto' ? 'Auto' : 'Execute' })] })] }), _jsxs(Box, { flexDirection: "column", flexGrow: 1, paddingX: 1, paddingY: 1, children: [visibleMessages.length === 0 && !isThinking && (_jsx(Box, { justifyContent: "center", marginTop: 1, children: _jsx(Text, { dimColor: true, color: "#6b7280", children: "Ask Sentinel Oracle anything to get started." }) })), visibleMessages.map((msg) => (_jsx(Message, { message: msg, terminalWidth: columns }, msg.id))), bridge.hasPendingPermission() && (_jsx(Box, { marginLeft: 2, marginTop: 1, paddingX: 1, borderStyle: "round", borderColor: "#f59e0b", children: _jsxs(Box, { flexDirection: "column", children: [_jsx(Text, { color: "#f59e0b", bold: true, children: "\u26A0 Tool requires approval" }), _jsx(Text, { dimColor: true, color: "#6b7280", children: "Enter: Approve \u00B7 Esc: Deny" })] }) })), isThinking && !bridge.hasPendingPermission() && (_jsxs(Box, { marginLeft: 2, marginTop: 1, children: [_jsx(Text, { color: "#a78bfa", children: "\u2726 Thinking" }), _jsx(Text, { color: "#a78bfa", children: "..." })] }))] }), _jsxs(Box, { borderStyle: "round", borderColor: inputFocused ? '#00d4aa' : '#6b7280', marginX: 1, marginBottom: 0, paddingX: 1, children: [_jsx(Box, { flexGrow: 1, flexDirection: "column", children: inputValue.length === 0 && !isMultiLine ? (_jsx(Text, { dimColor: true, color: "#6b7280", children: "Ask Sentinel Oracle anything..." })) : (_jsx(Text, { wrap: "wrap", color: "#e0e0e0", children: inputValue })) }), _jsx(Box, { children: _jsx(Text, { dimColor: true, color: "#6b7280", children: inputValue.length }) })] }), _jsx(StatusBar, { provider: provider, isConnected: true })] }));
 }

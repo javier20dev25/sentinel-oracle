@@ -1,44 +1,7 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.startMcpServer = startMcpServer;
-exports.startMcpHttpServer = startMcpHttpServer;
-const readline = __importStar(require("readline"));
-const http = __importStar(require("http"));
-const tools_1 = require("./tools");
-const threat_db_1 = require("./threat_db");
+import * as readline from 'readline';
+import * as http from 'http';
+import { runTool } from './tools.js';
+import { correlateFindings, getThreatsByAuthor } from './threat_db.js';
 const toolDefs = [
     {
         name: 'scan',
@@ -199,17 +162,17 @@ function handleMcpMessage(msg) {
                 let text;
                 switch (name) {
                     case 'threat-query': {
-                        const threats = (0, threat_db_1.getThreatsByAuthor)(toolArgs.author || '');
+                        const threats = getThreatsByAuthor(toolArgs.author || '');
                         text = JSON.stringify(threats.length > 0 ? threats : { message: 'No threats found for this author', author: toolArgs.author }, null, 2);
                         break;
                     }
                     case 'threat-correlate': {
-                        const corr = (0, threat_db_1.correlateFindings)(toolArgs.author || undefined, toolArgs.findings || undefined, toolArgs.diffHash || undefined);
+                        const corr = correlateFindings(toolArgs.author || undefined, toolArgs.findings || undefined, toolArgs.diffHash || undefined);
                         text = JSON.stringify(corr, null, 2);
                         break;
                     }
                     default: {
-                        text = (0, tools_1.runTool)(name, toolArgs);
+                        text = runTool(name, toolArgs);
                         break;
                     }
                 }
@@ -236,7 +199,7 @@ function handleMcpMessage(msg) {
         }
     }
 }
-function startMcpServer(port = 3003) {
+export function startMcpServer(port = 3003) {
     const rl = readline.createInterface({ input: process.stdin });
     rl.on('line', (line) => {
         var _a;
@@ -277,7 +240,7 @@ function startMcpServer(port = 3003) {
     console.error(`MCP server running (stdio mode, port ${port})`);
     console.error('Connect any MCP client (Claude Desktop, Cursor, Cline) to this process.');
 }
-function startMcpHttpServer(port = 3003) {
+export function startMcpHttpServer(port = 3003) {
     const server = http.createServer((req, res) => {
         const { method, headers } = req;
         if (method === 'POST') {

@@ -1,53 +1,15 @@
-"use strict";
 /**
  * CLI 1 bridge — coordinates with Sentinel CLI v1 data.
  * Reads config, classified DB, vault, and scan history from v1.
  */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.detectCli1 = detectCli1;
-exports.importCli1Classified = importCli1Classified;
-exports.formatCli1Report = formatCli1Report;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
+import * as fs from 'fs';
+import * as path from 'path';
 let cachedData = null;
 function getCli1Home() {
     const home = process.env.HOME || process.env.USERPROFILE || '.';
     return path.join(home, '.sentinel');
 }
-function detectCli1() {
+export function detectCli1() {
     if (cachedData)
         return cachedData;
     const dataDir = getCli1Home();
@@ -76,7 +38,7 @@ function detectCli1() {
     cachedData = { found, configPath, dataDir, config, classifiedCount, vaultDbPath: fs.existsSync(vaultDbPath) ? vaultDbPath : '' };
     return cachedData;
 }
-function importCli1Classified() {
+export function importCli1Classified() {
     const data = detectCli1();
     if (!data.found)
         return { imported: 0, files: [] };
@@ -88,7 +50,7 @@ function importCli1Classified() {
         .slice(0, 50);
     return { imported: files.length, files };
 }
-function formatCli1Report(data) {
+export function formatCli1Report(data) {
     if (!data.found) {
         return 'CLI 1 not detected on this system.';
     }

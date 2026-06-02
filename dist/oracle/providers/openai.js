@@ -1,4 +1,3 @@
-"use strict";
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -28,13 +27,8 @@ var __asyncGenerator = (this && this.__asyncGenerator) || function (thisArg, _ar
     function reject(value) { resume("throw", value); }
     function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
 };
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.OpenAIProvider = void 0;
-const openai_1 = __importDefault(require("openai"));
-const base_1 = require("./base");
+import OpenAI from 'openai';
+import { BaseProvider } from './base.js';
 function toOpenAITools(tools) {
     if (!tools || tools.length === 0)
         return undefined;
@@ -47,10 +41,10 @@ function toOpenAITools(tools) {
         },
     }));
 }
-class OpenAIProvider extends base_1.BaseProvider {
+export class OpenAIProvider extends BaseProvider {
     constructor(apiKey, model = 'gpt-4o', baseURL) {
         super('openai', model, apiKey);
-        this.client = new openai_1.default({ apiKey, baseURL });
+        this.client = new OpenAI({ apiKey, baseURL });
     }
     chat(messages, tools) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -150,4 +144,3 @@ class OpenAIProvider extends base_1.BaseProvider {
         });
     }
 }
-exports.OpenAIProvider = OpenAIProvider;

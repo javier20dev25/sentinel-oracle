@@ -19,7 +19,7 @@ vi.mock('better-sqlite3', () => ({
   default: vi.fn(function () { return mockDb; }),
 }));
 
-import * as threatDb from './threat_db';
+import * as threatDb from './threat_db.js';
 
 beforeEach(() => {
   mockStmt.run.mockClear();

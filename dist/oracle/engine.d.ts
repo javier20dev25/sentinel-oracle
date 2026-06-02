@@ -1,4 +1,4 @@
-import { BaseProvider, Message } from './providers/base';
+import { BaseProvider, Message } from './providers/base.js';
 export declare function buildSystemPrompt(): string;
 export declare function getDefaultProvider(): BaseProvider | null;
 export type ToolPermissionCallback = (toolName: string, args: Record<string, any>) => boolean | Promise<boolean>;

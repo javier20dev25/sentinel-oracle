@@ -1,37 +1,3 @@
-"use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
     function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
     return new (P || (P = Promise))(function (resolve, reject) {
@@ -41,34 +7,29 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.SLASH_COMMANDS = exports.permissionCache = exports.currentMode = exports.conversationHistory = void 0;
-exports.oracleInteractive = oracleInteractive;
-exports.handleSlash = handleSlash;
-exports.oracleAsk = oracleAsk;
-const path = __importStar(require("path"));
-const fs = __importStar(require("fs"));
-const child_process_1 = require("child_process");
-const engine_1 = require("./engine");
-const auth_1 = require("./auth");
-const tools_1 = require("./tools");
-const gh_guard_1 = require("./gh_guard");
-const rules_1 = require("./rules");
-const threat_db_1 = require("./threat_db");
-const viz_1 = require("./viz");
-const reports_1 = require("./reports");
-const spinner_1 = require("./spinner");
-const tono_1 = require("./tono");
-const agents_1 = require("./agents");
-const cli1_bridge_1 = require("./cli1_bridge");
-const config_migration_1 = require("./config_migration");
-const welcome_1 = require("./ui/welcome");
-const renderer_1 = require("./ui/renderer");
-const pc = __importStar(require("picocolors"));
-exports.conversationHistory = [];
-exports.currentMode = 'execute';
-exports.permissionCache = new Set();
-const spinner = new spinner_1.Spinner();
+import * as path from 'path';
+import * as fs from 'fs';
+import { execFileSync } from 'child_process';
+import { oracleChat, getDefaultProvider } from './engine.js';
+import { listProviders, getConfig } from './auth.js';
+import { getToolDefs } from './tools.js';
+import { runGuard, formatGuardReport, ghLogin } from './gh_guard.js';
+import { addRule, removeRule, toggleRule, listRules, ensureDefaultRules } from './rules.js';
+import { getThreatsByAuthor, getRecentThreats, getHighRiskAuthors, getThreatAuthor, correlateFindings } from './threat_db.js';
+import { permissionBannerText, modeBanner, findingsBox, } from './viz.js';
+import { generateMarkdown, generateJSON, saveReport, parseFindingsFromOutput } from './reports.js';
+import { Spinner } from './spinner.js';
+import { getCurrentTone, selectToneModal } from './tono.js';
+import { setAgent, getCurrentAgent, AGENTS } from './agents/index.js';
+import { detectCli1, formatCli1Report, importCli1Classified } from './cli1_bridge.js';
+import { exportConfigToFile, importConfigFromFile } from './config_migration.js';
+import { welcomeSequence } from './ui/welcome.js';
+import { startUI } from './ui/renderer.js';
+import * as pc from 'picocolors';
+export let conversationHistory = [];
+export let currentMode = 'execute';
+export const permissionCache = new Set();
+const spinner = new Spinner();
 // ─── Raw Keypress Reader ──────────────────────────────────────
 function readSingleKeypress() {
     return new Promise(resolve => {
@@ -112,23 +73,23 @@ function readSingleKeypress() {
 }
 // ─── Permission System ─────────────────────────────────────────
 const permissionPrompt = (toolName, args) => __awaiter(void 0, void 0, void 0, function* () {
-    if (exports.currentMode === 'auto')
+    if (currentMode === 'auto')
         return true;
     const key = `${toolName}:${JSON.stringify(args)}`;
-    if (exports.permissionCache.has(key))
+    if (permissionCache.has(key))
         return true;
     const argStr = Object.entries(args)
         .map(([k, v]) => `${k}=${String(v).slice(0, 60)}`)
         .join(', ');
-    console.log((0, viz_1.permissionBannerText)(toolName, argStr, exports.currentMode));
+    console.log(permissionBannerText(toolName, argStr, currentMode));
     const result = yield readSingleKeypress();
     if (result === 'auto') {
-        exports.currentMode = 'auto';
+        currentMode = 'auto';
         console.log(`\r  ${pc.green('(v)')} Auto-approve ${pc.bold('ON')}  all tools will run without prompting\n`);
         return true;
     }
     if (result === 'enter') {
-        exports.permissionCache.add(key);
+        permissionCache.add(key);
         console.log(`\r  ${pc.green('(v)')} Allowed\n`);
         return true;
     }
@@ -149,21 +110,20 @@ const SLASH_COMMANDS = [
     '/cli1', '/cli1-import',
     '/export config', '/import config',
 ];
-exports.SLASH_COMMANDS = SLASH_COMMANDS;
 function completer(line) {
     const hits = SLASH_COMMANDS.filter(c => c.startsWith(line) && c !== line);
     return [hits.length ? hits : SLASH_COMMANDS, line];
 }
 // ─── Help Text ─────────────────────────────────────────────────
 function HELP_TEXT() {
-    const tone = (0, tono_1.getCurrentTone)();
+    const tone = getCurrentTone();
     return `
 ${pc.cyan('┌─────────────────────────────────────────────────────────────┐')}
 ${pc.cyan('│')}  ${pc.bold('Sentinel Oracle Core — Complete Guide')}                ${pc.cyan('│')}
 ${pc.cyan('│')}  ${pc.gray('CLI 2  ·  Multi-Provider  ·  Tool-Orchestrated  ·  Permissions')}  ${pc.cyan('│')}
 ${pc.cyan('└─────────────────────────────────────────────────────────────┘')}
 
-${(0, viz_1.modeBanner)(exports.currentMode)}
+${modeBanner(currentMode)}
   ${pc.gray('Tone:')} ${pc.bold(tone.label)} ${pc.gray('(' + tone.description + ')')}
 
 ${pc.bold('HOW TO USE')}
@@ -194,7 +154,7 @@ ${pc.bold('SLASH COMMANDS')}
   ${pc.green('/tono')}               Interactive tone selector
   ${pc.green('/models')}             List providers and models
   ${pc.green('/provider')}           Show active configuration
-  ${pc.green('/tools')}              List ${(0, tools_1.getToolDefs)().length} tools
+  ${pc.green('/tools')}              List ${getToolDefs().length} tools
   ${pc.green('/guard')}              Run connection security guard
   ${pc.green('/gh-login')}           Authenticate with GitHub via browser
   ${pc.green('/repos')} [n] [owner]  List repositories via gh
@@ -266,9 +226,9 @@ function handleSlash(input) {
                 return true;
             }
             case '/tono': {
-                const selected = yield (0, tono_1.selectToneModal)();
+                const selected = yield selectToneModal();
                 if (selected) {
-                    const tone = (0, tono_1.getCurrentTone)();
+                    const tone = getCurrentTone();
                     console.log(pc.green(`  Tone set to: ${pc.bold(tone.label)}`));
                 }
                 else {
@@ -279,21 +239,21 @@ function handleSlash(input) {
             case '/mode': {
                 const sub = (_a = parts[1]) === null || _a === void 0 ? void 0 : _a.toLowerCase();
                 if (sub === 'plan') {
-                    exports.currentMode = 'plan';
-                    console.log((0, viz_1.modeBanner)('plan') + '\n');
+                    currentMode = 'plan';
+                    console.log(modeBanner('plan') + '\n');
                     return true;
                 }
                 if (sub === 'execute') {
-                    exports.currentMode = 'execute';
-                    console.log((0, viz_1.modeBanner)('execute') + '\n');
+                    currentMode = 'execute';
+                    console.log(modeBanner('execute') + '\n');
                     return true;
                 }
                 if (sub === 'auto') {
-                    exports.currentMode = 'auto';
-                    console.log((0, viz_1.modeBanner)('auto') + '\n');
+                    currentMode = 'auto';
+                    console.log(modeBanner('auto') + '\n');
                     return true;
                 }
-                console.log((0, viz_1.modeBanner)(exports.currentMode) + '\n');
+                console.log(modeBanner(currentMode) + '\n');
                 return true;
             }
             case '/models': {
@@ -305,7 +265,7 @@ function handleSlash(input) {
                 };
                 console.log(pc.cyan('\n  Available Providers & Models:\n'));
                 for (const [prov, mods] of Object.entries(models)) {
-                    const configured = (0, auth_1.listProviders)().includes(prov);
+                    const configured = listProviders().includes(prov);
                     const badge = configured ? pc.green('v') : pc.gray('.');
                     console.log(`  ${badge} ${pc.bold(prov)}`);
                     mods.forEach(m => console.log(`      ${pc.gray('-')} ${m}`));
@@ -314,8 +274,8 @@ function handleSlash(input) {
                 return true;
             }
             case '/provider': {
-                const config = (0, auth_1.getConfig)();
-                const configuredKeys = (0, auth_1.listProviders)();
+                const config = getConfig();
+                const configuredKeys = listProviders();
                 console.log(pc.cyan('\n  Provider Configuration:\n'));
                 if (config.provider) {
                     console.log(`  Active:   ${pc.bold(config.provider)} ${config.model ? `(${config.model})` : ''}`);
@@ -328,7 +288,7 @@ function handleSlash(input) {
                 return true;
             }
             case '/tools': {
-                const defs = (0, tools_1.getToolDefs)();
+                const defs = getToolDefs();
                 const verbose = parts[1] === '-v';
                 console.log(pc.cyan(`\n  ${defs.length} Available Tools:\n`));
                 for (const t of defs) {
@@ -350,7 +310,7 @@ function handleSlash(input) {
                     if (safeOwner)
                         args.push('--owner', safeOwner);
                     args.push('--limit', limit, '--json', 'name,owner,visibility,description');
-                    const out = (0, child_process_1.execFileSync)('gh', args, { timeout: 15000, encoding: 'utf-8', windowsHide: true });
+                    const out = execFileSync('gh', args, { timeout: 15000, encoding: 'utf-8', windowsHide: true });
                     const repos = JSON.parse(out);
                     if (repos.length === 0) {
                         console.log(pc.yellow('  No repos found.\n'));
@@ -372,44 +332,44 @@ function handleSlash(input) {
                 return true;
             }
             case '/history': {
-                const sysCount = exports.conversationHistory.filter(m => m.role === 'system').length;
-                const userCount = exports.conversationHistory.filter(m => m.role === 'user').length;
-                const asstCount = exports.conversationHistory.filter(m => m.role === 'assistant').length;
-                const toolCount = exports.conversationHistory.filter(m => m.role === 'tool').length;
+                const sysCount = conversationHistory.filter(m => m.role === 'system').length;
+                const userCount = conversationHistory.filter(m => m.role === 'user').length;
+                const asstCount = conversationHistory.filter(m => m.role === 'assistant').length;
+                const toolCount = conversationHistory.filter(m => m.role === 'tool').length;
                 console.log(pc.cyan('\n  Session Statistics:\n'));
-                console.log(`  Messages:   ${exports.conversationHistory.length}`);
+                console.log(`  Messages:   ${conversationHistory.length}`);
                 console.log(`  System:     ${sysCount}`);
                 console.log(`  User:       ${userCount}`);
                 console.log(`  Assistant:  ${asstCount}`);
                 console.log(`  Tool calls: ${toolCount}`);
-                console.log(`  Mode:       ${pc.bold(exports.currentMode.toUpperCase())}`);
-                console.log(`  Tone:       ${pc.bold((0, tono_1.getCurrentTone)().label)}`);
-                console.log(`  Perm cache: ${exports.permissionCache.size} tool(s) cached`);
+                console.log(`  Mode:       ${pc.bold(currentMode.toUpperCase())}`);
+                console.log(`  Tone:       ${pc.bold(getCurrentTone().label)}`);
+                console.log(`  Perm cache: ${permissionCache.size} tool(s) cached`);
                 console.log(pc.gray('  Use /clear to reset.\n'));
                 return true;
             }
             case '/clear': {
-                exports.conversationHistory = [];
-                exports.permissionCache.clear();
+                conversationHistory = [];
+                permissionCache.clear();
                 console.log(pc.gray('  History and permission cache cleared.\n'));
                 return true;
             }
             case '/guard': {
                 console.log(pc.gray('\n  Running connection security guard...'));
-                const report = (0, gh_guard_1.runGuard)();
-                console.log('\n' + (0, gh_guard_1.formatGuardReport)(report) + '\n');
+                const report = runGuard();
+                console.log('\n' + formatGuardReport(report) + '\n');
                 return true;
             }
             case '/gh-login': {
                 console.log(pc.cyan('\n  GitHub Login'));
                 console.log(pc.gray('  Opening browser to authenticate with GitHub...\n'));
-                const guard = (0, gh_guard_1.runGuard)();
+                const guard = runGuard();
                 if (guard.passed) {
                     const user = guard.auth.detail;
                     console.log(pc.green(`  Already authenticated: ${user}\n`));
                     return true;
                 }
-                const result = yield (0, gh_guard_1.ghLogin)();
+                const result = yield ghLogin();
                 if (result.success) {
                     console.log(pc.green(`  Login successful: ${result.username || 'authenticated'}\n`));
                 }
@@ -420,7 +380,7 @@ function handleSlash(input) {
                 return true;
             }
             case '/auth': {
-                const keys = (0, auth_1.listProviders)();
+                const keys = listProviders();
                 console.log(pc.cyan('\n  Authentication Status:\n'));
                 if (keys.length === 0) {
                     console.log(pc.yellow('  No API keys configured.\n'));
@@ -436,8 +396,8 @@ function handleSlash(input) {
                 const filename = parts[2];
                 const ext = format === 'json' ? 'json' : 'md';
                 const findings = [];
-                for (const m of exports.conversationHistory.filter(m => m.role === 'tool')) {
-                    const parsed = (0, reports_1.parseFindingsFromOutput)(m.content, 'scan');
+                for (const m of conversationHistory.filter(m => m.role === 'tool')) {
+                    const parsed = parseFindingsFromOutput(m.content, 'scan');
                     findings.push(...parsed);
                 }
                 const severities = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
@@ -448,7 +408,7 @@ function handleSlash(input) {
                 }
                 const totalFindings = findings.length;
                 const verdict = totalFindings === 0 ? 'SAFE' : severities.CRITICAL > 0 ? 'MALICIOUS' : 'SUSPICIOUS';
-                const config = (0, auth_1.getConfig)();
+                const config = getConfig();
                 const reportData = {
                     title: `Security Analysis — ${new Date().toLocaleDateString()}`,
                     date: new Date().toISOString(),
@@ -456,29 +416,29 @@ function handleSlash(input) {
                     model: config.model || undefined,
                     findings,
                     summary: { totalFindings, severities, verdict },
-                    conversation: exports.conversationHistory.map(m => ({
+                    conversation: conversationHistory.map(m => ({
                         role: m.role,
                         content: m.content.length > 500 ? m.content.slice(0, 500) + '...' : m.content,
                     })),
                 };
                 const safeName = filename || `oracle-report-${Date.now()}.${ext}`;
-                const content = format === 'json' ? (0, reports_1.generateJSON)(reportData) : (0, reports_1.generateMarkdown)(reportData);
-                const filePath = (0, reports_1.saveReport)(content, safeName);
+                const content = format === 'json' ? generateJSON(reportData) : generateMarkdown(reportData);
+                const filePath = saveReport(content, safeName);
                 console.log(pc.green(`\n  [OK] Report saved: ${filePath}\n`));
                 return true;
             }
             case '/trust': {
                 const sub = (_b = parts[1]) === null || _b === void 0 ? void 0 : _b.toLowerCase();
                 if (sub === 'clear') {
-                    exports.permissionCache.clear();
+                    permissionCache.clear();
                     console.log(pc.green('  [OK] Permission cache cleared.\n'));
                     return true;
                 }
                 console.log(pc.cyan('\n  Permission Status:\n'));
-                console.log(`  Mode:      ${pc.bold(exports.currentMode.toUpperCase())}`);
-                console.log(`  Cached:    ${exports.permissionCache.size} tool(s) approved`);
-                if (exports.permissionCache.size > 0) {
-                    for (const k of exports.permissionCache) {
+                console.log(`  Mode:      ${pc.bold(currentMode.toUpperCase())}`);
+                console.log(`  Cached:    ${permissionCache.size} tool(s) approved`);
+                if (permissionCache.size > 0) {
+                    for (const k of permissionCache) {
                         console.log(`    ${pc.gray('.')} ${k}`);
                     }
                 }
@@ -486,7 +446,7 @@ function handleSlash(input) {
                 return true;
             }
             case '/findings': {
-                const toolMessages = exports.conversationHistory.filter(m => m.role === 'tool');
+                const toolMessages = conversationHistory.filter(m => m.role === 'tool');
                 if (toolMessages.length === 0) {
                     console.log(pc.yellow('\n  No tool output in current session.\n'));
                     return true;
@@ -499,21 +459,21 @@ function handleSlash(input) {
                 const severity = hasCritical ? 'CRITICAL' : hasHigh ? 'HIGH' : 'INFO';
                 const toolName = last.tool_call_id || 'scan';
                 const displayLines = contentLines.slice(0, 25).map(l => l.replace(/⟨⟨⟨SENTINEL_DATA⟩⟩⟩/g, '').replace(/⟨⟨⟨\/SENTINEL_DATA⟩⟩⟩/g, '').trim()).filter(l => l);
-                console.log((0, viz_1.findingsBox)(`Last Tool Output: ${toolName}`, displayLines, severity));
+                console.log(findingsBox(`Last Tool Output: ${toolName}`, displayLines, severity));
                 return true;
             }
             case '/audit': {
-                const rules = (0, rules_1.listRules)();
-                const threats = (0, threat_db_1.getRecentThreats)(10);
+                const rules = listRules();
+                const threats = getRecentThreats(10);
                 console.log(pc.cyan('\n  Local Database Audit:\n'));
                 console.log(`  Rules:       ${rules.length} (${rules.filter(r => r.enabled).length} enabled)`);
                 console.log(`  Threats DB:  ${'~/.sentinel/threats.db'}`);
                 console.log(`  Recent threats: ${threats.length}`);
-                console.log(`  Permissions: ${exports.permissionCache.size} cached tools`);
-                console.log(`  Mode:        ${exports.currentMode}`);
-                console.log(`  Tone:        ${(0, tono_1.getCurrentTone)().label}`);
-                console.log(`  Agent:       ${(0, agents_1.getCurrentAgent)().name}`);
-                console.log(`  History:     ${exports.conversationHistory.length} messages`);
+                console.log(`  Permissions: ${permissionCache.size} cached tools`);
+                console.log(`  Mode:        ${currentMode}`);
+                console.log(`  Tone:        ${getCurrentTone().label}`);
+                console.log(`  Agent:       ${getCurrentAgent().name}`);
+                console.log(`  History:     ${conversationHistory.length} messages`);
                 const dbOk = fs.existsSync(path.join(process.env.HOME || process.env.USERPROFILE || '.', '.sentinel'));
                 console.log(`  Config dir:  ${dbOk ? pc.green('OK') : pc.yellow('not found')}`);
                 console.log();
@@ -523,8 +483,8 @@ function handleSlash(input) {
                 const sub = (_c = parts[1]) === null || _c === void 0 ? void 0 : _c.toLowerCase();
                 if (sub === 'list') {
                     console.log(pc.cyan('\n  Available Agents:\n'));
-                    for (const a of agents_1.AGENTS) {
-                        const active = a.id === (0, agents_1.getCurrentAgent)().id ? pc.green(' *') : '  ';
+                    for (const a of AGENTS) {
+                        const active = a.id === getCurrentAgent().id ? pc.green(' *') : '  ';
                         console.log(`  ${active} ${a.icon} ${pc.bold(a.name)}`);
                         console.log(`      ${a.description}`);
                         console.log();
@@ -538,8 +498,8 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /agent set <id>\n'));
                         return true;
                     }
-                    if ((0, agents_1.setAgent)(id)) {
-                        const agent = (0, agents_1.getCurrentAgent)();
+                    if (setAgent(id)) {
+                        const agent = getCurrentAgent();
                         console.log(pc.green(`  [OK] Agent switched to: ${pc.bold(agent.name)} — ${agent.description}\n`));
                     }
                     else {
@@ -547,7 +507,7 @@ function handleSlash(input) {
                     }
                     return true;
                 }
-                const agent = (0, agents_1.getCurrentAgent)();
+                const agent = getCurrentAgent();
                 console.log(pc.cyan('\n  Current Agent:\n'));
                 console.log(`  ${agent.icon} ${pc.bold(agent.name)}`);
                 console.log(`  ${agent.description}\n`);
@@ -555,14 +515,14 @@ function handleSlash(input) {
                 return true;
             }
             case '/cli1': {
-                const data = (0, cli1_bridge_1.detectCli1)();
+                const data = detectCli1();
                 console.log(pc.cyan('\n  CLI 1 Bridge:\n'));
-                console.log((0, cli1_bridge_1.formatCli1Report)(data));
+                console.log(formatCli1Report(data));
                 console.log();
                 return true;
             }
             case '/cli1-import': {
-                const result = (0, cli1_bridge_1.importCli1Classified)();
+                const result = importCli1Classified();
                 if (result.imported > 0) {
                     console.log(pc.green(`\n  [OK] Imported ${result.imported} classified files from CLI 1.\n`));
                     result.files.slice(0, 10).forEach(f => console.log(`    ${pc.gray('-')} ${f}`));
@@ -578,7 +538,7 @@ function handleSlash(input) {
             case '/rule': {
                 const sub = (_e = parts[1]) === null || _e === void 0 ? void 0 : _e.toLowerCase();
                 if (sub === 'list' || !sub) {
-                    const rules = (0, rules_1.listRules)();
+                    const rules = listRules();
                     console.log(pc.cyan('\n  Custom Rules:\n'));
                     if (rules.length === 0) {
                         console.log(pc.yellow('  No custom rules. Defaults will be created on first chat.\n'));
@@ -600,7 +560,7 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /rule add <name> <instruction>\n'));
                         return true;
                     }
-                    (0, rules_1.addRule)(name, instruction);
+                    addRule(name, instruction);
                     console.log(pc.green(`  [OK] Rule "${name}" added.\n`));
                     return true;
                 }
@@ -610,7 +570,7 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /rule remove <name>\n'));
                         return true;
                     }
-                    if ((0, rules_1.removeRule)(name))
+                    if (removeRule(name))
                         console.log(pc.green(`  [OK] Rule "${name}" removed.\n`));
                     else
                         console.log(pc.yellow(`  Rule "${name}" not found.\n`));
@@ -622,13 +582,13 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /rule toggle <name>\n'));
                         return true;
                     }
-                    const rules = (0, rules_1.listRules)();
+                    const rules = listRules();
                     const rule = rules.find(r => r.name.toLowerCase() === name.toLowerCase());
                     if (!rule) {
                         console.log(pc.yellow(`  Rule "${name}" not found.\n`));
                         return true;
                     }
-                    (0, rules_1.toggleRule)(name, !rule.enabled);
+                    toggleRule(name, !rule.enabled);
                     console.log(pc.green(`  [OK] Rule "${name}" ${rule.enabled ? 'disabled' : 'enabled'}.\n`));
                     return true;
                 }
@@ -638,7 +598,7 @@ function handleSlash(input) {
                 const sub = (_f = parts[1]) === null || _f === void 0 ? void 0 : _f.toLowerCase();
                 if (sub === 'list' || !sub) {
                     const n = parseInt(parts[2]) || 10;
-                    const threats = (0, threat_db_1.getRecentThreats)(n);
+                    const threats = getRecentThreats(n);
                     console.log(pc.cyan(`\n  Recent Threats (last ${n}):\n`));
                     if (threats.length === 0) {
                         console.log(pc.gray('  No threats recorded yet.\n'));
@@ -663,8 +623,8 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /threat query <author>\n'));
                         return true;
                     }
-                    const threats = (0, threat_db_1.getThreatsByAuthor)(author);
-                    const ta = (0, threat_db_1.getThreatAuthor)(author);
+                    const threats = getThreatsByAuthor(author);
+                    const ta = getThreatAuthor(author);
                     console.log(pc.cyan(`\n  Threat Intelligence: ${author}\n`));
                     if (ta) {
                         console.log(`  Risk Level: ${ta.risk_level === 'CRITICAL' ? pc.red('CRITICAL') : ta.risk_level === 'HIGH' ? pc.yellow('HIGH') : ta.risk_level}`);
@@ -683,7 +643,7 @@ function handleSlash(input) {
                     return true;
                 }
                 if (sub === 'auth') {
-                    const authors = (0, threat_db_1.getHighRiskAuthors)();
+                    const authors = getHighRiskAuthors();
                     console.log(pc.cyan('\n  High-Risk Authors:\n'));
                     if (authors.length === 0)
                         console.log(pc.gray('  No high-risk authors recorded.\n'));
@@ -702,7 +662,7 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /threat correlate <author>\n'));
                         return true;
                     }
-                    const corr = (0, threat_db_1.correlateFindings)(author, '', '');
+                    const corr = correlateFindings(author, '', '');
                     console.log(pc.cyan(`\n  Correlation for "${author}":\n`));
                     console.log(`  Known author:    ${corr.knownAuthor ? pc.yellow('YES') : pc.green('No')}`);
                     console.log(`  Threat count:    ${corr.threatCount}`);
@@ -719,7 +679,7 @@ function handleSlash(input) {
                 const sub = (_g = parts[1]) === null || _g === void 0 ? void 0 : _g.toLowerCase();
                 if (sub === 'config') {
                     const filePath = parts[2];
-                    const result = (0, config_migration_1.exportConfigToFile)(filePath || undefined);
+                    const result = exportConfigToFile(filePath || undefined);
                     console.log(pc.green(`\n  [OK] Configuration exported to: ${result}\n`));
                     return true;
                 }
@@ -733,7 +693,7 @@ function handleSlash(input) {
                         console.log(pc.yellow('  Usage: /import config <filepath>\n'));
                         return true;
                     }
-                    const result = (0, config_migration_1.importConfigFromFile)(filePath);
+                    const result = importConfigFromFile(filePath);
                     if (result.success) {
                         console.log(pc.green('\n  [OK] Configuration imported successfully.\n'));
                         if (result.warnings.length > 0) {
@@ -774,14 +734,14 @@ function captureOutput(fn) {
     const result = fn().finally(restore);
     return { result, captured: () => chunks.join('').trim() };
 }
-function oracleInteractive() {
+export function oracleInteractive() {
     return __awaiter(this, void 0, void 0, function* () {
         yield preFlightCheck();
-        yield (0, rules_1.ensureDefaultRules)();
+        yield ensureDefaultRules();
         // Run GitHub check (non-blocking, fire and forget)
-        (0, welcome_1.welcomeSequence)().catch(() => { });
+        welcomeSequence().catch(() => { });
         // Launch Ink UI
-        const { waitUntilExit } = (0, renderer_1.startUI)();
+        const { waitUntilExit } = startUI();
         yield waitUntilExit;
     });
 }
@@ -791,9 +751,11 @@ function preFlightCheck() {
         console.log(pc.yellow('  Warning: Integrity check skipped.'));
     }
 }
-function oracleAsk(question) {
+// ─── One-Shot Ask ──────────────────────────────────────────────
+export { handleSlash, SLASH_COMMANDS };
+export function oracleAsk(question) {
     return __awaiter(this, void 0, void 0, function* () {
-        const provider = (0, engine_1.getDefaultProvider)();
+        const provider = getDefaultProvider();
         if (!provider) {
             console.log(pc.yellow('No provider configured.'));
             console.log(pc.gray('Run: sentinel oracle auth set <provider> <key>'));
@@ -801,7 +763,7 @@ function oracleAsk(question) {
         }
         try {
             spinner.start('Processing...', 'processing');
-            const { response } = yield (0, engine_1.oracleChat)(question, exports.conversationHistory, provider, undefined, 'auto');
+            const { response } = yield oracleChat(question, conversationHistory, provider, undefined, 'auto');
             spinner.stop();
             console.log(response);
         }

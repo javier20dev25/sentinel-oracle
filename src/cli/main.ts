@@ -3,13 +3,13 @@
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
-import { LiteScanner, LiteFinding } from '../core/lite/lite_scanner';
+import { LiteScanner, LiteFinding } from '../core/lite/lite_scanner.js';
 import { execFileSync } from 'child_process';
-import { IntegrityManager } from './intelligence/integrity_manager';
-import { SystemAuditor } from './intelligence/system_auditor';
+import { IntegrityManager } from './intelligence/integrity_manager.js';
+import { SystemAuditor } from './intelligence/system_auditor.js';
 import * as pc from 'picocolors';
-import { oracleInteractive, oracleAsk } from '../oracle/command';
-import { setApiKey, removeApiKey, listProviders, setConfig } from '../oracle/auth';
+import { oracleInteractive, oracleAsk } from '../oracle/command.js';
+import { setApiKey, removeApiKey, listProviders, setConfig } from '../oracle/auth.js';
 
 const program = new Command();
 const scanner = new LiteScanner();

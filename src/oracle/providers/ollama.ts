@@ -1,4 +1,4 @@
-import { OpenAIProvider } from './openai';
+import { OpenAIProvider } from './openai.js';
 
 export class OllamaProvider extends OpenAIProvider {
   constructor(model = 'llama3') {
