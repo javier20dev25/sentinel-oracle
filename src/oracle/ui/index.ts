@@ -1,6 +1,16 @@
+export { startUI } from './renderer';
+export { App } from './app';
+export { Welcome } from './components/welcome';
+export { Chat } from './components/chat';
+export type { ChatMessage } from './components/message';
+export { Splash } from './components/splash';
+export { Message } from './components/message';
+export { StatusBar } from './components/status-bar';
 export { ChatInput } from './chat-input';
-export { MessageRenderer, type ChatMessage, type MessageType } from './messages';
+export { MessageRenderer, type ChatMessage as OldChatMessage, type MessageType } from './messages';
 export { providerWizard } from './wizard';
 export { checkGitHubLogin } from './github';
 export { welcomeSequence } from './welcome';
 export * from './styles';
+export { ChatBridge } from './bridge';
+export type { BridgeMessage, BridgeCallbacks } from './bridge';

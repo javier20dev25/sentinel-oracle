@@ -41,13 +41,6 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
         step((generator = generator.apply(thisArg, _arguments || [])).next());
     });
 };
-var __asyncValues = (this && this.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SLASH_COMMANDS = exports.permissionCache = exports.currentMode = exports.conversationHistory = void 0;
 exports.oracleInteractive = oracleInteractive;
@@ -70,8 +63,7 @@ const agents_1 = require("./agents");
 const cli1_bridge_1 = require("./cli1_bridge");
 const config_migration_1 = require("./config_migration");
 const welcome_1 = require("./ui/welcome");
-const chat_input_1 = require("./ui/chat-input");
-const messages_1 = require("./ui/messages");
+const renderer_1 = require("./ui/renderer");
 const pc = __importStar(require("picocolors"));
 exports.conversationHistory = [];
 exports.currentMode = 'execute';
@@ -784,115 +776,20 @@ function captureOutput(fn) {
 }
 function oracleInteractive() {
     return __awaiter(this, void 0, void 0, function* () {
-        (0, rules_1.ensureDefaultRules)();
-        const ruleCount = (0, rules_1.listRules)().length;
-        yield (0, welcome_1.welcomeSequence)();
-        const renderer = new messages_1.MessageRenderer();
-        renderer.addMessage({ type: 'system', content: (0, viz_1.modeBanner)(exports.currentMode), timestamp: new Date() });
-        const provider = (0, engine_1.getDefaultProvider)();
-        const agent = (0, agents_1.getCurrentAgent)();
-        const infoLine = `Tone: ${(0, tono_1.getCurrentTone)().label} | ${agent.icon} ${agent.name} | Rules: ${ruleCount} active | Tools: ${(0, tools_1.getToolDefs)().length} available`;
-        renderer.addMessage({ type: 'system', content: infoLine, timestamp: new Date() });
-        if (provider) {
-            renderer.addMessage({ type: 'system', content: `${provider.name} | Model: ${provider.model || 'default'}`, timestamp: new Date() });
-        }
-        renderer.renderAll();
-        function fullRefresh() {
-            renderer.renderAll();
-            chatInput.setMessageLineCount(renderer.renderedLineCount);
-            chatInput.render();
-        }
-        const chatInput = new chat_input_1.ChatInput({
-            placeholder: 'Ask Sentinel Oracle anything... (Ctrl+Enter to send)',
-            onSubmit: (text) => __awaiter(this, void 0, void 0, function* () {
-                var _a, e_1, _b, _c;
-                if (text === 'exit' || text === 'quit') {
-                    chatInput.stop();
-                    renderer.addMessage({ type: 'system', content: 'Oracle session ended.', timestamp: new Date() });
-                    fullRefresh();
-                    (0, threat_db_1.closeDb)();
-                    process.exit(0);
-                    return;
-                }
-                renderer.addMessage({ type: 'user', content: text, timestamp: new Date() });
-                fullRefresh();
-                if (text.startsWith('/')) {
-                    const { result, captured } = captureOutput(() => handleSlash(text));
-                    yield result;
-                    const output = captured();
-                    if (output) {
-                        renderer.addMessage({ type: 'system', content: output, timestamp: new Date() });
-                    }
-                    else {
-                        renderer.addMessage({ type: 'system', content: pc.gray('Command executed.'), timestamp: new Date() });
-                    }
-                    fullRefresh();
-                    return;
-                }
-                const p = provider || (0, engine_1.getDefaultProvider)();
-                if (!p) {
-                    renderer.addMessage({ type: 'error', content: 'No provider configured. Use /help for setup.', timestamp: new Date() });
-                    fullRefresh();
-                    return;
-                }
-                try {
-                    spinner.start('Thinking...', 'thinking');
-                    const stream = (0, engine_1.oracleChatStream)(text, exports.conversationHistory.filter(m => m.role !== 'system'), p, permissionPrompt, exports.currentMode);
-                    let started = false;
-                    let assistantContent = '';
-                    try {
-                        for (var _d = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _d = true) {
-                            _c = stream_1_1.value;
-                            _d = false;
-                            const chunk = _c;
-                            if (!started) {
-                                spinner.stop();
-                                started = true;
-                                assistantContent = chunk;
-                                renderer.addMessage({ type: 'assistant', content: chunk, timestamp: new Date() });
-                                fullRefresh();
-                            }
-                            else {
-                                assistantContent += chunk;
-                                renderer.updateLastAssistantContent(assistantContent);
-                                fullRefresh();
-                            }
-                        }
-                    }
-                    catch (e_1_1) { e_1 = { error: e_1_1 }; }
-                    finally {
-                        try {
-                            if (!_d && !_a && (_b = stream_1.return)) yield _b.call(stream_1);
-                        }
-                        finally { if (e_1) throw e_1.error; }
-                    }
-                    spinner.stop();
-                    if (!started) {
-                        const { response, history } = yield (0, engine_1.oracleChat)(text, exports.conversationHistory.filter(m => m.role !== 'system'), p, permissionPrompt, exports.currentMode);
-                        exports.conversationHistory = history;
-                        if (response) {
-                            renderer.addMessage({ type: 'assistant', content: response, timestamp: new Date() });
-                            fullRefresh();
-                        }
-                    }
-                    else if (engine_1.streamingResult.history.length > 0) {
-                        exports.conversationHistory = engine_1.streamingResult.history;
-                    }
-                }
-                catch (e) {
-                    spinner.stop();
-                    renderer.addMessage({ type: 'error', content: e.message, timestamp: new Date() });
-                    fullRefresh();
-                }
-            }),
-            onCancel: () => {
-                chatInput.stop();
-                (0, threat_db_1.closeDb)();
-                process.exit(0);
-            },
-        });
-        chatInput.start();
+        yield preFlightCheck();
+        yield (0, rules_1.ensureDefaultRules)();
+        // Run GitHub check (non-blocking, fire and forget)
+        (0, welcome_1.welcomeSequence)().catch(() => { });
+        // Launch Ink UI
+        const { waitUntilExit } = (0, renderer_1.startUI)();
+        yield waitUntilExit;
     });
+}
+function preFlightCheck() {
+    const integrityOk = true; // placeholder — could check sentinel integrity
+    if (!integrityOk) {
+        console.log(pc.yellow('  Warning: Integrity check skipped.'));
+    }
 }
 function oracleAsk(question) {
     return __awaiter(this, void 0, void 0, function* () {

@@ -27,8 +27,7 @@ import { setAgent, getCurrentAgent, AGENTS } from './agents';
 import { detectCli1, formatCli1Report, importCli1Classified } from './cli1_bridge';
 import { exportConfig, exportConfigToFile, importConfigFromFile } from './config_migration';
 import { welcomeSequence } from './ui/welcome';
-import { ChatInput } from './ui/chat-input';
-import { MessageRenderer } from './ui/messages';
+import { startUI } from './ui/renderer';
 import * as pc from 'picocolors';
 
 export let conversationHistory: Message[] = [];
@@ -723,125 +722,22 @@ function captureOutput<T>(fn: () => Promise<T>): { result: Promise<T>; captured:
 }
 
 export async function oracleInteractive(): Promise<void> {
-  ensureDefaultRules();
-  const ruleCount = listRules().length;
+  await preFlightCheck();
+  await ensureDefaultRules();
 
-  await welcomeSequence();
+  // Run GitHub check (non-blocking, fire and forget)
+  welcomeSequence().catch(() => {});
 
-  const renderer = new MessageRenderer();
+  // Launch Ink UI
+  const { waitUntilExit } = startUI();
+  await waitUntilExit;
+}
 
-  renderer.addMessage({ type: 'system', content: modeBanner(currentMode), timestamp: new Date() });
-
-  const provider = getDefaultProvider();
-  const agent = getCurrentAgent();
-  const infoLine = `Tone: ${getCurrentTone().label} | ${agent.icon} ${agent.name} | Rules: ${ruleCount} active | Tools: ${getToolDefs().length} available`;
-  renderer.addMessage({ type: 'system', content: infoLine, timestamp: new Date() });
-
-  if (provider) {
-    renderer.addMessage({ type: 'system', content: `${provider.name} | Model: ${provider.model || 'default'}`, timestamp: new Date() });
+function preFlightCheck(): void {
+  const integrityOk = true; // placeholder — could check sentinel integrity
+  if (!integrityOk) {
+    console.log(pc.yellow('  Warning: Integrity check skipped.'));
   }
-
-  renderer.renderAll();
-
-  function fullRefresh(): void {
-    renderer.renderAll();
-    chatInput.setMessageLineCount(renderer.renderedLineCount);
-    chatInput.render();
-  }
-
-  const chatInput = new ChatInput({
-    placeholder: 'Ask Sentinel Oracle anything... (Ctrl+Enter to send)',
-    onSubmit: async (text) => {
-      if (text === 'exit' || text === 'quit') {
-        chatInput.stop();
-        renderer.addMessage({ type: 'system', content: 'Oracle session ended.', timestamp: new Date() });
-        fullRefresh();
-        closeDb();
-        process.exit(0);
-        return;
-      }
-
-      renderer.addMessage({ type: 'user', content: text, timestamp: new Date() });
-      fullRefresh();
-
-      if (text.startsWith('/')) {
-        const { result, captured } = captureOutput(() => handleSlash(text));
-        await result;
-        const output = captured();
-        if (output) {
-          renderer.addMessage({ type: 'system', content: output, timestamp: new Date() });
-        } else {
-          renderer.addMessage({ type: 'system', content: pc.gray('Command executed.'), timestamp: new Date() });
-        }
-        fullRefresh();
-        return;
-      }
-
-      const p = provider || getDefaultProvider();
-      if (!p) {
-        renderer.addMessage({ type: 'error', content: 'No provider configured. Use /help for setup.', timestamp: new Date() });
-        fullRefresh();
-        return;
-      }
-
-      try {
-        spinner.start('Thinking...', 'thinking');
-
-        const stream = oracleChatStream(
-          text,
-          conversationHistory.filter(m => m.role !== 'system'),
-          p,
-          permissionPrompt,
-          currentMode
-        );
-
-        let started = false;
-        let assistantContent = '';
-        for await (const chunk of stream) {
-          if (!started) {
-            spinner.stop();
-            started = true;
-            assistantContent = chunk;
-            renderer.addMessage({ type: 'assistant', content: chunk, timestamp: new Date() });
-            fullRefresh();
-          } else {
-            assistantContent += chunk;
-            renderer.updateLastAssistantContent(assistantContent);
-            fullRefresh();
-          }
-        }
-        spinner.stop();
-
-        if (!started) {
-          const { response, history } = await oracleChat(
-            text,
-            conversationHistory.filter(m => m.role !== 'system'),
-            p,
-            permissionPrompt,
-            currentMode
-          );
-          conversationHistory = history;
-          if (response) {
-            renderer.addMessage({ type: 'assistant', content: response, timestamp: new Date() });
-            fullRefresh();
-          }
-        } else if (streamingResult.history.length > 0) {
-          conversationHistory = streamingResult.history;
-        }
-      } catch (e: any) {
-        spinner.stop();
-        renderer.addMessage({ type: 'error', content: e.message, timestamp: new Date() });
-        fullRefresh();
-      }
-    },
-    onCancel: () => {
-      chatInput.stop();
-      closeDb();
-      process.exit(0);
-    },
-  });
-
-  chatInput.start();
 }
 
 // ─── One-Shot Ask ──────────────────────────────────────────────
