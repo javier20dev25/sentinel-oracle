@@ -406,7 +406,7 @@ export const tools: Tool[] = [
       type: 'object',
       properties: {
         package: { type: 'string', description: 'npm package name to remove' },
-        global: { type: 'string', enum: ['--global', ''], description: '--global if globally installed' },
+        global: { type: 'string', enum: ['--global'], description: '--global if globally installed' },
       },
       required: ['package'],
     },
