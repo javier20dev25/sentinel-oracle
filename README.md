@@ -1,114 +1,75 @@
 # Sentinel Oracle -- AI-Native Security Assistant
 
-## Abstract
+Multi-provider AI assistant with local model support. No central API keys — each user brings their own or runs fully offline.
 
-Orchestration layer for multi-provider AI-assisted code security analysis.
-Extends the deterministic Sentinel scanner engine with contextual reasoning
-via large language model integration, MCP (Model Context Protocol) server
-capabilities, and interactive audit workflows.
+## Why Use It?
 
-## Table of Contents
+- **Bring your own key** — Gemini, Claude, OpenAI, Ollama, Anthropic
+- **Or go fully local** — Qwen 2.5 via `node-llama-cpp`, no API key needed, no rate limits, 100% offline
+- **Transparent provider system** — every provider is a standalone file. Add your own in minutes.
+- **Interactive TUI** powered by Ink 7 + React 19 — no Electron bloat
+- **MCP server** for AI IDE integration (Claude Desktop, Cursor, Cline)
 
-1. [Architecture](#architecture)
-2. [Providers](#providers)
-3. [MCP Server](#mcp-server)
-4. [Agent System](#agent-system)
-5. [Slash Commands](#slash-commands)
-6. [CLI Reference](#cli-reference)
-7. [License](#license)
+## Getting Started
 
-## Architecture
+```bash
+npx github:javier20dev25/sentinel-oracle
+```
 
-Sentinel Oracle operates as a proxy layer between the user and the deterministic
-Sentinel engine (CLI 1). All AI requests pass through a validation pipeline that
-enforces prompt boundaries, injects system context, and audits responses for
-integrity compliance.
+Or clone and run locally:
 
-### Request Pipeline
+```bash
+git clone https://github.com/javier20dev25/sentinel-oracle.git
+cd sentinel-oracle
+npm install
+npm run build
+npm link --force
+sentinel
+```
 
-1. **Input Routing** -- parses slash commands and natural language
-2. **Context Assembly** -- builds system prompt with file context, scan results, and agent persona
-3. **Provider Dispatch** -- routes to configured LLM provider (OpenAI, Anthropic, Google, Ollama)
-4. **Response Validation** -- integrity chain check, content safety filter
-5. **Audit Logging** -- persists request/response pair to local SQLite store
+Select a provider in the Welcome screen and you're in.
 
 ## Providers
 
-| Provider | Protocol | Models | Auth Method |
-|----------|----------|--------|-------------|
-| OpenAI | HTTP/REST | GPT-4o, GPT-4o-mini | API key |
-| Anthropic | HTTP/REST | Claude 3.5 Sonnet, Claude 3 Opus | API key |
-| Google Gemini | gRPC/REST | Gemini 1.5 Pro, Gemini 1.5 Flash | API key |
-| Ollama | HTTP/REST | Any local model | None (local) |
+### Cloud Providers (API key required)
 
-Provider failover: if primary provider returns non-2xx, Oracle falls back
-to the next configured provider in priority order.
+| Provider | Models | How it works |
+|----------|--------|-------------|
+| Gemini | Gemini 2.0 Flash, Gemini 1.5 Pro | API key from Google AI Studio |
+| Claude | Claude 3.5 Sonnet, Claude 3 Opus | API key from Anthropic |
+| OpenAI | GPT-4o, GPT-4o-mini | API key from OpenAI |
+| Ollama | Any local model via Ollama | No key, local server required |
 
-## MCP Server
+### Local (no API key, no rate limits)
 
-Implements the Model Context Protocol specification for integration with
-MCP-compatible AI IDEs (Claude Desktop, Cursor, Cline).
+| Provider | Model | Size | How it works |
+|----------|-------|------|-------------|
+| **Qwen** | Qwen 2.5 1.5B Instruct (GGUF) | ~900 MB | Downloads on first select, cached at `~/.sentinel/models/`. 100% offline after that. |
 
-### Tools Exposed
-
-| Tool | Input | Output |
-|------|-------|--------|
-| `scan_path` | path: string, scanners: string[] | ScanOutput JSON |
-| `verify_dependency` | name: string, registry?: string | VerificationResult |
-| `query_threat_intel` | query: string | ThreatIntel[] |
-| `pr_scan` | diff: string | ScanOutput |
-
-## Agent System
-
-Four agent personas, each with distinct system prompt and temperature:
-
-| Agent | Temperature | Role |
-|-------|-------------|------|
-| Blue | 0.1 | Defensive analysis, vulnerability assessment |
-| Red | 0.7 | Offensive security, penetration testing support |
-| Auditor | 0.3 | Compliance verification, code review |
-| Default | 0.3 | General assistance, code explanation |
+> **Built by the community for the community.** The Qwen provider was contributed by [@sleyt](https://github.com/sleyt) — anyone can add a new provider by dropping a file into `src/oracle/providers/` and registering it in `index.ts`. No approval needed, no central coordination.
 
 ## Slash Commands
 
-| Command | Args | Description |
-|---------|------|-------------|
-| `/ask` | free text | Query any configured AI model |
-| `/auth` | --provider, --set-key | Configure authentication for a provider |
-| `/scan` | path, --json | Run scan and discuss results |
-| `/audit` | path | Full audit with integrity chain verification |
+Available inside the chat TUI:
 
-## CLI Reference
+| Command | What it does |
+|---------|-------------|
+| `/logout` | Remove API key, return to Welcome screen |
+| `/key` | Change API key and provider interactively |
+| `/key <provider> <key>` | Set key and provider in one command |
+| `/provider <name>` | Switch provider instantly |
+| `/help` | Show help |
 
-```
-npx @sentinel/oracle [command] [options]
-```
+## Architecture
 
-### Commands
+All AI requests route through a pipeline: User → Chat UI → Bridge → Engine → Provider → Tools → Response.
 
-| Command | Arguments | Description |
-|---------|-----------|-------------|
-| `ask [prompt]` | `--provider`, `--model` | Send prompt to AI provider |
-| `scan [path]` | `--json`, `--provide-context` | Scan and analyze with AI |
-| `mcp` | `--port` | Start MCP server |
-| `interactive` | | Launch REPL session |
+Providers are standalone modules implementing a `BaseProvider` interface — the same interface regardless of whether it's Gemini Cloud or Qwen running on your laptop. See `docs/` for full documentation:
 
-## Data Formats
-
-### Audit Log Schema
-
-```typescript
-interface AuditEntry {
-  id: string; // UUIDv4
-  timestamp: string; // ISO 8601
-  provider: string;
-  model: string;
-  prompt: string;
-  response: string;
-  integrityHash: string; // SHA-256 of (prompt + response + timestamp)
-  verdict: 'PASS' | 'FLAGGED' | 'BLOCKED';
-}
-```
+- `docs/ARCHITECTURE.md` — component overview, data flow
+- `docs/ORCHESTRATION.md` — request pipeline, state machine, streaming
+- `docs/SKILLS.md` — available tools and parameters
+- `docs/METHODS.md` — interfaces and types
 
 ## License
 
