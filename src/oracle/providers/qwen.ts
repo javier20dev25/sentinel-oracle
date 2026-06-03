@@ -64,8 +64,8 @@ export class QwenProvider extends BaseProvider {
 
     this._initPromise = (async () => {
       const { getLlama, LlamaModel, LlamaChatSession, QwenChatWrapper } = await import('node-llama-cpp');
-      const llama = await getLlama();
-      const model = await (LlamaModel as any)._create({ modelPath: this.modelPath }, { _llama: llama });
+      const llama = await getLlama({ gpu: false });
+      const model = await (LlamaModel as any)._create({ modelPath: this.modelPath, gpuLayers: 0 }, { _llama: llama });
       const context = await model.createContext();
       const sequence = context.getSequence();
       this._session = new LlamaChatSession({
