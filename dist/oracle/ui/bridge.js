@@ -15,8 +15,9 @@ var __asyncValues = (this && this.__asyncValues) || function (o) {
     function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
 };
 import { oracleChatStream, getDefaultProvider, streamingResult } from '../engine.js';
-import { setApiKey as storeApiKey, setConfig as storeConfig } from '../auth.js';
+import { getApiKey, setApiKey as storeApiKey, setConfig as storeConfig, removeApiKey } from '../auth.js';
 import { createProvider } from '../providers/index.js';
+const PROVIDER_NAMES = ['gemini', 'claude', 'openai', 'ollama'];
 export class ChatBridge {
     constructor(callbacks) {
         this.providerName = '';
@@ -24,6 +25,7 @@ export class ChatBridge {
         this.mode = 'execute';
         this.pendingPermission = null;
         this.activeToolNames = new Set();
+        this.pendingCmd = null;
         this.callbacks = callbacks || {
             onMessage: () => { },
             onStreamingStart: () => { },
@@ -53,6 +55,54 @@ export class ChatBridge {
             }
         });
     }
+    matchProvider(input) {
+        const n = parseInt(input, 10);
+        if (!isNaN(n) && n >= 1 && n <= PROVIDER_NAMES.length)
+            return PROVIDER_NAMES[n - 1];
+        const match = PROVIDER_NAMES.find(p => p.startsWith(input.toLowerCase()));
+        return match || null;
+    }
+    handlePendingCmd(text) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const cmd = this.pendingCmd;
+            if (cmd.step === 'waiting_provider') {
+                const provider = this.matchProvider(text.trim());
+                if (!provider) {
+                    this.callbacks.onError(`Invalid provider. Choose: ${PROVIDER_NAMES.join(', ')}`);
+                    this.pendingCmd = null;
+                    return;
+                }
+                this.pendingCmd = { step: 'waiting_key', provider };
+                this.callbacks.onMessage({
+                    id: `cmd-${Date.now()}`, type: 'system',
+                    content: `Paste your ${provider} API key:`,
+                    timestamp: new Date(),
+                });
+                return;
+            }
+            if (cmd.step === 'waiting_key' && cmd.provider) {
+                const key = text.trim();
+                if (!key) {
+                    this.callbacks.onError('API key cannot be empty');
+                    this.pendingCmd = null;
+                    return;
+                }
+                storeApiKey(cmd.provider, key);
+                storeConfig(cmd.provider);
+                const p = createProvider(cmd.provider, key);
+                if (p) {
+                    this.provider = p;
+                    this.providerName = cmd.provider;
+                }
+                this.pendingCmd = null;
+                this.callbacks.onMessage({
+                    id: `cmd-${Date.now()}`, type: 'system',
+                    content: `✓ ${cmd.provider} configured successfully`,
+                    timestamp: new Date(),
+                });
+            }
+        });
+    }
     getOrCreateProvider() {
         if (this.provider)
             return this.provider;
@@ -67,6 +117,80 @@ export class ChatBridge {
     sendMessage(text) {
         return __awaiter(this, void 0, void 0, function* () {
             var _a, e_1, _b, _c;
+            var _d, _e;
+            // Handle pending interactive commands (key setup)
+            if (this.pendingCmd) {
+                yield this.handlePendingCmd(text);
+                return;
+            }
+            if (text.startsWith('/')) {
+                const parts = text.slice(1).split(/\s+/);
+                const cmd = parts[0].toLowerCase();
+                if (cmd === 'logout') {
+                    if (this.providerName) {
+                        removeApiKey(this.providerName);
+                        storeConfig('');
+                    }
+                    (_e = (_d = this.callbacks).onRestart) === null || _e === void 0 ? void 0 : _e.call(_d);
+                    return;
+                }
+                if (cmd === 'key') {
+                    const provider = parts[1];
+                    const key = parts.slice(2).join(' ');
+                    if (provider && key) {
+                        storeApiKey(provider, key);
+                        storeConfig(provider);
+                        const p = createProvider(provider, key);
+                        if (p) {
+                            this.provider = p;
+                            this.providerName = provider;
+                        }
+                        this.callbacks.onMessage({
+                            id: `cmd-${Date.now()}`, type: 'system',
+                            content: `✓ ${provider} configured successfully`,
+                            timestamp: new Date(),
+                        });
+                    }
+                    else if (provider) {
+                        this.pendingCmd = { step: 'waiting_key', provider };
+                        this.callbacks.onMessage({
+                            id: `cmd-${Date.now()}`, type: 'system',
+                            content: `Paste your ${provider} API key:`,
+                            timestamp: new Date(),
+                        });
+                    }
+                    else {
+                        this.pendingCmd = { step: 'waiting_provider' };
+                        this.callbacks.onMessage({
+                            id: `cmd-${Date.now()}`, type: 'system',
+                            content: `Select a provider:\n  ${PROVIDER_NAMES.map((p, i) => `${i + 1}) ${p}`).join('\n  ')}\n\nType the name or number:`,
+                            timestamp: new Date(),
+                        });
+                    }
+                    return;
+                }
+                if (cmd === 'provider') {
+                    const name = parts[1];
+                    if (!name) {
+                        this.callbacks.onError('Usage: /provider <name> (gemini, claude, openai, ollama)');
+                        return;
+                    }
+                    storeConfig(name);
+                    const key = getApiKey(name);
+                    const p = createProvider(name, key);
+                    if (p) {
+                        this.provider = p;
+                        this.providerName = name;
+                    }
+                    this.callbacks.onMessage({
+                        id: `cmd-${Date.now()}`,
+                        type: 'system',
+                        content: `✓ Switched to provider: ${name}`,
+                        timestamp: new Date(),
+                    });
+                    return;
+                }
+            }
             this.conversationHistory.push({ role: 'user', content: text });
             const userMsgId = `msg-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
             this.callbacks.onMessage({
@@ -105,9 +229,9 @@ export class ChatBridge {
             try {
                 const stream = oracleChatStream(text, this.conversationHistory.filter(m => m.role !== 'system'), p, permissionCb, mode);
                 try {
-                    for (var _d = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _d = true) {
+                    for (var _f = true, stream_1 = __asyncValues(stream), stream_1_1; stream_1_1 = yield stream_1.next(), _a = stream_1_1.done, !_a; _f = true) {
                         _c = stream_1_1.value;
-                        _d = false;
+                        _f = false;
                         const chunk = _c;
                         if (firstChunk) {
                             this.callbacks.onStreamingStart(asstMsgId);
@@ -119,7 +243,7 @@ export class ChatBridge {
                 catch (e_1_1) { e_1 = { error: e_1_1 }; }
                 finally {
                     try {
-                        if (!_d && !_a && (_b = stream_1.return)) yield _b.call(stream_1);
+                        if (!_f && !_a && (_b = stream_1.return)) yield _b.call(stream_1);
                     }
                     finally { if (e_1) throw e_1.error; }
                 }

@@ -1,4 +1,4 @@
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { BORDERS, COLORS } from './styles.js';
 function wordWrap(text, width) {
     const lines = [];

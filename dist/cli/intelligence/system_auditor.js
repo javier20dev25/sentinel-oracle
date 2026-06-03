@@ -16,7 +16,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 import * as fs from 'fs';
 import * as path from 'path';
 import { LiteScanner } from '../../core/lite/lite_scanner.js';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 export class SystemAuditor {
     constructor() {
         this.scanner = new LiteScanner();

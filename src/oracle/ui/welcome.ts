@@ -1,4 +1,4 @@
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { getConfig } from '../auth.js';
 import { checkGitHubLogin } from './github.js';
 import { providerWizard } from './wizard.js';

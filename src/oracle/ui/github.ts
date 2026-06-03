@@ -1,6 +1,6 @@
 import * as readline from 'readline';
 import { execFileSync } from 'child_process';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 function hasGh(): boolean {
   try {

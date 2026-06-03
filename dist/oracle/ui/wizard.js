@@ -8,7 +8,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
     });
 };
 import * as readline from 'readline';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { setApiKey, setConfig } from '../auth.js';
 const PROVIDERS = [
     { id: 'gemini', name: 'Gemini', desc: 'google, fast, free tier available' },

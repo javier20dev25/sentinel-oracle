@@ -7,7 +7,7 @@ import { LiteScanner, LiteFinding } from '../core/lite/lite_scanner.js';
 import { execFileSync } from 'child_process';
 import { IntegrityManager } from './intelligence/integrity_manager.js';
 import { SystemAuditor } from './intelligence/system_auditor.js';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 import { oracleInteractive, oracleAsk } from '../oracle/command.js';
 import { setApiKey, removeApiKey, listProviders, setConfig } from '../oracle/auth.js';
 

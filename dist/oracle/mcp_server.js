@@ -32,7 +32,7 @@ const toolDefs = [
             type: 'object',
             properties: {
                 path: { type: 'string', description: 'Project path to scan (default: current dir)' },
-                deep: { type: 'string', enum: ['--deep', ''], description: 'Pass --deep for full dependency tree scan' },
+                deep: { type: 'string', enum: ['--deep'], description: 'Pass --deep for full dependency tree scan' },
             },
             required: [],
         },

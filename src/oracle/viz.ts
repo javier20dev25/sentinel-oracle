@@ -3,7 +3,7 @@
  * No emojis — pure ASCII/Unicode + terminal colors.
  */
 
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 // ─── Severity colors ──────────────────────────────────────────
 

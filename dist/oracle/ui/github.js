@@ -9,7 +9,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 import * as readline from 'readline';
 import { execFileSync } from 'child_process';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 function hasGh() {
     try {
         execFileSync('gh', ['--version'], { encoding: 'utf-8', stdio: 'pipe' });

@@ -14,7 +14,7 @@ import { execFile } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 export const PROVIDER_OAUTH_CONFIGS = {
     gemini: {
         clientId: 'SENTINEL_GEMINI_CLIENT_ID',
@@ -238,6 +238,10 @@ export function oauthLogin(provider, config) {
         const cfg = config || PROVIDER_OAUTH_CONFIGS[provider];
         if (!cfg) {
             console.error(`  ${pc.red(`No OAuth configuration for provider "${provider}"`)}`);
+            return null;
+        }
+        // Skip OAuth when using placeholder client IDs (no real OAuth app registered)
+        if (cfg.clientId.startsWith('SENTINEL_') && !process.env[cfg.clientId]) {
             return null;
         }
         const pkce = generatePKCE();

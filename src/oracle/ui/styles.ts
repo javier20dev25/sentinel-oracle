@@ -1,4 +1,4 @@
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 export const BORDERS = {
   header: { tl: '╔', tr: '╗', bl: '╚', br: '╝', h: '═', v: '║' },

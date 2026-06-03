@@ -8,7 +8,7 @@ import { ANTI_INJECTION_RULES, wrapToolOutput, validateResponse, detectPromptInj
 import { toolCard } from './viz.js';
 import { getCurrentTone, getToneSystemPrompt } from './tono.js';
 import { getCurrentAgent, getAgentSystemPrompt } from './agents/index.js';
-import * as pc from 'picocolors';
+import pc from 'picocolors';
 
 export function buildSystemPrompt(): string {
   const rules = getActiveRulesText();
