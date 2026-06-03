@@ -148,6 +148,7 @@ export class QwenProvider extends BaseProvider {
       maxTokens: 512,
       topP: 0.9,
       repeatPenalty: 1.1,
+      customStopTriggers: ['<|im_end|>'],
     });
 
     const toolCalls = this.parseToolCalls(response);
