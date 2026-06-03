@@ -14,10 +14,7 @@ function getModelPath(): string {
 
 export class QwenProvider extends BaseProvider {
   private modelPath: string;
-  private _llama: any = null;
-  private _model: any = null;
-  private _context: any = null;
-  private _sequence: any = null;
+  private _session: any = null;
   private _initialized = false;
   private _initPromise: Promise<void> | null = null;
 
@@ -66,88 +63,35 @@ export class QwenProvider extends BaseProvider {
     if (this._initPromise) return this._initPromise;
 
     this._initPromise = (async () => {
-      const { getLlama } = await import('node-llama-cpp');
-      this._llama = await getLlama();
-      this._model = new this._llama.LlamaModel({ modelPath: this.modelPath });
-      this._context = await this._model.createContext();
-      this._sequence = this._context.getSequence();
+      const { getLlama, LlamaModel, LlamaChatSession, QwenChatWrapper } = await import('node-llama-cpp');
+      const llama = await getLlama();
+      const model = await (LlamaModel as any)._create({ modelPath: this.modelPath }, { _llama: llama });
+      const context = await model.createContext();
+      const sequence = context.getSequence();
+      this._session = new LlamaChatSession({
+        contextSequence: sequence,
+        chatWrapper: new QwenChatWrapper(),
+      });
       this._initialized = true;
     })();
 
     await this._initPromise;
   }
 
-  private async *runInference(
-    messages: Message[],
-    tools?: ToolDef[]
-  ): AsyncIterable<{ content?: string; toolCalls?: ToolCall[]; done: boolean }> {
-    await this.ensureInitialized();
-
-    const systemMsg = messages.find(m => m.role === 'system');
-    const chatMessages = messages.filter(m => m.role !== 'system').map(m => {
-      if (m.role === 'tool') {
-        return { role: 'tool' as const, content: m.content, name: m.tool_call_id || 'function' };
-      }
-      if (m.role === 'assistant') {
-        return { role: 'assistant' as const, content: m.content };
-      }
-      return { role: 'user' as const, content: m.content };
-    });
-
-    const prompt = this.buildPrompt(
-      systemMsg?.content || 'You are Sentinel Oracle, a security AI assistant.',
-      chatMessages,
-      tools
-    );
-
-    // Tokenize to estimate
-    const tokens = this._model.tokenize(prompt);
-    const maxTokens = Math.min(4096 - tokens.length, 2048);
-
-    let fullText = '';
-    for await (const chunk of this._sequence.complete(prompt, {
-      temperature: 0.6,
-      maxTokens,
-      topP: 0.9,
-      repeatPenalty: 1.1,
-      stream: true,
-    })) {
-      const text = typeof chunk === 'string' ? chunk : (chunk as any).text || '';
-      if (text) {
-        fullText += text;
-        yield { content: text, done: false };
-      }
-    }
-
-    // Try to parse tool calls from the response
-    const toolCalls = this.parseToolCalls(fullText);
-    if (toolCalls.length > 0) {
-      yield { toolCalls, done: true };
-      return;
-    }
-
-    yield { done: true };
-  }
-
-  private buildPrompt(system: string, messages: { role: string; content: string; name?: string }[], tools?: ToolDef[]): string {
-    let prompt = `<|im_start|>system\n${system}`;
-    if (tools && tools.length > 0) {
-      prompt += `\n\nYou have access to the following tools. When you want to use a tool, respond with a JSON block:\n\`\`\`json\n{"tool": "<tool_name>", "args": {...}}\n\`\`\`\n\nTools:\n${JSON.stringify(tools.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })), null, 2)}`;
-    }
-    prompt += `<|im_end|>\n`;
-
+  private toSessionHistory(messages: Message[]): any[] {
+    const history: any[] = [];
     for (const msg of messages) {
-      if (msg.role === 'tool') {
-        prompt += `<|im_start|>tool\n${msg.content}<|im_end|>\n`;
+      if (msg.role === 'system') {
+        history.push({ type: 'system', text: msg.content });
+      } else if (msg.role === 'user') {
+        history.push({ type: 'user', text: msg.content });
       } else if (msg.role === 'assistant') {
-        prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
-      } else {
-        prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
+        history.push({ type: 'model', response: [msg.content] });
+      } else if (msg.role === 'tool') {
+        history.push({ type: 'user', text: `[Tool result]: ${msg.content}` });
       }
     }
-
-    prompt += `<|im_start|>assistant\n`;
-    return prompt;
+    return history;
   }
 
   private parseToolCalls(text: string): ToolCall[] {
@@ -170,25 +114,38 @@ export class QwenProvider extends BaseProvider {
   }
 
   async chat(messages: Message[], tools?: ToolDef[]): Promise<ChatResponse> {
-    let fullContent = '';
-    let toolCalls: ToolCall[] | undefined;
+    await this.ensureInitialized();
 
-    for await (const chunk of this.runInference(messages, tools)) {
-      if (chunk.content) fullContent += chunk.content;
-      if (chunk.toolCalls) toolCalls = chunk.toolCalls;
-    }
+    const lastUserIdx = messages.map(m => m.role).lastIndexOf('user');
+    const historyMsgs = lastUserIdx >= 0 ? messages.slice(0, lastUserIdx) : messages;
+    this._session.setChatHistory(this.toSessionHistory(historyMsgs));
 
-    return { content: fullContent, toolCalls };
+    const promptText = lastUserIdx >= 0 ? messages[lastUserIdx].content : messages[messages.length - 1]?.content || '';
+
+    const response = await this._session.prompt(promptText, {
+      temperature: 0.6,
+      maxTokens: 2048,
+      topP: 0.9,
+      repeatPenalty: 1.1,
+    });
+
+    const toolCalls = this.parseToolCalls(response);
+    return {
+      content: response,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    };
   }
 
   async *stream(messages: Message[], tools?: ToolDef[]): AsyncIterable<ChatChunk> {
-    for await (const chunk of this.runInference(messages, tools)) {
-      yield {
-        content: chunk.content || '',
-        toolCalls: chunk.toolCalls,
-        done: chunk.done,
-      };
+    const result = await this.chat(messages, tools);
+    if (result.content) {
+      yield { content: result.content, done: false };
     }
+    if (result.toolCalls) {
+      yield { toolCalls: result.toolCalls, done: true };
+      return;
+    }
+    yield { done: true };
   }
 
   validateConfig(): boolean {
