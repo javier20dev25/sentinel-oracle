@@ -1,17 +1,30 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { spawn } from 'child_process';
 import { BaseProvider, Message, ChatResponse, ChatChunk, ToolDef, ToolCall } from './base.js';
 
-const QWEN_MODEL_URL = 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf';
-const MODEL_FILENAME = 'qwen2.5-1.5b-instruct-q4_k_m.gguf';
+const MODEL_VARIANTS: Record<string, { url: string; filename: string }> = {
+  'base': {
+    url: 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf',
+    filename: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+  },
+  'fast': {
+    url: 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf',
+    filename: 'qwen2.5-0.5b-instruct-q4_k_m.gguf',
+  },
+};
 const MODELS_DIR = path.join(os.homedir(), '.sentinel', 'models');
+const BIN_DIR = path.join(os.homedir(), '.sentinel', 'bin');
+const LLAMA_CLI = path.join(BIN_DIR, 'llama-cli.exe');
 
 const DEFAULT_SYSTEM = `You are Sentinel Oracle Core — an AI security assistant. Answer concisely and use tools when needed.`;
 
-function getModelPath(): string {
+function getModelPath(variant: string = 'base'): string {
   if (!fs.existsSync(MODELS_DIR)) fs.mkdirSync(MODELS_DIR, { recursive: true });
-  return path.join(MODELS_DIR, MODEL_FILENAME);
+  const info = MODEL_VARIANTS[variant];
+  if (!info) throw new Error(`Unknown model variant: ${variant}. Choose 'base' (1.5B) or 'fast' (0.5B).`);
+  return path.join(MODELS_DIR, info.filename);
 }
 
 function formatToolDefs(tools?: ToolDef[]): string {
@@ -23,22 +36,77 @@ function formatToolDefs(tools?: ToolDef[]): string {
   return `\n\n## Available Tools\n${lines.join('\n')}\n\nTo call a tool respond with ONLY:\n\`\`\`json\n{"tool": "<name>", "args": {...}}\n\`\`\`\nNo explanations before or after.`;
 }
 
+function buildPrompt(messages: Message[], tools?: ToolDef[]): string {
+  const sysMsg = messages.find(m => m.role === 'system');
+  const base = sysMsg?.content || DEFAULT_SYSTEM;
+  let prompt = `<|im_start|>system\n${base}${formatToolDefs(tools)}<|im_end|>\n`;
+
+  for (const msg of messages) {
+    if (msg.role === 'system') continue;
+    if (msg.role === 'user') {
+      prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
+    } else if (msg.role === 'assistant') {
+      prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
+    } else if (msg.role === 'tool') {
+      prompt += `<|im_start|>user\n[Tool result]\n${msg.content}<|im_end|>\n`;
+    }
+  }
+
+  prompt += `<|im_start|>assistant\n`;
+  return prompt;
+}
+
+function parseToolCalls(text: string): ToolCall[] {
+  const calls: ToolCall[] = [];
+  const jsonBlockRegex = /```json\s*({[\s\S]*?})\s*```/g;
+  let match;
+  while ((match = jsonBlockRegex.exec(text)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (parsed.tool && parsed.args) {
+        calls.push({
+          id: `${parsed.tool}-${Date.now()}`,
+          name: parsed.tool,
+          arguments: parsed.args,
+        });
+      }
+    } catch { /* skip invalid json */ }
+  }
+  return calls;
+}
+
+function runLlama(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(LLAMA_CLI, args, { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
+    proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code === 0 || code === null) {
+        resolve(stdout);
+      } else {
+        reject(new Error(`llama-cli exited with code ${code}: ${stderr}`));
+      }
+    });
+  });
+}
+
 export class QwenProvider extends BaseProvider {
   private modelPath: string;
-  private _model: any = null;
-  private _llama: any = null;
-  private _initialized = false;
-  private _initPromise: Promise<void> | null = null;
-  private _cachedSystemBase: string = '';
-  private _context: any = null;
+  private variant: string;
 
-  constructor(model?: string) {
-    super('qwen', model || 'qwen2.5-1.5b', 'local');
-    this.modelPath = getModelPath();
+  constructor(model?: string, variant?: string) {
+    super('qwen', model || 'qwen2.5-0.5b', 'local');
+    this.variant = model === 'base' ? 'base' : (variant || 'fast');
+    this.modelPath = getModelPath(this.variant);
   }
 
   isDownloaded(): boolean {
-    return fs.existsSync(this.modelPath);
+    return fs.existsSync(this.modelPath) && fs.existsSync(LLAMA_CLI);
   }
 
   getModelSize(): number {
@@ -47,9 +115,13 @@ export class QwenProvider extends BaseProvider {
   }
 
   async download(progressCb?: (downloaded: number, total: number) => void): Promise<void> {
-    if (this.isDownloaded()) return;
+    if (!fs.existsSync(LLAMA_CLI)) {
+      throw new Error(`llama-cli not found at ${LLAMA_CLI}. Run bootstrap or reinstall.`);
+    }
+    if (fs.existsSync(this.modelPath)) return;
 
-    const response = await fetch(QWEN_MODEL_URL);
+    const modelInfo = MODEL_VARIANTS[this.variant];
+    const response = await fetch(modelInfo.url);
     if (!response.ok) throw new Error(`Failed to download model: ${response.status} ${response.statusText}`);
     const total = parseInt(response.headers.get('content-length') || '0', 10);
     const reader = response.body!.getReader();
@@ -71,103 +143,84 @@ export class QwenProvider extends BaseProvider {
     });
   }
 
-  private async ensureInitialized(): Promise<void> {
-    if (this._initialized) return;
-    if (this._initPromise) return this._initPromise;
-
-    this._initPromise = (async () => {
-      const { getLlama, LlamaModel } = await import('node-llama-cpp');
-      this._llama = await getLlama({ gpu: false });
-      this._model = await (LlamaModel as any)._create({ modelPath: this.modelPath, gpuLayers: 0 }, { _llama: this._llama });
-      this._context = await this._model.createContext();
-      this._initialized = true;
-    })();
-
-    await this._initPromise;
-  }
-
-  private async resetContext(): Promise<any> {
-    if (this._context) {
-      await this._context.dispose();
-    }
-    this._context = await this._model.createContext();
-    const { LlamaCompletion } = await import('node-llama-cpp');
-    const sequence = this._context.getSequence();
-    return new LlamaCompletion({ contextSequence: sequence });
-  }
-
-  private buildPrompt(messages: Message[], tools?: ToolDef[]): string {
-    const sysMsg = messages.find(m => m.role === 'system');
-    const base = sysMsg?.content || this._cachedSystemBase || DEFAULT_SYSTEM;
-    if (sysMsg && !this._cachedSystemBase) {
-      this._cachedSystemBase = sysMsg.content;
-    }
-    let prompt = `<|im_start|>system\n${base}${formatToolDefs(tools)}<|im_end|>\n`;
-
-    for (const msg of messages) {
-      if (msg.role === 'system') continue;
-      if (msg.role === 'user') {
-        prompt += `<|im_start|>user\n${msg.content}<|im_end|>\n`;
-      } else if (msg.role === 'assistant') {
-        prompt += `<|im_start|>assistant\n${msg.content}<|im_end|>\n`;
-      } else if (msg.role === 'tool') {
-        prompt += `<|im_start|>user\n[Tool result]\n${msg.content}<|im_end|>\n`;
-      }
-    }
-
-    prompt += `<|im_start|>assistant\n`;
-    return prompt;
-  }
-
-  private parseToolCalls(text: string): ToolCall[] {
-    const calls: ToolCall[] = [];
-    const jsonBlockRegex = /```json\s*({[\s\S]*?})\s*```/g;
-    let match;
-    while ((match = jsonBlockRegex.exec(text)) !== null) {
-      try {
-        const parsed = JSON.parse(match[1]);
-        if (parsed.tool && parsed.args) {
-          calls.push({
-            id: `${parsed.tool}-${Date.now()}`,
-            name: parsed.tool,
-            arguments: parsed.args,
-          });
-        }
-      } catch { /* skip invalid json */ }
-    }
-    return calls;
-  }
-
   async chat(messages: Message[], tools?: ToolDef[]): Promise<ChatResponse> {
-    await this.ensureInitialized();
+    const prompt = buildPrompt(messages, tools);
+    const tempFile = path.join(os.tmpdir(), `qwen-prompt-${Date.now()}.txt`);
+    fs.writeFileSync(tempFile, prompt, 'utf-8');
 
-    const prompt = this.buildPrompt(messages, tools);
-    const completion = await this.resetContext();
-    const response = await completion.generateCompletion(prompt, {
-      temperature: 0.6,
-      maxTokens: 512,
-      topP: 0.9,
-      repeatPenalty: 1.1,
-      customStopTriggers: ['<|im_end|>'],
-    });
+    try {
+      const stdout = await runLlama([
+        '-m', this.modelPath,
+        '-f', tempFile,
+        '-n', '512',
+        '--temp', '0.6',
+        '--top-p', '0.9',
+        '--repeat-penalty', '1.1',
+        '--no-display-prompt',
+        '--simple-io',
+        '--single-turn',
+        '-t', '8',
+      ]);
 
-    const toolCalls = this.parseToolCalls(response);
-    return {
-      content: response,
-      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-    };
+      const output = stdout.replace(/\[end of text\]/g, '').trim();
+      const toolCalls = parseToolCalls(output);
+      return {
+        content: output,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      };
+    } finally {
+      try { fs.unlinkSync(tempFile); } catch { /* ignore */ }
+    }
   }
 
   async *stream(messages: Message[], tools?: ToolDef[]): AsyncIterable<ChatChunk> {
-    const result = await this.chat(messages, tools);
-    if (result.content) {
-      yield { content: result.content, done: false };
+    const prompt = buildPrompt(messages, tools);
+    const tempFile = path.join(os.tmpdir(), `qwen-prompt-${Date.now()}.txt`);
+    fs.writeFileSync(tempFile, prompt, 'utf-8');
+
+    const proc = spawn(LLAMA_CLI, [
+      '-m', this.modelPath,
+      '-f', tempFile,
+      '-n', '512',
+      '--temp', '0.6',
+      '--top-p', '0.9',
+      '--repeat-penalty', '1.1',
+      '--no-display-prompt',
+      '--simple-io',
+      '--single-turn',
+      '-t', '8',
+    ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+
+    const stderrChunks: Buffer[] = [];
+    let fullContent = '';
+
+    try {
+      for await (const chunk of proc.stdout) {
+        const text = chunk.toString();
+        fullContent += text;
+        yield { content: text, done: false };
+      }
+
+      proc.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+      await new Promise<void>((resolve, reject) => {
+        proc.on('error', reject);
+        proc.on('close', (code) => {
+          if (code === 0 || code === null) resolve();
+          else reject(new Error(`llama-cli exited with code ${code}`));
+        });
+      });
+    } finally {
+      try { fs.unlinkSync(tempFile); } catch { /* ignore */ }
     }
-    if (result.toolCalls) {
-      yield { toolCalls: result.toolCalls, done: true };
-      return;
+
+    const output = fullContent.replace(/\[end of text\]/g, '').trim();
+    const toolCalls = parseToolCalls(output);
+    if (toolCalls.length > 0) {
+      yield { toolCalls, done: true };
+    } else {
+      yield { done: true };
     }
-    yield { done: true };
   }
 
   validateConfig(): boolean {

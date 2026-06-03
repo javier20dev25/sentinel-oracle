@@ -54,7 +54,6 @@
         "commander": "^12.1.0",
         "dotenv": "^17.4.2",
         "ink": "^7.0.5",
-        "node-llama-cpp": "^3.18.1",
         "openai": "^6.39.1",
         "picocolors": "^1.1.1",
         "react": "^19.2.7"

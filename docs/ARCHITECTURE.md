@@ -44,7 +44,7 @@ src/
 │   │   ├── claude.ts             # Anthropic Claude provider
 │   │   ├── openai.ts             # OpenAI provider (also base for Ollama)
 │   │   ├── ollama.ts             # Local Ollama (extends OpenAI provider)
-│   │   └── qwen.ts               # Qwen local GGUF via node-llama-cpp
+│   │   └── qwen.ts               # Qwen local GGUF via llama.cpp CLI
 │   ├── ui/                        # Ink 7 TUI (React 19)
 │   │   ├── renderer.tsx          # Ink render entry point (startUI)
 │   │   ├── app.tsx               # App component: loading → setup → ready phases
