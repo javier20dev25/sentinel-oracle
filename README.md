@@ -5,7 +5,7 @@ Multi-provider AI assistant with local model support. No central API keys — ea
 ## Why Use It?
 
 - **Bring your own key** — Gemini, Claude, OpenAI, Ollama, Anthropic
-- **Or go fully local** — Qwen 2.5 via `node-llama-cpp`, no API key needed, no rate limits, 100% offline
+- **Or go fully local** — Qwen 2.5 via `llama.cpp` (bundled CLI), no API key needed, no rate limits, 100% offline
 - **Transparent provider system** — every provider is a standalone file. Add your own in minutes.
 - **Interactive TUI** powered by Ink 7 + React 19 — no Electron bloat
 - **MCP server** for AI IDE integration (Claude Desktop, Cursor, Cline)

@@ -17,7 +17,7 @@ const PROVIDERS = [
   { id: 'claude', icon: '🧠', name: 'Claude', desc: 'Anthropic AI assistant', needsKey: true },
   { id: 'openai', icon: '⚡', name: 'OpenAI', desc: 'GPT-4 and GPT models', needsKey: true },
   { id: 'ollama', icon: '💻', name: 'Ollama', desc: 'Local open-source models', needsKey: false },
-  { id: 'qwen', icon: '🔌', name: 'Qwen', desc: 'Local 1.5B model (download on first use)', needsKey: false },
+  { id: 'qwen', icon: '🔌', name: 'Qwen', desc: 'Local 0.5B model (fast, download on first use)', needsKey: false },
 ];
 
 type Phase = 'select' | 'input' | 'oauth' | 'downloading' | 'done';
@@ -191,7 +191,7 @@ export function Welcome({ onComplete }: WelcomeProps) {
       {phase === 'downloading' && (
         <Box flexDirection="column" marginBottom={1}>
           <Box marginBottom={1}>
-            <Text color="#a78bfa">✦ Downloading Qwen 2.5 1.5B model...</Text>
+            <Text color="#a78bfa">✦ Downloading Qwen 2.5 0.5B model...</Text>
           </Box>
           <Box>
             <Text dimColor color="#6b7280">
