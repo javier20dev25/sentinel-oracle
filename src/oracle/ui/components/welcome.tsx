@@ -1,8 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { execFileSync } from 'child_process';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { oauthLogin } from '../oauth.js';
 import { setApiKey as storeApiKey, setConfig as storeConfig } from '../../auth.js';
+import { QwenProvider } from '../../providers/qwen.js';
 
 interface WelcomeProps {
   onComplete: (result: { provider: string; apiKey: string } | null) => void;
@@ -13,9 +17,10 @@ const PROVIDERS = [
   { id: 'claude', icon: '🧠', name: 'Claude', desc: 'Anthropic AI assistant', needsKey: true },
   { id: 'openai', icon: '⚡', name: 'OpenAI', desc: 'GPT-4 and GPT models', needsKey: true },
   { id: 'ollama', icon: '💻', name: 'Ollama', desc: 'Local open-source models', needsKey: false },
+  { id: 'qwen', icon: '🔌', name: 'Qwen', desc: 'Local 1.5B model (download on first use)', needsKey: false },
 ];
 
-type Phase = 'select' | 'input' | 'oauth' | 'done';
+type Phase = 'select' | 'input' | 'oauth' | 'downloading' | 'done';
 
 export function Welcome({ onComplete }: WelcomeProps) {
   const [phase, setPhase] = useState<Phase>('select');
@@ -24,6 +29,8 @@ export function Welcome({ onComplete }: WelcomeProps) {
   const [apiKey, setApiKey] = useState('');
   const [oauthStatus, setOauthStatus] = useState('');
   const [oauthError, setOauthError] = useState('');
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [downloadTotal, setDownloadTotal] = useState(0);
 
   const finishSetup = useCallback((provider: string, key: string) => {
     storeApiKey(provider, key);
@@ -57,6 +64,14 @@ export function Welcome({ onComplete }: WelcomeProps) {
       setChosenProvider(prov);
       if (prov.needsKey) {
         tryOAuth(prov);
+      } else if (prov.id === 'qwen') {
+        // Check if model exists
+        const qwen = new QwenProvider();
+        if (qwen.isDownloaded()) {
+          finishSetup(prov.id, 'local');
+        } else {
+          startDownload(qwen);
+        }
       } else {
         finishSetup(prov.id, 'local');
       }
@@ -64,6 +79,19 @@ export function Welcome({ onComplete }: WelcomeProps) {
       onComplete(null);
     }
   }, [selectedIndex, onComplete, tryOAuth, finishSetup]);
+
+  const startDownload = useCallback(async (qwen: QwenProvider) => {
+    setPhase('downloading');
+    try {
+      await qwen.download((downloaded, total) => {
+        setDownloadProgress(downloaded);
+        setDownloadTotal(total);
+      });
+      finishSetup('qwen', 'local');
+    } catch (e: any) {
+      setPhase('select');
+    }
+  }, [finishSetup]);
 
   const pasteFromClipboard = useCallback(() => {
     try {
@@ -157,6 +185,28 @@ export function Welcome({ onComplete }: WelcomeProps) {
           <Box>
             <Text dimColor color="#6b7280">Waiting for browser authentication...</Text>
           </Box>
+        </Box>
+      )}
+
+      {phase === 'downloading' && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Box marginBottom={1}>
+            <Text color="#a78bfa">✦ Downloading Qwen 2.5 1.5B model...</Text>
+          </Box>
+          <Box>
+            <Text dimColor color="#6b7280">
+              {downloadTotal > 0
+                ? `${(downloadProgress / 1024 / 1024).toFixed(1)} MB / ${(downloadTotal / 1024 / 1024).toFixed(1)} MB`
+                : 'Starting download...'}
+            </Text>
+          </Box>
+          {downloadTotal > 0 && (
+            <Box marginTop={1} width={40}>
+              <Box width={Math.round(40 * downloadProgress / downloadTotal)}>
+                <Text color="#00d4aa">{'█'.repeat(Math.max(1, Math.round(40 * downloadProgress / downloadTotal)))}</Text>
+              </Box>
+            </Box>
+          )}
         </Box>
       )}
 
