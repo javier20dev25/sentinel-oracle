@@ -1,48 +1,84 @@
 # Sentinel Oracle
 
 Physically isolated merge authorization server for GitHub pull requests.
-The workstation never holds merge credentials. Merge authority resides on a
-separate device — Raspberry Pi, NUC, or mini PC — on the local network.
+Merge authority resides on a separate device — Raspberry Pi, NUC, or mini
+PC — on the local network. The architecture is designed to resist
+workstation compromise: an attacker who gains full control of the developer
+laptop cannot authorize a merge without physical access to a second device
+and a WebAuthn passkey.
+
+This is not a replacement for GitHub branch protection rules. Oracle
+operates as an additional enforcement layer. Repository administrators with
+direct push or bypass permissions remain a valid threat path independent of
+Oracle's controls.
 
 ## Architecture
 
 Sentinel Oracle implements a three-device trust model:
 
-- **Workstation** (untrusted): displays a QR challenge on the Oracle dashboard.
-  Does not hold GitHub credentials with merge permission.
-- **Oracle server** (trusted authority): polls GitHub for PRs with pending
-  Sentinel status. Accepts no commands from the workstation. Executes merge
-  via GitHub API after cryptographic verification.
+- **Workstation** (untrusted): displays a QR challenge on the Oracle
+  dashboard and initiates authorization requests. Does not hold GitHub
+  credentials with merge scope.
+- **Oracle server** (trusted authority): polls GitHub for open PRs.
+  Accepts authorization initiation requests from the workstation, generates
+  QR challenges, verifies WebAuthn assertions, and executes the merge via
+  the GitHub API. The workstation cannot invoke merge directly — only
+  the phone-confirmed path can produce the merge API call.
 - **Phone** (identity proof): scans the QR, opens the /authorize page, and
-  authenticates via WebAuthn passkey. The phone never interacts with GitHub
-  directly.
+  authenticates via WebAuthn passkey (biometric, PIN, or FIDO2 security
+  key depending on the authenticator). The phone never interacts with
+  GitHub directly.
 
 ## Authorization Flow
 
-1. **PR Polling** — Oracle polls GitHub for pull requests where Sentinel
-   status checks have passed but authorization is still pending.
-2. **QR Challenge** — Oracle generates an HMAC-signed QR code encoding a
-   challenge ID and PR number. TTL is 45 seconds. One-time use.
+1. **PR Polling** — Oracle polls GitHub for open pull requests and tracks
+   their commit statuses in SQLite.
+2. **Initiation** — The workstation calls
+   `POST /api/prs/:number/authorize` for a specific PR. Oracle generates
+   an HMAC-signed QR challenge encoding a challenge ID and PR number. TTL
+   is 45 seconds. One-time use.
 3. **Phone Authentication** — The phone scans the QR, opens
-   /authorize?cid=xxx&pr=142, and issues a WebAuthn biometric assertion
-   bound to the specific PR number.
-4. **Assertion Verification** — Oracle verifies the assertion signature,
-   confirms the challenge ID matches an active challenge, checks the PR
-   number in the assertion matches the PR number in the challenge, and marks
-   the challenge consumed.
-5. **Merge Execution** — Oracle calls POST /repos/:owner/:repo/pulls/:number/merge
-   via Octokit. The workstation never touches the merge button.
+   /authorize?cid=xxx&pr=142, and issues a WebAuthn passkey assertion
+   bound to the specific PR number. The assertion challenge is generated
+   server-side with the PR number embedded.
+4. **Assertion Verification** — Oracle verifies the assertion signature
+   against the stored credential, confirms the challenge ID matches an
+   active challenge, checks the PR number embedded in the assertion
+   matches the PR number in the challenge, and marks the challenge
+   consumed.
+5. **Merge Execution** — Oracle calls
+   `POST /repos/:owner/:repo/pulls/:number/merge` via Octokit with
+   squash merge method. The workstation never executes the merge API
+   call — only the server, after cryptographic verification, does.
 
 ## Threat Model
 
 Merge attacks typically exploit the developer workstation — a compromised
 laptop, a stolen session token, or a malicious IDE plugin can trigger an
 unauthorized merge. Sentinel Oracle eliminates that vector by enforcing
-physical separation: the workstation holds no tokens with merge scope, the
-Oracle server holds the PAT but never accepts instructions from the
-workstation, and the phone provides ephemeral biometric consent for each
-individual PR. Compromise of any single device is insufficient to authorize
-a merge.
+physical separation: the workstation holds no tokens with merge scope,
+the Oracle server executes merge only after WebAuthn + challenge
+verification, and the phone provides ephemeral consent for each
+individual PR.
+
+Workstation compromise alone is insufficient to authorize a merge.
+Oracle compromise remains a risk — the server stores a GitHub PAT with
+merge permissions and an AES encryption key on the same SQLite database.
+Enterprise deployments should mitigate Oracle-level risk with TPM-backed
+key storage and network segmentation.
+
+## GitHub Branch Protection
+
+Oracle does not replace GitHub's branch protection rules. To make the
+authorization flow effective, the target branch must be configured with:
+
+- Require status checks: add `Sentinel Authorization` as a required check
+- Disable force pushes
+- Disable administrator bypass (or ensure administrators also go through
+  Oracle)
+
+Without these settings, users with direct push or bypass permissions can
+merge independently of Oracle's authorization flow.
 
 ## Installation
 
@@ -77,7 +113,7 @@ Create config.json in the project root:
 | githubToken | GitHub PAT with repo scope and merge permissions |
 | repoOwner | GitHub organization or user that owns the target repository |
 | repoName | Repository name |
-| bindAddress | IP address the server binds to (auto-detected from LAN if omitted) |
+| bindAddress | IP address the server binds to (auto-detected from LAN if omitted). Detection returns the first non-loopback IPv4 interface, which may select Docker, VPN, or VirtualBox adapters on machines with multiple active interfaces. Set explicitly if auto-detection selects the wrong address. |
 | rpId | WebAuthn relying party ID (auto-detected from bindAddress if omitted) |
 | serverOrigin | Origin URL for WebAuthn (auto-assembled if omitted) |
 | port | HTTPS port (default 3443) |
@@ -104,23 +140,31 @@ Response:
 }
 ```
 
-### POST /api/confirm - Confirm authorization with WebAuthn assertion
+### POST /api/prs/:number/confirm - Confirm authorization with WebAuthn assertion
 
 Request:
 ```json
 {
   "challengeId": "uuid",
-  "assertion": { ... }
+  "credential": { "id": "...", "response": { ... }, "clientExtensionResults": {} },
+  "challenge": "webauthn-server-challenge",
+  "reason": "optional reason string"
 }
 ```
 
 Response:
 ```json
 {
-  "status": "approved",
+  "authorized": true,
   "prNumber": 142,
-  "mergeSuccess": true
+  "merged": true
 }
+```
+
+### POST /api/prs/:number/reject - Reject authorization
+
+```json
+{ "reason": "Unsafe diff detected" }
 ```
 
 ### POST /api/lockdown - Emergency lock
@@ -158,16 +202,35 @@ verdicts, and device identifiers.
 
 ## Security Considerations
 
-- Encryption key resides on the same disk as the SQLite database in the MVP.
-  Enterprise deployments should use TPM-backed or HSM-backed key storage.
+- Encryption key (`~/.sentinel-oracle/.encryption_key`) resides on the
+  same disk as the SQLite database in the MVP. Enterprise deployments
+  should use TPM-backed or HSM-backed key storage.
 - HMAC signing uses a server-side secret derived from the encryption key.
   Core security relies on nonce + server-side validation + TTL + one-time
   consumption + WebAuthn assertion — HMAC is defense-in-depth.
 - TLS is required. The server binds to the LAN IP by default and logs a
   warning if configured on loopback (127.0.0.1).
-- The /authorize page serves inline JavaScript. CSP is set to
-  script-src 'unsafe-inline' as the page is served over LAN and is
-  admin-only. Do not expose this server to the public internet.
+- CSP includes `script-src 'unsafe-inline'` and `style-src 'unsafe-inline'`
+  because the /authorize page serves inline JavaScript for the WebAuthn
+  flow and inline styles for the mobile UI. This is acceptable for a
+  LAN-bound admin server. A future version should migrate to external
+  scripts with integrity hashes or nonces.
+- `img-src 'self' data:` is required for QR code data URIs served inline.
+- Do not expose this server to the public internet.
+
+## Known Limitations
+
+- Branch protection rules must be configured independently on GitHub.
+  Oracle's authorization flow is bypassed if administrators can push
+  directly or force-push.
+- PAT with merge permissions is stored on the Oracle server. Compromise
+  of the server yields the PAT. Network segmentation and TPM-backed
+  storage reduce this risk.
+- WebAuthn credential storage and encryption key share the same SQLite
+  database. A full disk compromise yields both.
+- LAN IP auto-detection may select a Docker, VPN, or VirtualBox interface
+  if the machine has multiple active network adapters. Set `bindAddress`
+  explicitly in config.json if this occurs.
 
 ## License
 
