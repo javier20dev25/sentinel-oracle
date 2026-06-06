@@ -1,69 +1,65 @@
 {
-    "name": "@sentinel/oracle-core",
-    "version": "4.0.0",
-    "description": "Sentinel Oracle Core - AI-powered security CLI with multi-provider AI, SAST, SecuriGit, MCP, and threat intelligence.",
-    "main": "dist/cli/main.js",
+    "name": "@sentinel/oracle",
+    "version": "1.0.0",
+    "description": "Sentinel Oracle — Secure Merge Authorization Server. Physically separated merge authority that prevents workstation-compromise attacks from reaching the main branch.",
+    "main": "dist/index.js",
     "bin": {
-        "sentinel": "./dist/cli/main.js"
+        "sentinel-oracle": "./dist/index.js"
     },
     "scripts": {
         "build": "tsc",
-        "prepublishOnly": "npm run build",
-        "start": "node dist/cli/main.js",
+        "start": "node dist/index.js",
+        "dev": "ts-node src/index.ts",
         "test": "vitest run",
         "test:watch": "vitest",
-        "test:coverage": "vitest run --coverage",
         "pretest": "npm run build"
     },
     "keywords": [
         "security",
-        "sast",
-        "supply-chain",
-        "scanner",
-        "cli",
-        "audit",
-        "secrets-detection",
-        "devsecops"
+        "merge-authorization",
+        "github",
+        "webauthn",
+        "qr-auth",
+        "supply-chain-security",
+        "devsecops",
+        "air-gapped-authorization"
     ],
     "license": "BUSSL-1.1",
     "author": "Javier Astaroth <javier20dev25@sentinel.security>",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/javier20dev25/sentinel-cli.git"
+        "url": "git+https://github.com/javier20dev25/sentinel-oracle.git"
     },
     "bugs": {
-        "url": "https://github.com/javier20dev25/sentinel-cli/issues"
+        "url": "https://github.com/javier20dev25/sentinel-oracle/issues"
     },
-    "homepage": "https://sentinel-psi-nine.vercel.app/cli",
+    "homepage": "https://github.com/javier20dev25/sentinel-oracle",
     "engines": {
-        "node": ">=18.0.0"
+        "node": ">=20.0.0"
     },
     "files": [
         "dist/",
         "src/",
-        "README.md",
-        "LICENSE"
+        "public/",
+        "README.md"
     ],
     "dependencies": {
-        "@anthropic-ai/sdk": "^0.100.1",
-        "@google/generative-ai": "^0.24.1",
-        "@types/react": "^19.2.16",
-        "acorn": "^8.16.0",
-        "acorn-walk": "^8.3.5",
+        "@octokit/rest": "^21.1.1",
+        "@simplewebauthn/server": "^11.0.0",
         "better-sqlite3": "^12.9.0",
-        "commander": "^12.1.0",
-        "dotenv": "^17.4.2",
-        "ink": "^7.0.5",
-        "openai": "^6.39.1",
-        "picocolors": "^1.1.1",
-        "react": "^19.2.7"
+        "express": "^4.21.2",
+        "express-rate-limit": "^7.5.0",
+        "helmet": "^8.0.0",
+        "qrcode": "^1.5.4",
+        "uuid": "^11.1.0"
     },
     "devDependencies": {
         "@types/better-sqlite3": "^7.6.13",
-        "@types/node": "^20",
-        "keytar": "^7.9.0",
+        "@types/express": "^5.0.1",
+        "@types/node": "^22",
+        "@types/qrcode": "^1.5.5",
+        "@types/uuid": "^10.0.0",
         "typescript": "^5",
         "vitest": "^4.1.7"
-    },
-    "type": "module"
+    }
 }

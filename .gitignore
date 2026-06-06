@@ -1,7 +1,9 @@
 node_modules/
-*.tsbuildinfo
-.env*
-*.db
-*.db-journal
-dist/**/*.test.*
-dist/test-setup.*
+dist/
+coverage/
+.env
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.log
+config.local.json

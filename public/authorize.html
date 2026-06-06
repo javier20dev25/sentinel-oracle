@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sentinel Oracle — Authorize</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { padding: 1rem; }
+  .container { max-width: 400px; margin: 0 auto; padding: 0; }
+  .section { margin: 1rem 0; }
+  .pr-number { font-size: 2.5rem; font-weight: 700; color: #f0f6fc; text-align: center; margin: 1rem 0; }
+  .confirm-btn {
+    display: block; width: 100%; padding: 1rem;
+    font-size: 1.1rem; font-weight: 600;
+    background: #238636; border: none; border-radius: 8px;
+    color: #fff; cursor: pointer; margin: 1.5rem 0;
+  }
+  .confirm-btn:disabled { opacity: 0.5; }
+  .confirm-btn:active { background: #2ea043; }
+  .back-link { display: block; text-align: center; color: #58a6ff; font-size: 0.85rem; margin-top: 1rem; }
+  .header { padding: 1rem; }
+  .header h1 { font-size: 1.25rem; }
+  .reason-input {
+    width: 100%; padding: 0.5rem 0.75rem;
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    color: #c9d1d9; font-size: 0.85rem; margin-bottom: 0.75rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <header class="header">
+    <h1>Sentinel Oracle</h1>
+  </header>
+
+  <div class="section" id="loading-section">
+    <p style="text-align:center;color:#8b949e;">Loading authorization request...</p>
+  </div>
+
+  <div class="section" id="auth-section" style="display:none">
+    <p style="text-align:center;color:#8b949e;">Authorize merge for</p>
+    <div class="pr-number">#<span id="pr-number">--</span></div>
+    <p style="text-align:center;color:#8b949e;font-size:0.85rem;" id="pr-title"></p>
+
+    <input class="reason-input" id="reason-input" type="text" placeholder="Reason (optional)" maxlength="200">
+
+    <button class="confirm-btn" id="confirm-btn">Confirm with Biometrics</button>
+
+    <div id="status" class="status" style="text-align:center;"></div>
+    <a href="/" class="back-link">Open Dashboard</a>
+  </div>
+
+  <div class="section" id="error-section" style="display:none">
+    <div id="error-msg" class="status error" style="text-align:center;"></div>
+    <a href="/" class="back-link">Open Dashboard</a>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const params = new URLSearchParams(window.location.search);
+  const challengeId = params.get('cid');
+  const prNumber = params.get('pr');
+
+  if (!challengeId || !prNumber) {
+    showError('Invalid authorization link');
+    return;
+  }
+
+  document.getElementById('pr-number').textContent = prNumber;
+  document.getElementById('loading-section').style.display = 'none';
+  document.getElementById('auth-section').style.display = 'block';
+
+  async function confirm() {
+    const btn = document.getElementById('confirm-btn');
+    const status = document.getElementById('status');
+    btn.disabled = true;
+    status.textContent = 'Authenticating with biometrics...';
+    status.className = 'status info';
+
+    try {
+      // Step 1: Get WebAuthn assertion challenge (bound to this PR)
+      const { options, challenge: waChallenge } = await fetch('/api/webauthn/assert/begin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prNumber: parseInt(prNumber, 10) }),
+      }).then(r => { if (!r.ok) throw new Error('Failed to start authentication'); return r.json() });
+
+      // Step 2: Biometric assertion
+      const credential = await navigator.credentials.get({ publicKey: options });
+
+      // Step 3: Submit with challengeId + reason
+      const reason = document.getElementById('reason-input').value.trim() || undefined;
+      const confirmRes = await fetch('/api/prs/' + prNumber + '/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challengeId,
+          credential: credential.toJSON(),
+          challenge: waChallenge,
+          reason: reason,
+        }),
+      });
+
+      const data = await confirmRes.json();
+
+      if (!confirmRes.ok) {
+        throw new Error(data.error || 'Authorization failed');
+      }
+
+      status.textContent = 'PR #' + prNumber + ' authorized and merged successfully!';
+      status.className = 'status success';
+      btn.textContent = 'Done';
+    } catch (err) {
+      status.textContent = err.message;
+      status.className = 'status error';
+      btn.disabled = false;
+    }
+  }
+
+  function showError(msg) {
+    document.getElementById('loading-section').style.display = 'none';
+    document.getElementById('error-section').style.display = 'block';
+    document.getElementById('error-msg').textContent = msg;
+  }
+
+  document.getElementById('confirm-btn').addEventListener('click', confirm);
+})();
+</script>
+</body>
+</html>
