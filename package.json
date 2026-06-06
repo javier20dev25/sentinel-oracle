@@ -1,0 +1,65 @@
+{
+    "name": "@sentinel/oracle",
+    "version": "1.0.0",
+    "description": "Sentinel Oracle — Secure Merge Authorization Server. Physically separated merge authority that prevents workstation-compromise attacks from reaching the main branch.",
+    "main": "dist/index.js",
+    "bin": {
+        "sentinel-oracle": "./dist/index.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "ts-node src/index.ts",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "pretest": "npm run build"
+    },
+    "keywords": [
+        "security",
+        "merge-authorization",
+        "github",
+        "webauthn",
+        "qr-auth",
+        "supply-chain-security",
+        "devsecops",
+        "air-gapped-authorization"
+    ],
+    "license": "BUSSL-1.1",
+    "author": "Javier Astaroth <javier20dev25@sentinel.security>",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/javier20dev25/sentinel-oracle.git"
+    },
+    "bugs": {
+        "url": "https://github.com/javier20dev25/sentinel-oracle/issues"
+    },
+    "homepage": "https://github.com/javier20dev25/sentinel-oracle",
+    "engines": {
+        "node": ">=20.0.0"
+    },
+    "files": [
+        "dist/",
+        "src/",
+        "public/",
+        "README.md"
+    ],
+    "dependencies": {
+        "@octokit/rest": "^21.1.1",
+        "@simplewebauthn/server": "^11.0.0",
+        "better-sqlite3": "^12.9.0",
+        "express": "^4.21.2",
+        "express-rate-limit": "^7.5.0",
+        "helmet": "^8.0.0",
+        "qrcode": "^1.5.4",
+        "uuid": "^11.1.0"
+    },
+    "devDependencies": {
+        "@types/better-sqlite3": "^7.6.13",
+        "@types/express": "^5.0.1",
+        "@types/node": "^22",
+        "@types/qrcode": "^1.5.5",
+        "@types/uuid": "^10.0.0",
+        "typescript": "^5",
+        "vitest": "^4.1.7"
+    }
+}

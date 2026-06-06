@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel Oracle — Merge Authorization</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="header">
+  <h1>Sentinel Oracle</h1>
+  <p class="subtitle">Secure Merge Authorization Server</p>
+  <div id="lockdown-banner" class="lockdown-banner" style="display:none">⚠ SYSTEM LOCKED DOWN — No authorizations will be processed</div>
+</header>
+
+<main class="container">
+  <section id="setup-section" class="section" style="display:none">
+    <h2>Device Registration</h2>
+    <p>Register a passkey (biometric authenticator) to authorize merges.</p>
+    <form id="register-form">
+      <label for="device-name">Device Name</label>
+      <input type="text" id="device-name" placeholder="e.g. Pixel 7" required>
+      <button type="submit" id="register-btn">Register Device</button>
+    </form>
+    <div id="register-status" class="status"></div>
+  </section>
+
+  <section id="auth-section" class="section" style="display:none">
+    <h2>Authenticate</h2>
+    <p>Authenticate with your passkey to view pending authorizations.</p>
+    <button id="auth-btn">Authenticate</button>
+    <div id="auth-status" class="status"></div>
+  </section>
+
+  <section id="pr-section" class="section" style="display:none">
+    <h2>Pending Pull Requests</h2>
+    <div id="pr-list">
+      <p class="empty">No pending PRs awaiting authorization.</p>
+    </div>
+  </section>
+
+  <section id="devices-section" class="section" style="display:none">
+    <h2>Authorized Devices</h2>
+    <div id="device-list">
+      <p class="empty">No devices registered.</p>
+    </div>
+  </section>
+
+  <section id="lockdown-section" class="section" style="display:none">
+    <h2>Emergency</h2>
+    <p>Lock down the system to prevent all merges and reject all pending authorizations.</p>
+    <button id="lockdown-btn" style="background:#da3633">ACTIVATE LOCKDOWN</button>
+    <button id="unlock-btn" style="background:#238636;display:none">Deactivate Lockdown</button>
+    <div id="lockdown-status" class="status"></div>
+  </section>
+
+  <section id="audit-section" class="section">
+    <h2>Audit Log</h2>
+    <div id="audit-log">
+      <p class="empty">Loading...</p>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
