@@ -2,133 +2,143 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Sentinel Oracle — Authorize</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel Oracle — Authorize Merge</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-  body { padding: 1rem; }
-  .container { max-width: 400px; margin: 0 auto; padding: 0; }
-  .section { margin: 1rem 0; }
-  .pr-number { font-size: 2.5rem; font-weight: 700; color: #f0f6fc; text-align: center; margin: 1rem 0; }
-  .confirm-btn {
-    display: block; width: 100%; padding: 1rem;
-    font-size: 1.1rem; font-weight: 600;
-    background: #238636; border: none; border-radius: 8px;
-    color: #fff; cursor: pointer; margin: 1.5rem 0;
-  }
-  .confirm-btn:disabled { opacity: 0.5; }
-  .confirm-btn:active { background: #2ea043; }
-  .back-link { display: block; text-align: center; color: #58a6ff; font-size: 0.85rem; margin-top: 1rem; }
-  .header { padding: 1rem; }
-  .header h1 { font-size: 1.25rem; }
-  .reason-input {
-    width: 100%; padding: 0.5rem 0.75rem;
-    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
-    color: #c9d1d9; font-size: 0.85rem; margin-bottom: 0.75rem;
-  }
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .auth-box { text-align: center; max-width: 420px; }
+  .btn { font-size: 1.2rem; padding: 1rem 2rem; }
+  .pr-info { color: #888; margin: 0.5rem 0; }
+  .detail { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
+  .success-icon { font-size: 3rem; margin-bottom: 0.5rem; }
+  .password-field { margin: 1rem 0; }
+  .password-field input { padding: 0.6rem 1rem; font-size: 1rem; border: 1px solid #444; background: #1a1a1a; color: #ddd; border-radius: 4px; width: 100%; box-sizing: border-box; }
+  .password-field label { display: block; margin-bottom: 0.4rem; color: #888; font-size: 0.85rem; }
 </style>
 </head>
 <body>
-<div class="container">
-  <header class="header">
+  <div class="auth-box">
     <h1>Sentinel Oracle</h1>
-  </header>
-
-  <div class="section" id="loading-section">
-    <p style="text-align:center;color:#8b949e;">Loading authorization request...</p>
+    <p class="subtitle">Authorize Merge</p>
+    <div id="status" class="status"></div>
+    <div id="details" class="detail"></div>
+    <div class="password-field">
+      <label for="auth-password">Authorization Password</label>
+      <input type="password" id="auth-password" placeholder="Enter authorization password" autocomplete="off">
+    </div>
+    <button id="confirm-btn" class="btn" style="display:none">Confirm Authorization</button>
   </div>
 
-  <div class="section" id="auth-section" style="display:none">
-    <p style="text-align:center;color:#8b949e;">Authorize merge for</p>
-    <div class="pr-number">#<span id="pr-number">--</span></div>
-    <p style="text-align:center;color:#8b949e;font-size:0.85rem;" id="pr-title"></p>
+  <script>
+    function base64urlToBuffer(str) {
+      const padding = '='.repeat((4 - str.length % 4) % 4);
+      const base64 = (str + padding).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(base64);
+      const buf = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+      return buf;
+    }
 
-    <input class="reason-input" id="reason-input" type="text" placeholder="Reason (optional)" maxlength="200">
+    function prepareOptions(options) {
+      return {
+        ...options,
+        challenge: base64urlToBuffer(options.challenge),
+        allowCredentials: options.allowCredentials?.map(c => ({
+          ...c,
+          id: base64urlToBuffer(c.id),
+        })),
+      };
+    }
 
-    <button class="confirm-btn" id="confirm-btn">Confirm with Biometrics</button>
+    function setStatus(msg, type) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.className = 'status ' + (type || '');
+    }
 
-    <div id="status" class="status" style="text-align:center;"></div>
-    <a href="/" class="back-link">Open Dashboard</a>
-  </div>
+    function showDetail(msg) {
+      document.getElementById('details').textContent = msg;
+    }
 
-  <div class="section" id="error-section" style="display:none">
-    <div id="error-msg" class="status error" style="text-align:center;"></div>
-    <a href="/" class="back-link">Open Dashboard</a>
-  </div>
-</div>
+    const params = new URLSearchParams(window.location.search);
+    const challengeId = params.get('cid');
+    const prNumber = params.get('pr');
 
-<script>
-(function () {
-  'use strict';
+    if (!challengeId || !prNumber) {
+      setStatus('Invalid authorization link', 'error');
+    } else {
+      setStatus('PR #' + prNumber + ' ready for authorization', 'info');
+      showDetail('Enter the password and tap Confirm with your passkey');
+      document.getElementById('confirm-btn').style.display = 'block';
+    }
 
-  const params = new URLSearchParams(window.location.search);
-  const challengeId = params.get('cid');
-  const prNumber = params.get('pr');
+    document.getElementById('confirm-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('confirm-btn');
+      const passwordField = document.getElementById('auth-password');
+      const password = passwordField?.value || '';
+      btn.disabled = true;
+      setStatus('Contacting server...', 'info');
+      showDetail('');
 
-  if (!challengeId || !prNumber) {
-    showError('Invalid authorization link');
-    return;
-  }
+      try {
+        const { options, challenge } = await fetch('/api/webauthn/assert/begin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prNumber: parseInt(prNumber, 10) }),
+        }).then(r => {
+          if (r.status === 404) throw new Error('No passkeys registered. Enroll a device first from the dashboard.')
+          if (!r.ok) return r.json().then(d => { throw new Error(d.error || 'Failed to get challenge') })
+          return r.json()
+        })
 
-  document.getElementById('pr-number').textContent = prNumber;
-  document.getElementById('loading-section').style.display = 'none';
-  document.getElementById('auth-section').style.display = 'block';
+        setStatus('Authenticating with passkey...', 'info');
 
-  async function confirm() {
-    const btn = document.getElementById('confirm-btn');
-    const status = document.getElementById('status');
-    btn.disabled = true;
-    status.textContent = 'Authenticating with biometrics...';
-    status.className = 'status info';
+        const credential = await navigator.credentials.get({ publicKey: prepareOptions(options) });
 
-    try {
-      // Step 1: Get WebAuthn assertion challenge (bound to this PR)
-      const { options, challenge: waChallenge } = await fetch('/api/webauthn/assert/begin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prNumber: parseInt(prNumber, 10) }),
-      }).then(r => { if (!r.ok) throw new Error('Failed to start authentication'); return r.json() });
+        setStatus('Authorizing merge...', 'info');
 
-      // Step 2: Biometric assertion
-      const credential = await navigator.credentials.get({ publicKey: options });
-
-      // Step 3: Submit with challengeId + reason
-      const reason = document.getElementById('reason-input').value.trim() || undefined;
-      const confirmRes = await fetch('/api/prs/' + prNumber + '/confirm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        const body = {
           challengeId,
           credential: credential.toJSON(),
-          challenge: waChallenge,
-          reason: reason,
-        }),
-      });
+          challenge,
+        };
+        if (password) body.password = password;
 
-      const data = await confirmRes.json();
+        const result = await fetch(`/api/prs/${prNumber}/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(r => r.json());
 
-      if (!confirmRes.ok) {
-        throw new Error(data.error || 'Authorization failed');
+        if (result.authorized && result.merged) {
+          setStatus('✓ Merge completed successfully!', 'success');
+          showDetail('PR #' + prNumber + ' has been merged to main');
+          btn.style.display = 'none';
+        } else if (result.authorized) {
+          setStatus('✓ Authorization granted', 'success');
+          showDetail('PR #' + prNumber + ' has been authorized (merge pending)');
+          btn.style.display = 'none';
+        } else {
+          const err = result.error || 'Authorization failed'
+          if (err.includes('Challenge already') || err.includes('already used')) {
+            setStatus('This QR code has already been used', 'error');
+            showDetail('If the PR was already merged, check the dashboard. Otherwise, start a new authorization.');
+          } else {
+            setStatus('✗ ' + err, 'error');
+          }
+          btn.disabled = false;
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
+          setStatus('Authentication cancelled', 'error');
+          btn.disabled = false;
+        } else {
+          setStatus('✗ ' + (err.message || 'Connection failed'), 'error');
+          btn.disabled = false;
+        }
       }
-
-      status.textContent = 'PR #' + prNumber + ' authorized and merged successfully!';
-      status.className = 'status success';
-      btn.textContent = 'Done';
-    } catch (err) {
-      status.textContent = err.message;
-      status.className = 'status error';
-      btn.disabled = false;
-    }
-  }
-
-  function showError(msg) {
-    document.getElementById('loading-section').style.display = 'none';
-    document.getElementById('error-section').style.display = 'block';
-    document.getElementById('error-msg').textContent = msg;
-  }
-
-  document.getElementById('confirm-btn').addEventListener('click', confirm);
-})();
-</script>
+    });
+  </script>
 </body>
 </html>

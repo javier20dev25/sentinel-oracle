@@ -199,3 +199,71 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 
 .qr-status.error { color: #f85149; }
+
+/* Token Inspector */
+.token-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.token-avatar {
+  border-radius: 50%;
+}
+.token-detail {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid #21262d;
+  font-size: 0.85rem;
+}
+.token-detail:last-of-type { border-bottom: none; }
+.token-label {
+  color: #8b949e;
+  min-width: 60px;
+  flex-shrink: 0;
+}
+.token-detail code {
+  font-family: 'SF Mono', Monaco, monospace;
+  font-size: 0.8rem;
+  color: #58a6ff;
+  background: #0d1117;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+.scope-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.scope-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 8px;
+}
+.scope-badge.high { background: #381b1b; color: #f85149; }
+.scope-badge.medium { background: #382f1b; color: #d29922; }
+.scope-badge.low { background: #1b3820; color: #3fb950; }
+.risk-badge { font-size: 0.75rem; padding: 0.2rem 0.6rem; }
+.risk-badge.success { background: #1b3820; color: #3fb950; }
+.risk-badge.warning { background: #382f1b; color: #d29922; }
+.risk-badge.error { background: #381b1b; color: #f85149; }
+.risk-reasons {
+  list-style: disc;
+  padding-left: 1.2rem;
+  font-size: 0.8rem;
+  color: #f85149;
+  margin: 0.25rem 0;
+}
+.token-footer {
+  margin-top: 0.75rem;
+  font-size: 0.8rem;
+}
+.token-footer a {
+  color: #58a6ff;
+  text-decoration: none;
+}
+.token-footer a:hover {
+  text-decoration: underline;
+}

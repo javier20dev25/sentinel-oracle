@@ -1,7 +1,14 @@
+// Force public DNS + IPv4-first (avoids getaddrinfo ENOTFOUND on some Windows networks)
+import { setDefaultResultOrder, setServers, promises as dns } from 'dns'
+setServers(['8.8.8.8', '1.1.1.1'])
+setDefaultResultOrder('ipv4first')
+
 import { loadConfig } from './config'
 import { DatabaseStore } from './storage/database'
 import { GitHubClient } from './github/client'
-import { createApp } from './server'
+import { createApp, initEnrollment } from './server'
+import { initHmacKey } from './crypto/signing'
+import { printStartupBanner } from './startup'
 import * as fs from 'fs'
 import * as https from 'https'
 
@@ -19,7 +26,7 @@ function ensureCredentials(config: ReturnType<typeof loadConfig>) {
   if (missing.length > 0) {
     console.error(`Missing required config: ${missing.join(', ')}`)
     console.error(`Set them in ${require('os').homedir()}\\.sentinel-oracle\\config.json`)
-    process.exit(1)
+    gracefulExit(1)
   }
 }
 
@@ -37,13 +44,13 @@ function validatePermissions(configDir: string): void {
       if (item.required !== 'dir' && !stat.isFile()) {
         if (item.required === 'file') {
           console.error(`[security] Expected file not found: ${item.path}`)
-          process.exit(1)
+          gracefulExit(1)
         }
       }
     } catch {
       if (item.required === 'file') {
         console.error(`[security] Missing required file: ${item.path}`)
-        process.exit(1)
+        gracefulExit(1)
       }
     }
   }
@@ -61,24 +68,48 @@ function getHttpsOptions(configDir: string): { key: string; cert: string } {
   } catch {
     console.error('TLS certificates not found. Generate them:')
     console.error(`  openssl req -x509 -newkey rsa:2048 -keyout ${keyPath} -out ${certPath} -days 365 -nodes`)
-    process.exit(1)
+    gracefulExit(1)
   }
 }
 
-function main() {
+// Windows libuv bug: direct process.exit with pending handles => assertion
+function gracefulExit(code: number): never {
+  setTimeout(() => process.exit(code), 100)
+  throw new Error('exiting')
+}
+
+async function main() {
+  // Buffer config warnings to print after banner
+  const configWarnings: string[] = []
+  const origWarn = console.warn
+  console.warn = (msg: string) => { configWarnings.push(String(msg)) }
   const config = loadConfig()
+  console.warn = origWarn
+
   ensureCredentials(config)
   validatePermissions(config.dataDir)
 
-  const db = new DatabaseStore(config.dataDir)
+  const db = new DatabaseStore(config.dataDir, config.encryptionKey)
+  initHmacKey(config.encryptionKey)
+  initEnrollment(config, db)
   const client = new GitHubClient(config.githubToken, config.githubOwner, config.githubRepo, config.githubStatusContext)
 
-  client.verifyToken().then(valid => {
+  // Warm DNS cache for GitHub API (avoids intermittent ENOTFOUND on some Windows networks)
+  try {
+    await dns.resolve('api.github.com')
+  } catch {}
+
+  const skipVerify = process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1'
+  if (skipVerify) {
+    configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+  } else {
+    const valid = await client.verifyToken()
     if (!valid) {
       console.error('GitHub token verification failed — check token permissions')
-      process.exit(1)
+      console.error('Set SENTINEL_SKIP_TOKEN_VERIFY=1 to skip (development only)')
+      gracefulExit(1)
     }
-  })
+  }
 
   const { app, startPolling, stopPolling } = createApp(config, db, client)
 
@@ -86,35 +117,34 @@ function main() {
 
   const server = https.createServer(httpsOptions, app)
   server.listen(config.port, config.host, () => {
-    console.log(`Sentinel Oracle running on https://${config.bindAddress}:${config.port}`)
-    console.log(`Dashboard: https://${config.bindAddress}:${config.port}`)
-    console.log(`RP ID:     ${config.rpId}`)
-    console.log(`Origin:    ${config.serverOrigin}`)
+    printStartupBanner(config, db)
+    for (const w of configWarnings) {
+      console.error(w)
+    }
+    const wasLocked = db.getConfig('system_lockdown') === 'true'
+    if (wasLocked) {
+      console.error('[lockdown] System was in lockdown mode at shutdown — restoring')
+    }
   })
-
-  // Recover lockdown state
-  const wasLocked = db.getConfig('system_lockdown') === 'true'
-  if (wasLocked) {
-    console.warn('[lockdown] System was in lockdown mode at shutdown — restoring')
-  }
 
   startPolling()
 
   process.on('SIGINT', () => {
-    console.log('Shutting down...')
     stopPolling()
     db.close()
     server.close()
-    process.exit(0)
+    gracefulExit(0)
   })
 
   process.on('SIGTERM', () => {
-    console.log('Shutting down...')
     stopPolling()
     db.close()
     server.close()
-    process.exit(0)
+    gracefulExit(0)
   })
 }
 
-main()
+main().catch(err => {
+  console.error(err)
+  gracefulExit(1)
+})

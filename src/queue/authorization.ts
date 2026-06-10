@@ -2,7 +2,11 @@ import type { DatabaseStore, PendingPR } from '../storage/database'
 import { createAuthChallenge } from '../auth/challenge'
 import type { ChallengeResult } from '../auth/challenge'
 import { verifyAssertion } from '../auth/webauthn'
+import { verifyChallengeToken } from '../crypto/signing'
 import type { GitHubClient } from '../github/client'
+import { logEvent } from '../logger'
+
+const QR_MAX_AGE_MS = 45000
 
 export class AuthorizationQueue {
   private db: DatabaseStore
@@ -55,7 +59,38 @@ export class AuthorizationQueue {
       return { success: false, error: 'System is locked down' }
     }
 
-    // 1. Verify WebAuthn assertion (PR-bound)
+    // 1. Read challenge data (without consuming)
+    const challenge = this.db.getChallenge(challengeId)
+    if (!challenge) {
+      return { success: false, error: 'Challenge expired or invalid' }
+    }
+    if (challenge.used !== 0) {
+      return { success: false, error: 'Challenge already used' }
+    }
+    if (challenge.prNumber !== prNumber) {
+      return { success: false, error: 'Challenge does not match PR' }
+    }
+
+    // 2. Verify HMAC signature on QR payload (fail fast before expensive WebAuthn)
+    try {
+      const payload = JSON.parse(challenge.data)
+      if (!payload.sig) {
+        this.db.log('hmac_missing', prNumber, `QR payload missing signature for challenge ${challengeId}`)
+        return { success: false, error: 'Challenge missing integrity signature' }
+      }
+      const valid = verifyChallengeToken(
+        { challengeId, prNumber, timestamp: payload.ts, signature: payload.sig },
+        this.challengeTtlMs,
+      )
+      if (!valid) {
+        this.db.log('hmac_verify_failed', prNumber, `QR signature verification failed for challenge ${challengeId}`)
+        return { success: false, error: 'Challenge integrity check failed' }
+      }
+    } catch {
+      return { success: false, error: 'Challenge data malformed' }
+    }
+
+    // 3. Verify WebAuthn assertion (PR-bound)
     const assertionResult = await verifyAssertion(
       webauthnCredential,
       webauthnChallenge,
@@ -69,13 +104,11 @@ export class AuthorizationQueue {
       return { success: false, error: 'Biometric authentication failed' }
     }
 
-    // 2. Consume QR challenge
+    // 4. Consume challenge (atomic — prevents double-use race)
     const consumed = this.db.consumeChallenge(challengeId)
     if (!consumed) {
-      return { success: false, error: 'Challenge expired or already used' }
-    }
-    if (consumed.prNumber !== prNumber) {
-      return { success: false, error: 'Challenge does not match PR' }
+      this.db.log('challenge_race_lost', prNumber, `Challenge ${challengeId} consumed by concurrent request`)
+      return { success: false, error: 'Challenge already used' }
     }
 
     const pr = this.db.getPRByNumber(prNumber)
@@ -83,10 +116,19 @@ export class AuthorizationQueue {
       return { success: false, error: 'PR not found' }
     }
 
-    // 3. Grant authorization
-    this.db.setAuthStatus(prNumber, 'authorized')
-    const detail = `Authorized by ${assertionResult.credentialId.slice(0, 16)}...${reason ? ` Reason: ${reason}` : ''}`
+    // 5. Re-check lockdown before granting (TOCTOU prevention)
+    if (this.isLocked()) {
+      this.db.log('lockdown_blocked', prNumber, `Authorization blocked by lockdown after WebAuthn verification`)
+      return { success: false, error: 'System was locked during authorization' }
+    }
+
+    // 6. Grant authorization
+    const device = this.db.getDeviceByCredentialId(assertionResult.credentialId)
+    const deviceName = device?.name || assertionResult.credentialId.slice(0, 16) + '...'
+    this.db.setAuthStatus(prNumber, 'authorized', deviceName)
+    const detail = `Authorized by ${deviceName}${reason ? ` — ${reason}` : ''}`
     this.db.log('authorization_granted', prNumber, detail)
+    logEvent('PR #' + prNumber + ' authorized', deviceName)
 
     let statusOk = false
     try {
@@ -96,17 +138,20 @@ export class AuthorizationQueue {
       this.db.log('status_update_failed', prNumber, `GitHub status update failed: ${err}`)
     }
 
-    // 4. Execute merge
+    // 7. Execute merge
     let merged = false
     try {
       merged = await this.client.mergePR(prNumber, pr.sha)
       if (merged) {
         this.db.log('merge_executed', prNumber, 'PR merged by Sentinel Oracle')
+        logEvent('PR #' + prNumber + ' merged', pr.sha.slice(0, 7))
       } else {
         this.db.log('merge_failed', prNumber, 'GitHub merge API returned non-success')
+        logEvent('PR #' + prNumber + ' merge failed', 'GitHub API returned non-success')
       }
     } catch (err) {
       this.db.log('merge_failed', prNumber, `Merge execution failed: ${err}`)
+      logEvent('PR #' + prNumber + ' merge error', String(err))
     }
 
     if (!statusOk) {
@@ -147,6 +192,7 @@ export class AuthorizationQueue {
   async lockdown(): Promise<void> {
     this.setLocked(true)
     this.db.log('lockdown_activated', null, 'Emergency lockdown activated — all pending authorizations rejected')
+    logEvent('LOCKDOWN ACTIVATED', 'All pending authorizations rejected')
 
     const prs = this.db.getPendingPRs()
     for (const pr of prs) {
@@ -162,6 +208,7 @@ export class AuthorizationQueue {
   async unlock(): Promise<void> {
     this.setLocked(false)
     this.db.log('lockdown_deactivated', null, 'Emergency lockdown deactivated')
+    logEvent('LOCKDOWN DEACTIVATED')
   }
 
   revokeDevice(credentialId: string): boolean {

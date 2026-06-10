@@ -1,5 +1,6 @@
 import type { GitHubClient, CheckStatus, PRInfo } from './client';
 import type { DatabaseStore } from '../storage/database';
+import { promises as dns } from 'dns'
 
 const REQUIRED_CHECKS = ['build-and-test', 'Sentinel Authorization'];
 
@@ -14,8 +15,10 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
 
     let prs: PRInfo[];
     try {
+        await dns.resolve('api.github.com').catch(() => {})
         prs = await client.listOpenPRs();
-    } catch {
+    } catch (err) {
+        console.error('[monitor] Failed to list PRs:', err instanceof Error ? err.message : String(err))
         return result;
     }
 
@@ -33,13 +36,14 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 ciStatus: 'checking',
                 sentinelStatus: 'checking',
                 authStatus: 'pending',
-                createdAt: Date.parse(pr.createdAt),
+                createdAt: Date.now(),
                 authorizedAt: null,
+                deviceName: null,
             });
             result.newPRs++;
         }
 
-        if (existing && existing.sha !== pr.sha) {
+        if (existing && (existing.sha !== pr.sha || existing.authStatus === 'expired')) {
             db.upsertPR({
                 prNumber: pr.number,
                 owner: client.owner,
@@ -49,9 +53,10 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 sha: pr.sha,
                 ciStatus: 'checking',
                 sentinelStatus: 'checking',
-                authStatus: existing.authStatus === 'authorized' ? 'pending' : existing.authStatus,
-                createdAt: existing.createdAt,
+                authStatus: 'pending',
+                createdAt: Date.now(),
                 authorizedAt: null,
+                deviceName: null,
             });
             result.updatedPRs++;
         }
@@ -65,6 +70,7 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 ...current,
                 ciStatus: allPassed ? 'passed' : 'pending',
                 sentinelStatus: statuses.sentinel,
+                authStatus: current.authStatus === 'expired' ? 'pending' : current.authStatus,
                 sha: pr.sha,
             });
 

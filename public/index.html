@@ -14,9 +14,22 @@
 </header>
 
 <main class="container">
+  <section id="enrollment-section" class="section" style="display:none">
+    <h2>First-Time Setup</h2>
+    <p>This server has no authorized devices. Complete the enrollment to register the first administrator device.</p>
+    <form id="enrollment-form">
+      <label for="enrollment-token">Enrollment Token</label>
+      <input type="text" id="enrollment-token" placeholder="Check server console" required>
+      <label for="enrollment-device-name">Device Name</label>
+      <input type="text" id="enrollment-device-name" placeholder="e.g. Pixel 7" required>
+      <button type="submit" id="enrollment-btn">Enroll Device</button>
+    </form>
+    <div id="enrollment-status" class="status"></div>
+  </section>
+
   <section id="setup-section" class="section" style="display:none">
-    <h2>Device Registration</h2>
-    <p>Register a passkey (biometric authenticator) to authorize merges.</p>
+    <h2>Register Device</h2>
+    <p>Add another passkey to authorize merges.</p>
     <form id="register-form">
       <label for="device-name">Device Name</label>
       <input type="text" id="device-name" placeholder="e.g. Pixel 7" required>
@@ -39,11 +52,31 @@
     </div>
   </section>
 
+  <section id="history-section" class="section" style="display:none">
+    <h2>Authorization History</h2>
+    <div id="history-list">
+      <p class="empty">No authorizations yet.</p>
+    </div>
+  </section>
+
   <section id="devices-section" class="section" style="display:none">
     <h2>Authorized Devices</h2>
     <div id="device-list">
       <p class="empty">No devices registered.</p>
     </div>
+  </section>
+
+  <section id="password-section" class="section" style="display:none">
+    <h2>Authorization Password</h2>
+    <p>Set a shared password as a second factor — required alongside the passkey to authorize merges.</p>
+    <form id="password-form">
+      <label for="current-password">Current Password <em>(leave blank if not set)</em></label>
+      <input type="password" id="current-password" placeholder="Current password" autocomplete="off">
+      <label for="new-password">New Password</label>
+      <input type="password" id="new-password" placeholder="New password (min 4 chars)" required autocomplete="off">
+      <button type="submit" id="password-btn">Set Password</button>
+    </form>
+    <div id="password-status" class="status"></div>
   </section>
 
   <section id="lockdown-section" class="section" style="display:none">
@@ -52,6 +85,11 @@
     <button id="lockdown-btn" style="background:#da3633">ACTIVATE LOCKDOWN</button>
     <button id="unlock-btn" style="background:#238636;display:none">Deactivate Lockdown</button>
     <div id="lockdown-status" class="status"></div>
+  </section>
+
+  <section id="token-section" class="section" style="display:none">
+    <h2>Credential Inspector</h2>
+    <div id="token-info"></div>
   </section>
 
   <section id="audit-section" class="section">

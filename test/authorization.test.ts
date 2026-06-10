@@ -126,6 +126,7 @@ describe('AuthorizationQueue', () => {
       authStatus: 'pending',
       createdAt: Date.now(),
       authorizedAt: null,
+      deviceName: null,
     })
 
     registerTestDevice(db)
@@ -233,6 +234,7 @@ describe('AuthorizationQueue', () => {
       authStatus: 'pending',
       createdAt: Date.now() - 7200000,
       authorizedAt: null,
+      deviceName: null,
     })
 
     const expired = queue.expireStaleChallenges()

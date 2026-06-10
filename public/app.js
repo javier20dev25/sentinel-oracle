@@ -5,6 +5,27 @@
   let currentCredentialId = null;
   let devicesRegistered = false;
 
+  function base64urlToBuffer(str) {
+    const padding = '='.repeat((4 - str.length % 4) % 4);
+    const base64 = (str + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const buf = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    return buf;
+  }
+
+  function prepareWebAuthnOptions(options) {
+    return {
+      ...options,
+      challenge: base64urlToBuffer(options.challenge),
+      user: options.user ? { ...options.user, id: base64urlToBuffer(options.user.id) } : undefined,
+      allowCredentials: options.allowCredentials?.map(c => ({
+        ...c,
+        id: base64urlToBuffer(c.id),
+      })),
+    };
+  }
+
   async function api(path, options = {}) {
     const res = await fetch(path, {
       headers: { 'Content-Type': 'application/json' },
@@ -35,8 +56,21 @@
     const status = await api('/api/status');
     devicesRegistered = status.registeredDevices > 0;
     updateLockdownBanner(status.locked);
-    if (!devicesRegistered) {
+
+    // Validate session server-side
+    const session = await api('/api/session/check');
+    authenticated = session.authenticated;
+
+    if (status.setupRequired) {
+      show('enrollment-section');
+      hide('setup-section');
+      hide('auth-section');
+      hide('pr-section');
+      hide('devices-section');
+      hide('lockdown-section');
+    } else if (!devicesRegistered) {
       show('setup-section');
+      hide('enrollment-section');
       hide('auth-section');
       hide('pr-section');
       hide('devices-section');
@@ -48,14 +82,19 @@
       hide('devices-section');
       hide('lockdown-section');
     } else {
-      show('pr-section');
-      show('devices-section');
-      show('lockdown-section');
-      hide('setup-section');
-      hide('auth-section');
-      await loadPRs();
-      await loadDevices();
+        show('pr-section');
+        show('devices-section');
+        show('lockdown-section');
+        show('token-section');
+        hide('enrollment-section');
+        hide('setup-section');
+        hide('auth-section');
+        await loadPRs();
+        await loadDevices();
+        await loadTokenInfo();
+      }
     }
+  }
   }
 
   function updateLockdownBanner(locked) {
@@ -67,7 +106,48 @@
     }
   }
 
-  // Registration
+  // Enrollment (first device — no session required, uses enrollment token)
+  document.getElementById('enrollment-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const enrollmentToken = document.getElementById('enrollment-token').value;
+    const deviceName = document.getElementById('enrollment-device-name').value;
+    const btn = document.getElementById('enrollment-btn');
+    btn.disabled = true;
+    setStatus('enrollment-status', 'Initializing enrollment...', 'info');
+
+    try {
+      const { options, challenge } = await api('/api/setup/begin', {
+        method: 'POST',
+        body: JSON.stringify({ enrollmentToken, deviceName }),
+      });
+
+      const credential = await navigator.credentials.create({ publicKey: prepareWebAuthnOptions(options) });
+
+      const result = await api('/api/setup/complete', {
+        method: 'POST',
+        body: JSON.stringify({
+          credential: credential.toJSON(),
+          challenge,
+          deviceName,
+          enrollmentToken,
+        }),
+      });
+
+      if (result.verified) {
+        setStatus('enrollment-status', 'Enrollment successful!', 'success');
+        hide('enrollment-section');
+        await checkSetup();
+      } else {
+        setStatus('enrollment-status', 'Enrollment failed', 'error');
+      }
+    } catch (err) {
+      setStatus('enrollment-status', err.message, 'error');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  // Registration (requires session — server handles cookie)
   document.getElementById('register-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const deviceName = document.getElementById('device-name').value;
@@ -81,7 +161,7 @@
         body: JSON.stringify({ deviceName }),
       });
 
-      const credential = await navigator.credentials.create({ publicKey: options });
+      const credential = await navigator.credentials.create({ publicKey: prepareWebAuthnOptions(options) });
 
       const result = await api('/api/webauthn/register/complete', {
         method: 'POST',
@@ -106,7 +186,7 @@
     }
   });
 
-  // Authentication
+  // Authentication (server creates session on success)
   document.getElementById('auth-btn').addEventListener('click', async () => {
     const btn = document.getElementById('auth-btn');
     btn.disabled = true;
@@ -117,7 +197,7 @@
         method: 'POST',
       });
 
-      const credential = await navigator.credentials.get({ publicKey: options });
+      const credential = await navigator.credentials.get({ publicKey: prepareWebAuthnOptions(options) });
 
       const result = await api('/api/webauthn/assert/complete', {
         method: 'POST',
@@ -128,15 +208,23 @@
       });
 
       if (result.verified) {
-        authenticated = true;
         currentCredentialId = result.credentialId;
+        // Server set session cookie — now re-check
+        const session = await api('/api/session/check');
+        authenticated = session.authenticated;
+        if (!authenticated) {
+          throw new Error('Session was not created — try re-authenticating');
+        }
         setStatus('auth-status', 'Authenticated successfully!', 'success');
         hide('auth-section');
+        hide('enrollment-section');
         show('pr-section');
         show('devices-section');
         show('lockdown-section');
+        show('token-section');
         await loadPRs();
         await loadDevices();
+        await loadTokenInfo();
       } else {
         setStatus('auth-status', 'Authentication failed', 'error');
       }
@@ -156,38 +244,71 @@
       const prs = await api('/api/prs');
       if (prs.length === 0) {
         prList.innerHTML = '<p class="empty">No pending PRs awaiting authorization.</p>';
-        return;
+      } else {
+        prList.innerHTML = '';
+        for (const pr of prs) {
+          const card = document.createElement('div');
+          card.className = 'pr-card';
+          card.innerHTML = `
+            <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
+            <div class="meta">${escapeHtml(pr.author)} &middot; ${new Date(pr.createdAt).toLocaleString()}</div>
+            <div class="status-row">
+              <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
+              <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
+              <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
+            </div>
+            <div class="actions">
+              <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
+              <button class="reject-btn" data-pr="${pr.prNumber}" style="background:#da3633">Reject</button>
+            </div>
+            <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
+          `;
+          prList.appendChild(card);
+        }
+
+        document.querySelectorAll('.auth-btn').forEach(btn => {
+          btn.addEventListener('click', authorizePR);
+        });
+        document.querySelectorAll('.reject-btn').forEach(btn => {
+          btn.addEventListener('click', rejectPR);
+        });
       }
 
-      prList.innerHTML = '';
-      for (const pr of prs) {
-        const card = document.createElement('div');
-        card.className = 'pr-card';
-        card.innerHTML = `
-          <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
-          <div class="meta">${escapeHtml(pr.author)} &middot; ${new Date(pr.createdAt).toLocaleString()}</div>
-          <div class="status-row">
-            <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
-            <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
-            <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
-          </div>
-          <div class="actions">
-            <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
-            <button class="reject-btn" data-pr="${pr.prNumber}" style="background:#da3633">Reject</button>
-          </div>
-          <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
-        `;
-        prList.appendChild(card);
-      }
-
-      document.querySelectorAll('.auth-btn').forEach(btn => {
-        btn.addEventListener('click', authorizePR);
-      });
-      document.querySelectorAll('.reject-btn').forEach(btn => {
-        btn.addEventListener('click', rejectPR);
-      });
+      // Load history
+      await loadHistory();
     } catch (err) {
       prList.innerHTML = `<p class="empty">Error loading PRs: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  async function loadHistory() {
+    const historyList = document.getElementById('history-list');
+    try {
+      const prs = await api('/api/prs/history');
+      const section = document.getElementById('history-section');
+      if (prs.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+      section.style.display = 'block';
+      historyList.innerHTML = '';
+      for (const pr of prs) {
+        const card = document.createElement('div');
+        card.className = 'pr-card history';
+        const time = pr.authorizedAt ? new Date(pr.authorizedAt).toLocaleString() : '';
+        const deviceLabel = pr.authStatus === 'authorized' && pr.deviceName ? ` by ${escapeHtml(pr.deviceName)}` : '';
+        card.innerHTML = `
+          <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
+          <div class="meta">${escapeHtml(pr.author)}</div>
+          <div class="status-row">
+            <span class="badge ${pr.authStatus}">${pr.authStatus}</span>
+            <span class="meta">${time}${deviceLabel}</span>
+          </div>
+        `;
+        historyList.appendChild(card);
+      }
+    } catch (err) {
+      document.getElementById('history-section').style.display = 'none';
     }
   }
 
@@ -290,6 +411,49 @@
     }
   }
 
+  // Token Info
+  async function loadTokenInfo() {
+    if (!authenticated) return;
+    const el = document.getElementById('token-info');
+    try {
+      const info = await api('/api/github/token-info');
+      const scopeBadges = info.scopes.length
+        ? info.scopes.map(s => `<span class="badge scope-badge ${getScopeLevel(s)}">${escapeHtml(s)}</span>`).join(' ')
+        : '<span class="badge scope-badge low">granular (fine-grained)</span>';
+      const riskBadge = info.riskScore === 'high' ? 'HIGH' : info.riskScore === 'medium' ? 'MEDIUM' : 'LOW';
+      const riskClass = info.riskScore === 'high' ? 'error' : info.riskScore === 'medium' ? 'warning' : 'success';
+      const reasons = info.riskReasons.length
+        ? `<ul class="risk-reasons">${info.riskReasons.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`
+        : '';
+      el.innerHTML = `
+        <div class="token-header">
+          <img src="${escapeHtml(info.avatarUrl)}" alt="" class="token-avatar" width="40" height="40">
+          <div>
+            <strong>${escapeHtml(info.name)}</strong>
+            <span class="meta">@${escapeHtml(info.login)}</span>
+          </div>
+          <span class="badge risk-badge ${riskClass}">${riskBadge} RISK</span>
+        </div>
+        <div class="token-detail"><span class="token-label">Token</span><code>${escapeHtml(info.tokenPrefix)}</code></div>
+        <div class="token-detail"><span class="token-label">Type</span>${info.tokenType === 'classic' ? 'Classic PAT (broad scopes)' : 'Fine-Grained PAT (granular)'}</div>
+        <div class="token-detail"><span class="token-label">Scopes</span><div class="scope-list">${scopeBadges}</div></div>
+        ${reasons ? `<div class="token-detail"><span class="token-label">Risks</span>${reasons}</div>` : ''}
+        <div class="token-footer">
+          <a href="https://github.com/settings/tokens" target="_blank" rel="noopener">Manage tokens on GitHub →</a>
+        </div>
+      `;
+      document.getElementById('token-section').style.display = 'block';
+    } catch (err) {
+      document.getElementById('token-section').style.display = 'none';
+    }
+  }
+
+  function getScopeLevel(scope) {
+    if (['admin:org', 'repo', 'delete_repo', 'workflow', 'admin:repo_hook'].includes(scope)) return 'high';
+    if (['write:org', 'write:repo_hook', 'user', 'repo:invite'].includes(scope)) return 'medium';
+    return 'low';
+  }
+
   // Lockdown
   document.getElementById('lockdown-btn').addEventListener('click', async () => {
     const btn = document.getElementById('lockdown-btn');
@@ -328,6 +492,34 @@
       btn.disabled = false;
     }
   });
+
+  // Password management
+  const passwordForm = document.getElementById('password-form');
+  if (passwordForm) {
+    passwordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('password-btn');
+      const cur = document.getElementById('current-password').value;
+      const pwd = document.getElementById('new-password').value;
+      btn.disabled = true;
+      setStatus('password-status', 'Saving password...', 'info');
+
+      try {
+        await api('/api/config/password', {
+          method: 'POST',
+          body: JSON.stringify({ currentPassword: cur, newPassword: pwd }),
+          headers: { 'Content-Type': 'application/json' },
+        });
+        setStatus('password-status', 'Authorization password updated', 'success');
+        document.getElementById('current-password').value = '';
+        document.getElementById('new-password').value = '';
+      } catch (err) {
+        setStatus('password-status', err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
 
   // Audit
   async function loadAudit() {

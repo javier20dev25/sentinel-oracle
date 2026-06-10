@@ -127,14 +127,15 @@ export async function verifyAssertion(
   origin: string,
   rpId: string,
   expectedPrNumber?: number,
-): Promise<{ verified: boolean; credentialId: string }> {
+): Promise<{ verified: boolean; credentialId: string; prNumber?: number }> {
   const storedJson = db.getConfig(`webauthn_assertion_${expectedChallenge}`)
   if (!storedJson) return { verified: false, credentialId: '' }
 
   const stored = JSON.parse(storedJson)
+  const originalPrNumber: number | undefined = stored.prNumber || undefined
   db.setConfig(`webauthn_assertion_${expectedChallenge}`, '')
 
-  if (expectedPrNumber !== undefined && stored.prNumber !== expectedPrNumber) {
+  if (expectedPrNumber !== undefined && originalPrNumber !== expectedPrNumber) {
     return { verified: false, credentialId: '' }
   }
 
@@ -160,5 +161,5 @@ export async function verifyAssertion(
 
   db.updateDeviceCounter(device.credentialId, verification.authenticationInfo.newCounter)
 
-  return { verified: true, credentialId }
+  return { verified: true, credentialId, prNumber: originalPrNumber }
 }
