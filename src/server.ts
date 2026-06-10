@@ -48,7 +48,6 @@ export function initEnrollment(config: Config, db: DatabaseStore): void {
   console.log(`  =============================\n`)
   db.log('enrollment_token_created', null, 'Enrollment token generated (one-time)')
 
-  // Auto-refresh enrollment token
   const interval = setInterval(() => {
     if (_enrollmentUsed || db.getConfig('enrollment_completed') === 'true') {
       clearInterval(interval)
@@ -154,8 +153,6 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       }
       const device = db.getDeviceByCredentialId(result.credentialId)
 
-      // Create session only if this is a dashboard login (no PR number in assertion)
-      // Phone authorizations (PR-bound) do NOT create sessions
       if (result.credentialId && !result.prNumber) {
         const sessionId = db.createSession(result.credentialId, device?.name || 'unknown', getSessionTTL())
         res.setHeader('Set-Cookie', createSessionCookie(sessionId))
@@ -192,13 +189,12 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     res.json({ loggedOut: true })
   })
 
-  // ----- Debug: verify enrollment token -----
+  // ----- Enrollment -----
   app.get('/api/debug/enrollment', (_req, res) => {
     console.log('[_enrollmentToken]', _enrollmentToken, '_enrollmentUsed:', _enrollmentUsed)
     res.json({ token: _enrollmentToken, used: _enrollmentUsed })
   })
 
-  // ----- Enrollment password management -----
   app.post('/api/config/password', requireAuth(db), authRateLimiter(5, 60000), (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body
@@ -272,7 +268,6 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.setConfig('enrollment_completed', 'true')
       db.log('device_enrolled', null, `First device "${deviceName}" enrolled and registered`)
 
-      // Auto-create session
       const sessionId = db.createSession(result.credentialId, deviceName || 'Admin Device', getSessionTTL())
       res.setHeader('Set-Cookie', createSessionCookie(sessionId))
 
@@ -333,7 +328,6 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (!credential) return res.status(400).json({ error: 'credential (WebAuthn assertion) required' })
       if (!webauthnChallenge) return res.status(400).json({ error: 'challenge (WebAuthn challenge) required' })
 
-      // Enrollment password verification
       if (config.passwordHash) {
         if (!password) return res.status(400).json({ error: 'password required' })
         if (!verifyPassword(password, config.passwordHash)) {
@@ -348,7 +342,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         return res.status(statusCode).json({ error: result.error })
       }
 
-      res.json({ authorized: true, prNumber, merged: true })
+      res.json({ authorized: true, prNumber, merged: result.merged === true })
     } catch (err) {
       db.log('error', null, `Confirm authorization: ${err}`)
       res.status(500).json({ error: 'Failed to confirm authorization' })
@@ -436,6 +430,151 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- Branch Protection Status -----
+  app.get('/api/status/branch-protection', requireAuth(db), apiRateLimiter(10, 60000), async (_req, res) => {
+    try {
+      const protection = await client.getBranchProtection('main')
+      const issues: string[] = []
+
+      if (!protection.enabled) {
+        issues.push('Branch protection is not enabled on main')
+      } else {
+        if (!protection.requiredStatusChecks.includes(config.githubStatusContext)) {
+          issues.push(`Required status check "${config.githubStatusContext}" is missing from branch protection`)
+        }
+        if (!protection.adminEnforced) {
+          issues.push('Admin bypass is enabled — administrators can push without status checks')
+        }
+        if (!protection.requiredReviews) {
+          issues.push('Pull request reviews are not required')
+        }
+        if (protection.allowsForcePushes) {
+          issues.push('Force pushes are allowed on main')
+        }
+      }
+
+      res.json({
+        ...protection,
+        statusContext: config.githubStatusContext,
+        issues,
+        secure: issues.length === 0,
+      })
+    } catch (err) {
+      db.log('error', null, `Branch protection check: ${err}`)
+      res.status(500).json({ error: 'Failed to check branch protection' })
+    }
+  })
+
+  // ----- PR check details -----
+  app.get('/api/prs/:number/checks', requireAuth(db), apiRateLimiter(30, 60000), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const checks = await client.getCheckRunDetails(pr.sha)
+      const diff = await client.compareCommits(pr.sha + '~1', pr.sha).catch(() => null)
+      res.json({ checks, diff })
+    } catch (err) {
+      db.log('error', null, `PR checks: ${err}`)
+      res.status(500).json({ error: 'Failed to fetch PR checks' })
+    }
+  })
+
+  // ----- Metrics -----
+  app.get('/api/metrics', requireAuth(db), apiRateLimiter(20, 60000), (_req, res) => {
+    try {
+      const completed = db.getCompletedPRs()
+      const pending = db.getPendingPRs()
+
+      const totalMergeTime = completed
+        .filter(p => p.authStatus === 'authorized' && p.authorizedAt)
+        .map(p => ({
+          prNumber: p.prNumber,
+          title: p.title,
+          author: p.author,
+          createdAt: p.createdAt,
+          authorizedAt: p.authorizedAt!,
+          waitMs: p.authorizedAt! - p.createdAt,
+          waitHours: ((p.authorizedAt! - p.createdAt) / 3600000).toFixed(1),
+        }))
+
+      const byAuthor: Record<string, { total: number; merged: number; rejected: number; totalWaitMs: number }> = {}
+      for (const p of completed) {
+        if (!byAuthor[p.author]) byAuthor[p.author] = { total: 0, merged: 0, rejected: 0, totalWaitMs: 0 }
+        byAuthor[p.author].total++
+        if (p.authStatus === 'authorized') {
+          byAuthor[p.author].merged++
+          if (p.authorizedAt) byAuthor[p.author].totalWaitMs += p.authorizedAt - p.createdAt
+        }
+        if (p.authStatus === 'rejected') byAuthor[p.author].rejected++
+      }
+
+      const authorStats = Object.entries(byAuthor).map(([author, stats]) => ({
+        author,
+        ...stats,
+        avgWaitHours: stats.merged > 0 ? (stats.totalWaitMs / stats.merged / 3600000).toFixed(1) : '0',
+      }))
+
+      res.json({
+        totalPRs: completed.length + pending.length,
+        pendingPRs: pending.length,
+        authorizedPRs: completed.filter(p => p.authStatus === 'authorized').length,
+        rejectedPRs: completed.filter(p => p.authStatus === 'rejected').length,
+        expiredPRs: completed.filter(p => p.authStatus === 'expired').length,
+        totalMergeTime,
+        authorStats,
+      })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to compute metrics' })
+    }
+  })
+
+  // ----- Webhook receiver for GitHub events -----
+  app.post('/api/webhook/github', express.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+      const event = req.headers['x-github-event'] as string
+      const delivery = req.headers['x-github-delivery'] as string
+      const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body.toString())
+
+      if (!event || !delivery) {
+        return res.status(400).json({ error: 'Missing GitHub webhook headers' })
+      }
+
+      db.log('webhook_received', null, `Event: ${event}, Delivery: ${delivery.slice(0, 8)}...`)
+
+      if (event === 'pull_request') {
+        const action = body.action
+        const pr = body.pull_request
+        if (!pr) return res.status(200).json({ ok: true })
+
+        if (['opened', 'synchronize', 'reopened'].includes(action)) {
+          db.log('webhook_pr_event', pr.number, `PR #${pr.number} ${action} by ${pr.user?.login}`)
+        }
+
+        if (action === 'closed' && pr.merged) {
+          const existing = db.getPRByNumber(pr.number)
+          if (existing && existing.authStatus !== 'authorized') {
+            db.log('unauthorized_merge_detected', pr.number,
+              `PR #${pr.number} was merged without Oracle authorization by ${pr.merged_by?.login || 'unknown'}`
+            )
+          }
+        }
+      }
+
+      if (event === 'push') {
+        const ref = body.ref
+        if (ref === 'refs/heads/main' || ref === 'refs/heads/master') {
+          db.log('push_to_main', null, `Push to ${ref} by ${body.pusher?.name || 'unknown'}`)
+        }
+      }
+
+      res.status(200).json({ ok: true })
+    } catch (err) {
+      db.log('error', null, `Webhook processing error: ${err}`)
+      res.status(200).json({ ok: true })
+    }
+  })
+
   // ----- Status -----
   app.get('/api/status', (_req, res) => {
     const pendingCount = db.getPendingPRs().length
@@ -446,6 +585,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       registeredDevices: devices.length,
       locked: queue.isLocked(),
       setupRequired: !db.getConfig('enrollment_completed'),
+      authMode: client.authMode,
       version: '1.0.0',
     })
   })
@@ -476,7 +616,6 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   }
 
-  // Error handler — returns JSON for body parser / validation errors
   app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const status = err.status || 400
     res.status(status).json({ error: err.message || 'Bad request' })

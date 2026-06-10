@@ -4,6 +4,7 @@
   let authenticated = false;
   let currentCredentialId = null;
   let devicesRegistered = false;
+  let currentStatus = null;
 
   function base64urlToBuffer(str) {
     const padding = '='.repeat((4 - str.length % 4) % 4);
@@ -55,6 +56,7 @@
   async function checkSetup() {
     const status = await api('/api/status');
     devicesRegistered = status.registeredDevices > 0;
+    currentStatus = status;
     updateLockdownBanner(status.locked);
 
     // Validate session server-side
@@ -68,6 +70,10 @@
       hide('pr-section');
       hide('devices-section');
       hide('lockdown-section');
+      hide('auth-mode-section');
+      hide('branch-protection-section');
+      hide('metrics-section');
+      hide('webhook-section');
     } else if (!devicesRegistered) {
       show('setup-section');
       hide('enrollment-section');
@@ -75,26 +81,40 @@
       hide('pr-section');
       hide('devices-section');
       hide('lockdown-section');
+      hide('auth-mode-section');
+      hide('branch-protection-section');
+      hide('metrics-section');
+      hide('webhook-section');
     } else if (!authenticated) {
       show('auth-section');
       hide('setup-section');
       hide('pr-section');
       hide('devices-section');
       hide('lockdown-section');
+      hide('auth-mode-section');
+      hide('branch-protection-section');
+      hide('metrics-section');
+      hide('webhook-section');
     } else {
         show('pr-section');
         show('devices-section');
         show('lockdown-section');
         show('token-section');
+        show('auth-mode-section');
+        show('branch-protection-section');
+        show('metrics-section');
+        show('webhook-section');
         hide('enrollment-section');
         hide('setup-section');
         hide('auth-section');
         await loadPRs();
         await loadDevices();
         await loadTokenInfo();
+        await loadAuthMode();
+        await loadBranchProtection();
+        await loadMetrics();
+        await loadWebhookInfo();
       }
-    }
-  }
   }
 
   function updateLockdownBanner(locked) {
@@ -222,9 +242,17 @@
         show('devices-section');
         show('lockdown-section');
         show('token-section');
+        show('auth-mode-section');
+        show('branch-protection-section');
+        show('metrics-section');
+        show('webhook-section');
         await loadPRs();
         await loadDevices();
         await loadTokenInfo();
+        await loadAuthMode();
+        await loadBranchProtection();
+        await loadMetrics();
+        await loadWebhookInfo();
       } else {
         setStatus('auth-status', 'Authentication failed', 'error');
       }
@@ -262,6 +290,8 @@
               <button class="reject-btn" data-pr="${pr.prNumber}" style="background:#da3633">Reject</button>
             </div>
             <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
+            <button class="checks-toggle-btn" data-pr="${pr.prNumber}" style="margin-top:0.5rem;font-size:0.8rem;background:transparent;border:1px solid #30363d;">Show Checks</button>
+            <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
           `;
           prList.appendChild(card);
         }
@@ -271,6 +301,11 @@
         });
         document.querySelectorAll('.reject-btn').forEach(btn => {
           btn.addEventListener('click', rejectPR);
+        });
+        document.querySelectorAll('.checks-toggle-btn').forEach(btn => {
+          btn.addEventListener('click', function () {
+            togglePRChecks(this.dataset.pr, this);
+          });
         });
       }
 
@@ -547,9 +582,199 @@
     return div.innerHTML;
   }
 
+  // Auth Mode Display
+  async function loadAuthMode() {
+    if (!authenticated) return;
+    const el = document.getElementById('auth-mode-display');
+    try {
+      const status = await api('/api/status');
+      currentStatus = status;
+      const mode = status.authMode || 'unknown';
+      let label, cls;
+      if (mode === 'github_app') {
+        label = '🔐 GitHub App';
+        cls = 'success';
+      } else if (mode === 'pat') {
+        label = '🔑 PAT';
+        cls = 'warning';
+      } else {
+        label = 'ℹ️ ' + mode;
+        cls = 'info';
+      }
+      el.innerHTML = '<span class="badge risk-badge ' + cls + '">' + label + '</span>';
+    } catch (err) {
+      el.innerHTML = '<span class="badge risk-badge info">Unknown</span>';
+    }
+  }
+
+  // Branch Protection Status
+  async function loadBranchProtection() {
+    if (!authenticated) return;
+    const el = document.getElementById('branch-protection-info');
+    try {
+      const data = await api('/api/status/branch-protection');
+      const hasIssues = data.issues && data.issues.length > 0;
+      const overallClass = hasIssues ? 'error' : 'success';
+      const overallText = hasIssues ? 'Issues Found' : 'Secure';
+
+      let html = '<div class="token-header"><span class="badge risk-badge ' + overallClass + '" style="font-size:0.9rem;padding:0.3rem 0.8rem;">' + overallText + '</span></div>';
+
+      if (data.issues && data.issues.length > 0) {
+        html += '<ul class="risk-reasons" style="margin-bottom:0.75rem;">';
+        data.issues.forEach(function (issue) {
+          html += '<li>' + escapeHtml(issue) + '</li>';
+        });
+        html += '</ul>';
+      }
+
+      if (data.requiredStatusChecks && data.requiredStatusChecks.length > 0) {
+        html += '<div class="token-detail"><span class="token-label">Checks</span><div class="scope-list">';
+        html += data.requiredStatusChecks.map(function (c) { return '<span class="badge scope-badge low">' + escapeHtml(c) + '</span>'; }).join(' ');
+        html += '</div></div>';
+      }
+
+      if (data.adminEnforcement !== undefined) {
+        html += '<div class="token-detail"><span class="token-label">Enforcement</span>';
+        html += data.adminEnforcement ? '<span class="badge risk-badge success">On</span>' : '<span class="badge risk-badge error">Off</span>';
+        html += '</div>';
+      }
+
+      el.innerHTML = html;
+    } catch (err) {
+      el.innerHTML = '<p class="empty">Error loading branch protection</p>';
+    }
+  }
+
+  // PR Check Details
+  async function togglePRChecks(prNumber, btn) {
+    const section = document.getElementById('checks-section-' + prNumber);
+    if (section.style.display !== 'none') {
+      section.style.display = 'none';
+      btn.textContent = 'Show Checks';
+      return;
+    }
+    try {
+      section.innerHTML = '<p style="padding:0.5rem;color:#8b949e;">Loading checks...</p>';
+      section.style.display = 'block';
+      btn.textContent = 'Hide Checks';
+
+      const data = await api('/api/prs/' + prNumber + '/checks');
+
+      let html = '<div style="padding:0.75rem 0;font-size:0.85rem;">';
+      html += '<table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid #30363d;">';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Check</th>';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Conclusion</th>';
+      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Duration</th></tr></thead><tbody>';
+
+      if (data.checks && data.checks.length > 0) {
+        data.checks.forEach(function (check) {
+          var conclusionClass = check.conclusion === 'success' ? 'success' : check.conclusion === 'failure' ? 'error' : 'warning';
+          html += '<tr style="border-bottom:1px solid #21262d;">';
+          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(check.name) + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;"><span class="badge ' + conclusionClass + '">' + escapeHtml(check.conclusion || 'pending') + '</span></td>';
+          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (check.duration ? check.duration + 's' : '-') + '</td>';
+          html += '</tr>';
+        });
+      } else {
+        html += '<tr><td colspan="3" style="padding:0.5rem;color:#8b949e;">No checks found</td></tr>';
+      }
+      html += '</tbody></table>';
+
+      if (data.diffStats) {
+        html += '<div class="token-detail" style="margin-top:0.5rem;"><span class="token-label">Diff</span>';
+        html += '<span>' + data.diffStats.files + ' files changed, <span style="color:#3fb950;">+' + data.diffStats.additions + '</span> <span style="color:#f85149;">-' + data.diffStats.deletions + '</span></span>';
+        html += '</div>';
+      }
+
+      html += '</div>';
+      section.innerHTML = html;
+    } catch (err) {
+      section.innerHTML = '<p class="empty">Error: ' + escapeHtml(err.message) + '</p>';
+      btn.textContent = 'Show Checks';
+    }
+  }
+
+  // Metrics Section
+  async function loadMetrics() {
+    if (!authenticated) return;
+    const el = document.getElementById('metrics-info');
+    try {
+      const data = await api('/api/metrics');
+
+      let html = '<div class="token-header" style="flex-wrap:wrap;gap:0.75rem;">';
+      html += '<span class="badge scope-badge low"><strong>Total PRs:</strong> ' + (data.totalPrs || 0) + '</span>';
+      html += '<span class="badge scope-badge low"><strong>Pending:</strong> ' + (data.pending || 0) + '</span>';
+      html += '<span class="badge scope-badge low"><strong>Authorized:</strong> ' + (data.authorized || 0) + '</span>';
+      html += '<span class="badge scope-badge low"><strong>Rejected:</strong> ' + (data.rejected || 0) + '</span>';
+      html += '<span class="badge scope-badge low"><strong>Expired:</strong> ' + (data.expired || 0) + '</span>';
+      html += '</div>';
+
+      if (data.recentMergeTimes && data.recentMergeTimes.length > 0) {
+        html += '<h3 style="font-size:0.9rem;margin:0.75rem 0 0.5rem;color:#f0f6fc;">Recent Merge Times</h3>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;"><thead><tr style="border-bottom:1px solid #30363d;">';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">PR #</th>';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Title</th>';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Wait Time</th></tr></thead><tbody>';
+        data.recentMergeTimes.forEach(function (m) {
+          html += '<tr style="border-bottom:1px solid #21262d;">';
+          html += '<td style="padding:0.3rem 0.5rem;">#' + m.prNumber + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(m.title) + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (m.waitTime || '-') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      if (data.authorStats && data.authorStats.length > 0) {
+        html += '<h3 style="font-size:0.9rem;margin:0.75rem 0 0.5rem;color:#f0f6fc;">Author Stats</h3>';
+        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;"><thead><tr style="border-bottom:1px solid #30363d;">';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Author</th>';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Merged</th>';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Rejected</th>';
+        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Avg Wait</th></tr></thead><tbody>';
+        data.authorStats.forEach(function (a) {
+          html += '<tr style="border-bottom:1px solid #21262d;">';
+          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(a.author) + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;">' + (a.merged || 0) + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;">' + (a.rejected || 0) + '</td>';
+          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (a.avgWait || '-') + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      if (!data.recentMergeTimes && !data.authorStats) {
+        html += '<p class="empty">No metrics data available yet.</p>';
+      }
+
+      el.innerHTML = html;
+    } catch (err) {
+      el.innerHTML = '<p class="empty">Error loading metrics: ' + escapeHtml(err.message) + '</p>';
+    }
+  }
+
+  // Webhook Info
+  async function loadWebhookInfo() {
+    if (!authenticated) return;
+    const el = document.getElementById('webhook-info');
+    try {
+      let secretHint = 'configured';
+      if (currentStatus && currentStatus.webhookSecretHint) {
+        secretHint = currentStatus.webhookSecretHint;
+      } else {
+        const status = await api('/api/status');
+        currentStatus = status;
+        if (status.webhookSecretHint) secretHint = status.webhookSecretHint;
+      }
+      el.innerHTML = '<div class="token-detail"><span class="token-label">Receiver</span><code>POST /api/webhook/github</code></div>' +
+        '<div class="token-detail"><span class="token-label">Secret</span><span>' + escapeHtml(secretHint) + '</span></div>';
+    } catch (err) {
+      el.innerHTML = '<div class="token-detail"><span class="token-label">Receiver</span><code>POST /api/webhook/github</code></div>';
+    }
+  }
+
   // Init
   checkSetup();
   loadAudit();
   setInterval(loadPRs, 15000);
   setInterval(loadAudit, 30000);
+  setInterval(loadMetrics, 60000);
 })();

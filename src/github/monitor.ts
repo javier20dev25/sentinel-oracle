@@ -1,4 +1,4 @@
-import type { GitHubClient, CheckStatus, PRInfo } from './client';
+import type { GitHubClient, CheckStatus, BranchProtection } from './client';
 import type { DatabaseStore } from '../storage/database';
 import { promises as dns } from 'dns'
 
@@ -13,7 +13,7 @@ export interface MonitorResult {
 export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<MonitorResult> {
     const result: MonitorResult = { newPRs: 0, updatedPRs: 0, authorizedPRs: 0 };
 
-    let prs: PRInfo[];
+    let prs;
     try {
         await dns.resolve('api.github.com').catch(() => {})
         prs = await client.listOpenPRs();
@@ -80,6 +80,12 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
         }
     }
 
+    // Check branch protection once per poll cycle
+    try {
+        const protection = await client.getBranchProtection('main');
+        checkBranchProtection(protection, db);
+    } catch {}
+
     return result;
 }
 
@@ -112,4 +118,23 @@ function evaluateStatuses(statuses: {
     sentinel: string;
 }): boolean {
     return statuses.allRequiredPass;
+}
+
+function checkBranchProtection(protection: BranchProtection, db: DatabaseStore): void {
+    if (!protection.enabled) {
+        db.log('branch_protection_warning', null, 'Branch protection is NOT enabled on main — merges can bypass Sentinel Oracle');
+        return;
+    }
+
+    const issues: string[] = [];
+    if (!protection.requiredStatusChecks.includes('Sentinel Authorization')) {
+        issues.push('Sentinel Authorization is not in required status checks');
+    }
+    if (!protection.adminEnforced) {
+        issues.push('Admins can bypass required status checks');
+    }
+
+    for (const issue of issues) {
+        db.log('branch_protection_issue', null, issue);
+    }
 }

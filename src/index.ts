@@ -1,4 +1,3 @@
-// Force public DNS + IPv4-first (avoids getaddrinfo ENOTFOUND on some Windows networks)
 import { setDefaultResultOrder, setServers, promises as dns } from 'dns'
 setServers(['8.8.8.8', '1.1.1.1'])
 setDefaultResultOrder('ipv4first')
@@ -6,19 +5,52 @@ setDefaultResultOrder('ipv4first')
 import { loadConfig } from './config'
 import { DatabaseStore } from './storage/database'
 import { GitHubClient } from './github/client'
+import type { GitHubAppConfig } from './github/auth'
 import { createApp, initEnrollment } from './server'
 import { initHmacKey } from './crypto/signing'
 import { printStartupBanner } from './startup'
 import * as fs from 'fs'
 import * as https from 'https'
 
+function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrConfig: string | GitHubAppConfig; warnings: string[] } {
+  const warnings: string[] = []
+
+  const hasPat = !!config.githubToken
+  const hasApp = !!config.githubAppId && !!config.githubInstallationId && !!config.githubPrivateKeyPath
+
+  if (hasPat && hasApp) {
+    warnings.push('Both githubToken and GitHub App credentials provided — using GitHub App mode')
+  }
+
+  if (hasApp) {
+    if (!fs.existsSync(config.githubPrivateKeyPath)) {
+      console.error(`GitHub App private key not found at: ${config.githubPrivateKeyPath}`)
+      process.exit(1)
+    }
+    return {
+      tokenOrConfig: {
+        appId: config.githubAppId,
+        installationId: config.githubInstallationId,
+        privateKeyPath: config.githubPrivateKeyPath,
+      },
+      warnings,
+    }
+  }
+
+  if (hasPat) {
+    return { tokenOrConfig: config.githubToken, warnings }
+  }
+
+  console.error('Missing credentials: provide either githubToken (PAT) OR (githubAppId + githubInstallationId + githubPrivateKeyPath)')
+  process.exit(1)
+}
+
 function ensureCredentials(config: ReturnType<typeof loadConfig>) {
   const missing: string[] = []
-  if (config.githubToken) {
-    // PAT mode - ok
-  } else if (config.githubAppId && config.githubInstallationId && config.githubPrivateKeyPath) {
-    // GitHub App mode - ok
-  } else {
+  const hasPat = !!config.githubToken
+  const hasApp = !!config.githubAppId && !!config.githubInstallationId && !!config.githubPrivateKeyPath
+
+  if (!hasPat && !hasApp) {
     missing.push('githubToken OR (githubAppId + githubInstallationId + githubPrivateKeyPath)')
   }
   if (!config.githubOwner) missing.push('githubOwner')
@@ -72,14 +104,12 @@ function getHttpsOptions(configDir: string): { key: string; cert: string } {
   }
 }
 
-// Windows libuv bug: direct process.exit with pending handles => assertion
 function gracefulExit(code: number): never {
   setTimeout(() => process.exit(code), 100)
   throw new Error('exiting')
 }
 
 async function main() {
-  // Buffer config warnings to print after banner
   const configWarnings: string[] = []
   const origWarn = console.warn
   console.warn = (msg: string) => { configWarnings.push(String(msg)) }
@@ -89,12 +119,15 @@ async function main() {
   ensureCredentials(config)
   validatePermissions(config.dataDir)
 
+  const { tokenOrConfig, warnings } = resolveCredentials(config)
+  configWarnings.push(...warnings)
+
   const db = new DatabaseStore(config.dataDir, config.encryptionKey)
   initHmacKey(config.encryptionKey)
   initEnrollment(config, db)
-  const client = new GitHubClient(config.githubToken, config.githubOwner, config.githubRepo, config.githubStatusContext)
 
-  // Warm DNS cache for GitHub API (avoids intermittent ENOTFOUND on some Windows networks)
+  const client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
+
   try {
     await dns.resolve('api.github.com')
   } catch {}
@@ -105,10 +138,12 @@ async function main() {
   } else {
     const valid = await client.verifyToken()
     if (!valid) {
-      console.error('GitHub token verification failed — check token permissions')
+      console.error('GitHub credential verification failed — check token/permissions')
       console.error('Set SENTINEL_SKIP_TOKEN_VERIFY=1 to skip (development only)')
       gracefulExit(1)
     }
+    const mode = client.authMode === 'github_app' ? 'GitHub App' : 'PAT'
+    configWarnings.push(`[auth] Using ${mode} authentication`)
   }
 
   const { app, startPolling, stopPolling } = createApp(config, db, client)

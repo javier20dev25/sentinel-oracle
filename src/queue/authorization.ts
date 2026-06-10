@@ -54,7 +54,7 @@ export class AuthorizationQueue {
     webauthnCredential: unknown,
     webauthnChallenge: string,
     reason?: string,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; merged?: boolean }> {
     if (this.isLocked()) {
       return { success: false, error: 'System is locked down' }
     }
@@ -155,10 +155,10 @@ export class AuthorizationQueue {
     }
 
     if (!statusOk) {
-      return { success: true, error: 'Authorized but failed to update GitHub status' }
+      return { success: true, merged, error: 'Authorized but failed to update GitHub status' }
     }
 
-    return { success: true }
+    return { success: true, merged }
   }
 
   async rejectAuthorization(prNumber: number, reason?: string): Promise<void> {

@@ -10,6 +10,8 @@ operates as an additional enforcement layer. Repository administrators with
 direct push or bypass permissions remain a valid threat path independent of
 Oracle's controls.
 
+Two authentication modes are supported: Personal Access Token (PAT) and GitHub App (recommended). See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for detailed GitHub App setup instructions.
+
 ---
 
 ## Table of Contents
@@ -23,6 +25,7 @@ Oracle's controls.
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Configuration Reference](#configuration-reference)
+- [GitHub App Setup](#github-app-setup)
 - [API Endpoints](#api-endpoints)
 - [Database Schema](#database-schema)
 - [Network Architecture](#network-architecture)
@@ -377,6 +380,32 @@ export ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
 | `locked` | boolean | `false` | Emergency lockdown. Persisted state. |
 | `passwordHash` | string | `""` | SHA-256 hash of dashboard password. Empty = no password. |
 | `enrollmentTokenTtlMs` | number | `120000` | First-time device enrollment token TTL. |
+| `githubAppId` | string | `""` | GitHub App ID for JWT authentication |
+| `githubInstallationId` | string | `""` | GitHub App installation ID |
+| `githubPrivateKeyPath` | string | `""` | Path to GitHub App private key PEM file |
+| `githubWebhookSecret` | string | `""` | Secret for verifying GitHub webhook payloads |
+
+---
+
+## GitHub App Setup
+
+Sentinel Oracle supports two authentication modes for GitHub API access:
+
+1. **Personal Access Token (PAT)** — The traditional approach. A fine-grained PAT with `pull-requests: write` scope is stored on the oracle server. Simple to set up but creates a long-lived credential.
+2. **GitHub App (recommended)** — Installation tokens with 1-hour TTL, auto-refresh, and repository-scoped permissions. No long-lived credentials are stored on the oracle server.
+
+### Why GitHub App?
+
+| Aspect | PAT | GitHub App |
+|--------|-----|------------|
+| Token lifetime | Long-lived (user-managed rotation) | 1 hour TTL, auto-refreshed |
+| Scope | User-scoped (all repos the user can access) | Repository-scoped (specific repos only) |
+| Risk profile | High — token exfiltration grants wide access | Low — compromised token expires within 1 hour |
+| Rotation | Manual, periodic | Automatic, every hour |
+
+Using a GitHub App eliminates the risk of a long-lived PAT being exfiltrated from the oracle server. Even if an attacker gains access to the server, the installation token expires within 60 minutes and is scoped to a single repository.
+
+See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for complete setup instructions, including registering a GitHub App, installing it on your organization, generating a private key, and configuring the required environment variables.
 
 ---
 
@@ -391,6 +420,10 @@ export ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
 | GET | `/api/devices` | List registered WebAuthn credentials. |
 | DELETE | `/api/devices/:id` | Revoke a registered device. |
 | GET | `/api/audit` | Paginated authorization audit log. |
+| GET | `/api/status/branch-protection` | Returns current branch protection status for main branch. Checks for required status checks, admin enforcement, force push settings. |
+| GET | `/api/prs/{number}/checks` | Returns detailed check run results for a specific PR including check names, conclusions, durations, and diff statistics (files changed, additions, deletions). |
+| GET | `/api/metrics` | Returns aggregated metrics for audit and analysis: summary counts, per-PR merge times with approval wait duration, and per-author statistics. |
+| POST | `/api/webhook/github` | GitHub webhook receiver. Accepts pull_request and push events. Used for real-time PR notifications and unauthorized merge detection. |
 
 ### POST /api/prs
 
@@ -438,6 +471,86 @@ Response:
 
 Rejects all pending challenges, sets all open PRs to failure commit status,
 persists locked state to SQLite.
+
+### GET /api/status/branch-protection
+
+Returns current branch protection status for the main branch:
+
+- Checks whether required status checks are configured.
+- Verifies admin enforcement is enabled.
+- Detects force push settings.
+- Returns a JSON summary of each check and an overall pass/fail status.
+
+### GET /api/prs/{number}/checks
+
+Returns detailed check run results for a specific PR:
+
+```json
+{
+  "prNumber": 142,
+  "checks": [
+    {
+      "name": "CI / test (18.x)",
+      "conclusion": "success",
+      "status": "completed",
+      "startedAt": "2026-06-10T10:00:00Z",
+      "completedAt": "2026-06-10T10:02:30Z",
+      "durationMs": 150000
+    }
+  ],
+  "diff": {
+    "filesChanged": 12,
+    "additions": 45,
+    "deletions": 8
+  }
+}
+```
+
+### GET /api/metrics
+
+Returns aggregated metrics for audit and analysis:
+
+```json
+{
+  "summary": {
+    "total": 150,
+    "pending": 3,
+    "authorized": 120,
+    "rejected": 20,
+    "expired": 7
+  },
+  "mergeTimes": [
+    {
+      "prNumber": 142,
+      "requestedAt": "2026-06-10T10:00:00Z",
+      "authorizedAt": "2026-06-10T10:02:00Z",
+      "approvedAt": "2026-06-10T10:02:30Z",
+      "approvalWaitMs": 120000,
+      "totalDurationMs": 150000
+    }
+  ],
+  "perAuthor": [
+    {
+      "author": "javier20dev25",
+      "mergedCount": 45,
+      "rejectionCount": 5,
+      "averageWaitMs": 95000
+    }
+  ]
+}
+```
+
+### POST /api/webhook/github
+
+GitHub webhook receiver. Accepts `pull_request` and `push` events.
+
+Used for:
+- Real-time PR notifications when new pull requests are opened or updated.
+- Unauthorized merge detection — triggers alerts when merges bypass Oracle.
+
+Requires `Content-Type: application/json` header.
+
+If `githubWebhookSecret` is configured, Oracle verifies the `X-Hub-Signature-256` header to authenticate the webhook payload.
 
 ---
 
@@ -746,6 +859,18 @@ The only persistent state is the SQLite database and config file. Back up the
 database daily, encrypted, and stored separately from the oracle server. Test
 restoration quarterly.
 
+### GitHub App Mode
+
+When using GitHub App authentication, no long-lived credentials are stored on the oracle server. Installation tokens are generated on-demand with a 1-hour TTL and are scoped to a single repository. This eliminates the risk of PAT exfiltration and reduces the blast radius of a server compromise.
+
+### Webhook Verification
+
+The optional `githubWebhookSecret` configures HMAC-SHA256 verification of incoming webhook payloads. Oracle verifies the `X-Hub-Signature-256` header against the request body, ensuring that only legitimate GitHub webhook events are processed. This prevents spoofed webhook deliveries from triggering unauthorized actions.
+
+### Branch Protection Auto-Verification
+
+Oracle automatically verifies branch protection settings on the main branch before processing merge requests. It checks for required status checks, admin enforcement, and force push settings. If branch protection is misconfigured, Oracle logs a warning and returns the status via the `/api/status/branch-protection` endpoint.
+
 ---
 
 ## Known Limitations
@@ -760,6 +885,9 @@ restoration quarterly.
 - LAN IP auto-detection may select a Docker, VPN, or VirtualBox interface
   if the machine has multiple active network adapters. Set `bindAddress`
   explicitly in config.json if this occurs.
+- Branch protection verification is read-only — Oracle detects issues but does not auto-fix them.
+- Webhook delivery is not guaranteed — polling serves as fallback.
+- Unauthorized merge detection relies on webhook availability.
 
 ---
 
