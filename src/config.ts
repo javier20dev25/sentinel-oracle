@@ -27,6 +27,7 @@ export interface Config {
   locked: boolean
   passwordHash: string
   enrollmentTokenTtlMs: number
+  githubWebhookSecret: string
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -163,6 +164,7 @@ export function loadConfig(): Config {
     locked: false,
     passwordHash: '',
     enrollmentTokenTtlMs: 120000,
+    githubWebhookSecret: '',
   }
 
   try {

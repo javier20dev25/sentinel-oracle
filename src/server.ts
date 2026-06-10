@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'path'
@@ -20,8 +21,7 @@ import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 
 function generateEnrollmentToken(): string {
-  const { randomBytes } = require('crypto')
-  return randomBytes(16).toString('hex')
+  return crypto.randomBytes(16).toString('hex')
 }
 
 let _enrollmentToken: string | null = null
@@ -29,6 +29,11 @@ let _enrollmentUsed = false
 
 export function getEnrollmentToken(): string {
   return _enrollmentToken || ''
+}
+
+function safeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
 }
 
 export function initEnrollment(config: Config, db: DatabaseStore): void {
@@ -42,9 +47,9 @@ export function initEnrollment(config: Config, db: DatabaseStore): void {
   _enrollmentToken = generateEnrollmentToken()
   _enrollmentUsed = false
   console.log(`  ===== FIRST-TIME SETUP =====`)
-  console.log(`  Enrollment token: ${_enrollmentToken}`)
+  console.log(`  Enrollment token configured (length: ${_enrollmentToken.length})`)
   console.log(`  Token refreshes every ${config.enrollmentTokenTtlMs / 1000}s — check terminal for updates`)
-  console.log(`  POST /api/setup/begin  {"enrollmentToken":"${_enrollmentToken}","deviceName":"..."}`)
+  console.log(`  POST /api/setup/begin with enrollment token to enroll`)
   console.log(`  =============================\n`)
   db.log('enrollment_token_created', null, 'Enrollment token generated (one-time)')
 
@@ -55,8 +60,8 @@ export function initEnrollment(config: Config, db: DatabaseStore): void {
     }
     _enrollmentToken = generateEnrollmentToken()
     console.log(`\n  ===== ENROLLMENT TOKEN REFRESHED =====`)
-    console.log(`  New token: ${_enrollmentToken}`)
-    console.log(`  POST /api/setup/begin  {"enrollmentToken":"${_enrollmentToken}","deviceName":"..."}`)
+    console.log(`  New token configured (length: ${_enrollmentToken.length})`)
+    console.log(`  POST /api/setup/begin with enrollment token to enroll`)
     console.log(`  =====================================\n`)
     db.log('enrollment_token_refreshed', null, 'Enrollment token refreshed')
   }, config.enrollmentTokenTtlMs)
@@ -105,7 +110,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const result = await generateRegistration(deviceName, db, config.serverOrigin, rpId)
       res.json(result)
     } catch (err) {
-      db.log('error', null, `WebAuthn register begin: ${err}`)
+      db.log('error', null, `WebAuthn register begin: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Registration initialization failed' })
     }
   })
@@ -127,7 +132,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.log('device_registered', null, `Device "${deviceName}" registered (credential: ${result.credentialId.slice(0, 16)}...)`)
       res.json({ verified: true, credentialId: result.credentialId })
     } catch (err) {
-      db.log('error', null, `WebAuthn register complete: ${err}`)
+      db.log('error', null, `WebAuthn register complete: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Registration completion failed' })
     }
   })
@@ -139,7 +144,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const result = await generateAssertion(db, config.serverOrigin, rpId, prNumber)
       res.json(result)
     } catch (err) {
-      db.log('error', null, `WebAuthn assert begin: ${err}`)
+      db.log('error', null, `WebAuthn assert begin: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Assertion initialization failed' })
     }
   })
@@ -162,14 +167,14 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.log('authenticated', null, `Device "${device?.name || 'unknown'}" authenticated`)
       res.json({ verified: true, credentialId: result.credentialId })
     } catch (err) {
-      db.log('error', null, `WebAuthn assert complete: ${err}`)
+      db.log('error', null, `WebAuthn assert complete: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Assertion completion failed' })
     }
   })
 
   // ----- Session -----
   app.get('/api/session/check', (req, res) => {
-    const sessionId = req.cookies?.sentinel_session
+    const sessionId = req.signedCookies?.sentinel_session
     if (!sessionId) return res.json({ authenticated: false })
     const session = db.getSession(sessionId)
     if (!session) {
@@ -180,7 +185,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   app.post('/api/session/logout', (req, res) => {
-    const sessionId = req.cookies?.sentinel_session
+    const sessionId = req.signedCookies?.sentinel_session
     if (sessionId) {
       db.deleteSession(sessionId)
       db.log('session_logout', null, 'Session explicitly terminated')
@@ -190,11 +195,6 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Enrollment -----
-  app.get('/api/debug/enrollment', (_req, res) => {
-    console.log('[_enrollmentToken]', _enrollmentToken, '_enrollmentUsed:', _enrollmentUsed)
-    res.json({ token: _enrollmentToken, used: _enrollmentUsed })
-  })
-
   app.post('/api/config/password', requireAuth(db), authRateLimiter(5, 60000), (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body
@@ -209,7 +209,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.log('password_set', null, 'Enrollment password was set or changed')
       res.json({ success: true })
     } catch (err) {
-      db.log('error', null, `Password change: ${err}`)
+      db.log('error', null, `Password change: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to set password' })
     }
   })
@@ -218,11 +218,11 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   app.post('/api/setup/begin', authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const { enrollmentToken, deviceName } = req.body
-      console.log('[setup/begin] received token:', JSON.stringify(enrollmentToken), 'expected:', _enrollmentToken, 'used:', _enrollmentUsed)
+      console.log('[setup/begin] enrollment attempt — token provided:', !!enrollmentToken, 'used:', _enrollmentUsed)
       if (_enrollmentUsed || !_enrollmentToken) {
         return res.status(403).json({ error: 'Enrollment not available — already completed or disabled' })
       }
-      if (!enrollmentToken || enrollmentToken !== _enrollmentToken) {
+      if (!enrollmentToken || !safeCompare(enrollmentToken, _enrollmentToken)) {
         return res.status(403).json({ error: 'Invalid enrollment token' })
       }
       if (!deviceName || typeof deviceName !== 'string') {
@@ -232,7 +232,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const result = await generateRegistration('admin-' + deviceName, db, config.serverOrigin, rpId)
       res.json(result)
     } catch (err) {
-      db.log('error', null, `Setup begin: ${err}`)
+      db.log('error', null, `Setup begin: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Setup initialization failed' })
     }
   })
@@ -240,11 +240,11 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   app.post('/api/setup/complete', authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const { credential, challenge, deviceName, enrollmentToken } = req.body
-      console.log('[setup/complete] received token:', JSON.stringify(enrollmentToken), 'expected:', _enrollmentToken, 'used:', _enrollmentUsed)
+      console.log('[setup/complete] enrollment completion — token provided:', !!enrollmentToken, 'used:', _enrollmentUsed)
       if (_enrollmentUsed || !_enrollmentToken) {
         return res.status(403).json({ error: 'Enrollment not available' })
       }
-      if (!enrollmentToken || enrollmentToken !== _enrollmentToken) {
+      if (!enrollmentToken || !safeCompare(enrollmentToken, _enrollmentToken)) {
         return res.status(403).json({ error: 'Invalid enrollment token' })
       }
       if (!credential || !challenge) {
@@ -273,7 +273,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
       res.json({ verified: true, credentialId: result.credentialId })
     } catch (err) {
-      db.log('error', null, `Setup complete: ${err}`)
+      db.log('error', null, `Setup complete: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Setup completion failed' })
     }
   })
@@ -287,7 +287,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const prs = queue.getPendingPRs()
       res.json(prs)
     } catch (err) {
-      db.log('error', null, `List PRs: ${err}`)
+      db.log('error', null, `List PRs: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to list PRs' })
     }
   })
@@ -297,7 +297,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const prs = db.getCompletedPRs()
       res.json(prs)
     } catch (err) {
-      db.log('error', null, `List history: ${err}`)
+      db.log('error', null, `List history: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to list history' })
     }
   })
@@ -314,12 +314,12 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       }
       res.json(challenge)
     } catch (err) {
-      db.log('error', null, `Initiate authorization: ${err}`)
+      db.log('error', null, `Initiate authorization: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to initiate authorization' })
     }
   })
 
-  app.post('/api/prs/:number/confirm', authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/prs/:number/confirm', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
       const { challengeId, credential, challenge: webauthnChallenge, reason, password } = req.body
@@ -344,7 +344,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
       res.json({ authorized: true, prNumber, merged: result.merged === true })
     } catch (err) {
-      db.log('error', null, `Confirm authorization: ${err}`)
+      db.log('error', null, `Confirm authorization: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to confirm authorization' })
     }
   })
@@ -356,7 +356,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       await queue.rejectAuthorization(prNumber, reason)
       res.json({ rejected: true, prNumber })
     } catch (err) {
-      db.log('error', null, `Reject authorization: ${err}`)
+      db.log('error', null, `Reject authorization: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to reject authorization' })
     }
   })
@@ -425,7 +425,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const info = await client.getTokenInfo()
       res.json(info)
     } catch (err) {
-      db.log('error', null, `Token info: ${err}`)
+      db.log('error', null, `Token info: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to fetch token info' })
     }
   })
@@ -460,7 +460,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         secure: issues.length === 0,
       })
     } catch (err) {
-      db.log('error', null, `Branch protection check: ${err}`)
+      db.log('error', null, `Branch protection check: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to check branch protection' })
     }
   })
@@ -475,7 +475,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const diff = await client.compareCommits(pr.sha + '~1', pr.sha).catch(() => null)
       res.json({ checks, diff })
     } catch (err) {
-      db.log('error', null, `PR checks: ${err}`)
+      db.log('error', null, `PR checks: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to fetch PR checks' })
     }
   })
@@ -529,11 +529,23 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  function verifyGitHubWebhook(payload: string, signature: string, secret: string): boolean {
+    if (!secret) return true
+    const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex')
+    if (sig.length !== expected.length) return false
+    return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+  }
+
   // ----- Webhook receiver for GitHub events -----
   app.post('/api/webhook/github', express.raw({ type: 'application/json' }), async (req, res) => {
     try {
       const event = req.headers['x-github-event'] as string
       const delivery = req.headers['x-github-delivery'] as string
+      const signature = req.headers['x-hub-signature-256'] as string
+      if (!verifyGitHubWebhook(req.body.toString(), signature, config.githubWebhookSecret || '')) {
+        return res.status(401).json({ error: 'Invalid webhook signature' })
+      }
       const body = typeof req.body === 'object' ? req.body : JSON.parse(req.body.toString())
 
       if (!event || !delivery) {
@@ -570,7 +582,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
       res.status(200).json({ ok: true })
     } catch (err) {
-      db.log('error', null, `Webhook processing error: ${err}`)
+      db.log('error', null, `Webhook processing error: ${err instanceof Error ? err.message : err}`)
       res.status(200).json({ ok: true })
     }
   })
@@ -604,7 +616,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           db.log('poll_complete', null, `Polled: ${result.newPRs} new, ${result.updatedPRs} updated`)
         }
       } catch (err) {
-        db.log('error', null, `Poll failed: ${err}`)
+        db.log('error', null, `Poll failed: ${err instanceof Error ? err.message : err}`)
       }
     }, intervalMs)
   }

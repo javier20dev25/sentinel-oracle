@@ -41,7 +41,7 @@ export async function printStartupBanner(config: Config, db: DatabaseStore): Pro
 
   // Enrollment status
   if (!enrolled && token) {
-    console.log(` ${BLD}First-time setup token: ${token}${R}`)
+    console.log(` ${BLD}First-time setup token configured (length: ${token.length})${R}`)
     console.log(` ${DIM}POST /api/setup/begin with this token to enroll${R}`)
   } else {
     console.log(` ${GREEN}Enrollment complete${R}${DIM} — register new devices from the dashboard${R}`)

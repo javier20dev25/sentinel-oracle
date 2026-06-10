@@ -1,8 +1,6 @@
 import { createPrivateKey, sign } from 'crypto'
-import { execSync } from 'child_process'
-import { readFileSync, mkdtempSync, writeFileSync, unlinkSync, rmSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import { readFileSync } from 'fs'
+import https from 'https'
 
 export interface GitHubAppConfig {
   appId: string
@@ -30,31 +28,33 @@ function base64urlNoPad(str: string): string {
   return base64url(str).replace(/=+$/, '')
 }
 
-function execCurl(method: string, url: string, bearerToken: string, body?: object): string {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'gh-auth-'))
-  const outFile = join(tmpDir, 'out.json')
-  try {
-    let cmd = `curl.exe -sS --connect-timeout 15 --max-time 30 -X ${method}`
-    cmd += ` -H "Authorization: Bearer ${bearerToken}"`
-    cmd += ` -H "Accept: application/vnd.github+json"`
-    cmd += ` -H "User-Agent: sentinel-oracle"`
-    if (body) {
-      const bodyFile = join(tmpDir, 'body.json')
-      writeFileSync(bodyFile, JSON.stringify(body), 'utf8')
-      cmd += ` -d @${bodyFile}`
+function httpsRequest(method: string, url: string, headers: Record<string, string>, body?: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url)
+    const opts: https.RequestOptions = {
+      hostname: u.hostname,
+      port: u.port || 443,
+      path: u.pathname + u.search,
+      method,
+      headers,
+      timeout: 30000,
     }
-    cmd += ` -o "${outFile}" -w "%{http_code}"`
-    cmd += ` "${url}"`
-
-      const code = execSync(cmd, { shell: true, timeout: 35000 } as any).toString().trim()
-    const out = readFileSync(outFile, 'utf8')
-
-    if (code.startsWith('2')) return out
-    throw new Error(`GitHub API ${code}: ${out}`)
-  } finally {
-    try { unlinkSync(outFile) } catch {}
-    try { rmSync(tmpDir, { recursive: true, force: true }) } catch {}
-  }
+    const req = https.request(opts, (res) => {
+      let data = ''
+      res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+      res.on('end', () => {
+        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(data)
+        } else {
+          reject(new Error(`HTTP ${res.statusCode}: ${data}`))
+        }
+      })
+    })
+    req.on('error', reject)
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')) })
+    if (body) req.write(body)
+    req.end()
+  })
 }
 
 export interface InstallationTokenData {
@@ -121,7 +121,11 @@ export class GitHubAppAuth {
 
     let raw: string
     try {
-      raw = execCurl('POST', url, jwt)
+      raw = await httpsRequest('POST', url, {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'sentinel-oracle',
+      })
     } catch (err) {
       throw new Error(`Failed to obtain installation token: ${err}`)
     }
@@ -160,10 +164,14 @@ export class GitHubAppAuth {
     return data.token
   }
 
-  verifyInstallation(): boolean {
+  async verifyInstallation(): Promise<boolean> {
     try {
       const jwt = this.generateJWT()
-      execCurl('GET', 'https://api.github.com/app', jwt)
+      await httpsRequest('GET', 'https://api.github.com/app', {
+        Authorization: `Bearer ${jwt}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'sentinel-oracle',
+      })
       return true
     } catch {
       return false

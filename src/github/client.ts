@@ -1,7 +1,4 @@
-import { execSync } from 'child_process'
-import { writeFileSync, unlinkSync, mkdtempSync, rmSync, readFileSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import https from 'https'
 import { GitHubAppAuth, type GitHubAppConfig } from './auth'
 
 export interface PRInfo {
@@ -87,47 +84,45 @@ export class GitHubClient {
 
   private async apiWithHeaders(method: string, pathOrUrl: string, body?: object): Promise<{ body: string; headers: Record<string, string> }> {
     const token = await this.resolveToken()
-    const tmpDir = mkdtempSync(join(tmpdir(), 'gh-'))
-    const outFile = join(tmpDir, 'out.json')
-    const headerFile = join(tmpDir, 'headers.txt')
-    let bodyFile = ''
-    try {
-      const isFullUrl = pathOrUrl.startsWith('https://')
-      const url = isFullUrl ? pathOrUrl : `https://api.github.com${pathOrUrl}`
+    const isFullUrl = pathOrUrl.startsWith('https://')
+    const url = isFullUrl ? pathOrUrl : `https://api.github.com${pathOrUrl}`
 
-      let cmd = `curl.exe -sS --connect-timeout 15 --max-time 30 -X ${method}`
-      cmd += ` -H "Authorization: Bearer ${token}"`
-      cmd += ` -H "Accept: application/vnd.github+json"`
-      cmd += ` -H "User-Agent: sentinel-oracle"`
-      if (body) {
-        bodyFile = join(tmpDir, 'body.json')
-        writeFileSync(bodyFile, JSON.stringify(body), 'utf8')
-        cmd += ` -d @${bodyFile}`
-      }
-      cmd += ` -D "${headerFile}"`
-      cmd += ` -o "${outFile}" -w "%{http_code}"`
-      cmd += ` "${url}"`
-
-      const code = execSync(cmd, { shell: true, timeout: 35000 } as any).toString().trim()
-      const out = readFileSync(outFile, 'utf8')
-
-      const headers: Record<string, string> = {}
-      try {
-        const hdr = readFileSync(headerFile, 'utf8')
-        for (const line of hdr.split('\n')) {
-          const m = line.match(/^([^:]+):\s*(.+)\r?$/)
-          if (m) headers[m[1].toLowerCase()] = m[2].trim()
-        }
-      } catch {}
-
-      if (code.startsWith('2')) return { body: out, headers }
-      throw new Error(`GitHub API ${code}: ${out}`)
-    } finally {
-      try { unlinkSync(outFile) } catch {}
-      try { unlinkSync(headerFile) } catch {}
-      if (bodyFile) { try { unlinkSync(bodyFile) } catch {} }
-      try { rmSync(tmpDir, { recursive: true, force: true }) } catch {}
+    const reqHeaders: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'sentinel-oracle',
     }
+
+    return new Promise((resolve, reject) => {
+      const u = new URL(url)
+      const opts: https.RequestOptions = {
+        hostname: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        method,
+        headers: reqHeaders,
+        timeout: 30000,
+      }
+      const req = https.request(opts, (res) => {
+        let data = ''
+        res.on('data', (chunk: Buffer) => { data += chunk.toString() })
+        res.on('end', () => {
+          const respHeaders: Record<string, string> = {}
+          for (const [key, val] of Object.entries(res.headers)) {
+            if (val) respHeaders[key] = Array.isArray(val) ? val.join(', ') : val
+          }
+          if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+            resolve({ body: data, headers: respHeaders })
+          } else {
+            reject(new Error(`GitHub API ${res.statusCode}: ${data}`))
+          }
+        })
+      })
+      req.on('error', reject)
+      req.on('timeout', () => { req.destroy(); reject(new Error('Request timeout')) })
+      if (body) req.write(JSON.stringify(body))
+      req.end()
+    })
   }
 
   async listOpenPRs(): Promise<PRInfo[]> {

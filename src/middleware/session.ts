@@ -7,7 +7,7 @@ const SESSION_IDLE_MS = 30 * 60 * 1000
 
 export function requireAuth(db: DatabaseStore) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const sessionId = req.cookies?.[COOKIE_NAME]
+    const sessionId = req.signedCookies?.[COOKIE_NAME]
     if (!sessionId) {
       return res.status(401).json({ error: 'Authentication required' })
     }
