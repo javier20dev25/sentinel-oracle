@@ -22,7 +22,7 @@ function createMockClient(): GitHubClient {
     owner: 'test-owner',
     repo: 'test-repo',
     statusContext: 'Sentinel Authorization',
-    setCommitStatus: vi.fn().mockResolvedValue(undefined),
+    updateCheckRun: vi.fn().mockResolvedValue(undefined),
     mergePR: vi.fn().mockResolvedValue(true),
   } as unknown as GitHubClient
 }
@@ -60,8 +60,8 @@ describe('QR URL flow', () => {
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
-  it('creates challenge with URL in QR payload', () => {
-    const result = createAuthChallenge(42, db, 45000, 'https://localhost:3443')
+  it('creates challenge with URL in QR payload', async () => {
+    const result = await createAuthChallenge(42, db, 45000, 'https://localhost:3443')
     expect(result.challengeId).toBeTruthy()
     expect(result.prNumber).toBe(42)
     expect(result.qrUrl).toBe(`https://localhost:3443/authorize?cid=${result.challengeId}&pr=42`)
@@ -75,28 +75,28 @@ describe('QR URL flow', () => {
     expect(parsed.exp).toBeGreaterThan(Date.now())
   })
 
-  it('can consume a valid challenge', () => {
-    const result = createAuthChallenge(42, db, 45000, 'https://localhost:3443')
+  it('can consume a valid challenge', async () => {
+    const result = await createAuthChallenge(42, db, 45000, 'https://localhost:3443')
     const consumed = db.consumeChallenge(result.challengeId)
     expect(consumed).not.toBeNull()
     expect(consumed!.prNumber).toBe(42)
     expect(consumed!.data).toBeTruthy()
   })
 
-  it('rejects double consumption', () => {
-    const result = createAuthChallenge(42, db, 45000, 'https://localhost:3443')
+  it('rejects double consumption', async () => {
+    const result = await createAuthChallenge(42, db, 45000, 'https://localhost:3443')
     db.consumeChallenge(result.challengeId)
     const second = db.consumeChallenge(result.challengeId)
     expect(second).toBeNull()
   })
 
-  it('rejects expired challenge', () => {
-    const result = createAuthChallenge(42, db, -1000, 'https://localhost:3443')
+  it('rejects expired challenge', async () => {
+    const result = await createAuthChallenge(42, db, -1000, 'https://localhost:3443')
     const consumed = db.consumeChallenge(result.challengeId)
     expect(consumed).toBeNull()
   })
 
-  it('rejects nonexistent challenge', () => {
+  it('rejects nonexistent challenge', async () => {
     const consumed = db.consumeChallenge('no-such-id')
     expect(consumed).toBeNull()
   })
@@ -127,6 +127,7 @@ describe('AuthorizationQueue', () => {
       createdAt: Date.now(),
       authorizedAt: null,
       deviceName: null,
+      checkRunId: 123,
     })
 
     registerTestDevice(db)
@@ -143,52 +144,52 @@ describe('AuthorizationQueue', () => {
     expect(prs[0].prNumber).toBe(142)
   })
 
-  it('initiates authorization and returns QR URL', () => {
-    const challenge = queue.initiateAuthorization(142)
+  it('initiates authorization and returns QR URL', async () => {
+    const challenge = await queue.initiateAuthorization(142)
     expect(challenge).not.toBeNull()
     expect(challenge!.prNumber).toBe(142)
     expect(challenge!.qrUrl).toContain('/authorize?cid=')
     expect(challenge!.qrUrl).toContain('pr=142')
   })
 
-  it('returns null for non-existent PR', () => {
-    const challenge = queue.initiateAuthorization(999)
+  it('returns null for non-existent PR', async () => {
+    const challenge = await queue.initiateAuthorization(999)
     expect(challenge).toBeNull()
   })
 
-  it('returns null for already authorized PR', () => {
+  it('returns null for already authorized PR', async () => {
     db.setAuthStatus(142, 'authorized')
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     expect(challenge).toBeNull()
   })
 
-  it('returns null for rejected PR', () => {
+  it('returns null for rejected PR', async () => {
     db.setAuthStatus(142, 'rejected')
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     expect(challenge).toBeNull()
   })
 
   it('confirms authorization with valid challengeId', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
     expect(result.success).toBe(true)
 
     const pr = db.getPRByNumber(142)
     expect(pr!.authStatus).toBe('authorized')
 
-    expect(mockClient.setCommitStatus).toHaveBeenCalledWith(
-      'abc123def456',
+    expect(mockClient.updateCheckRun).toHaveBeenCalledWith(
+      123,
       'success',
-      'Authorized via physical authentication'
+      expect.stringContaining('Authorized by')
     )
   })
 
   it('rejects confirm with wrong PR number', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(999, challenge!.challengeId, mockCredential, mockChallenge)
     expect(result.success).toBe(false)
     expect(db.getPRByNumber(142)!.authStatus).toBe('pending')
@@ -204,7 +205,7 @@ describe('AuthorizationQueue', () => {
   it('rejects duplicate confirmation', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
     const second = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
     expect(second.success).toBe(false)
@@ -214,10 +215,10 @@ describe('AuthorizationQueue', () => {
     await queue.rejectAuthorization(142)
     const pr = db.getPRByNumber(142)
     expect(pr!.authStatus).toBe('rejected')
-    expect(mockClient.setCommitStatus).toHaveBeenCalledWith(
-      'abc123def456',
+    expect(mockClient.updateCheckRun).toHaveBeenCalledWith(
+      123,
       'failure',
-      'Authorization rejected'
+      expect.stringContaining('Authorization rejected')
     )
   })
 
@@ -235,6 +236,7 @@ describe('AuthorizationQueue', () => {
       createdAt: Date.now() - 7200000,
       authorizedAt: null,
       deviceName: null,
+      checkRunId: 123,
     })
 
     const expired = queue.expireStaleChallenges()
@@ -248,8 +250,8 @@ describe('AuthorizationQueue', () => {
     expect(db.getPRByNumber(142)!.authStatus).toBe('pending')
   })
 
-  it('written audit log entries are readable', () => {
-    queue.initiateAuthorization(142)
+  it('written audit log entries are readable', async () => {
+    await queue.initiateAuthorization(142)
     const log = db.getAuditLog(10)
     expect(log.length).toBeGreaterThanOrEqual(1)
     expect(log[0].action).toBe('challenge_created')
@@ -259,7 +261,7 @@ describe('AuthorizationQueue', () => {
   it('logs authorization grant', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
     const log = db.getAuditLog(10)
     expect(log.some(e => e.action === 'authorization_granted')).toBe(true)
@@ -274,7 +276,7 @@ describe('AuthorizationQueue', () => {
   it('rejects confirm when WebAuthn fails', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: false })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
     expect(result.success).toBe(false)
     expect(result.error).toBe('Biometric authentication failed')
@@ -283,7 +285,7 @@ describe('AuthorizationQueue', () => {
 
   it('rejects confirm when system is locked', async () => {
     await queue.lockdown()
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     expect(challenge).toBeNull()
 
     const result = await queue.confirmAuthorization(142, 'any', mockCredential, mockChallenge)
@@ -305,7 +307,7 @@ describe('AuthorizationQueue', () => {
   it('rejects confirm with wrong PR in challenge', async () => {
     vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
-    const challenge = queue.initiateAuthorization(142)
+    const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
 
     expect(result.success).toBe(true)

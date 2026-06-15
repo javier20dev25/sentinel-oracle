@@ -7,8 +7,8 @@ import type { DatabaseStore } from './storage/database'
 import type { GitHubClient } from './github/client'
 import { AuthorizationQueue } from './queue/authorization'
 import { pollPRs } from './github/monitor'
-import { securityHeaders, corsBlock, auditLogger } from './middleware/security'
-import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL } from './middleware/session'
+import { securityHeaders, corsBlock, auditLogger, csrfProtection } from './middleware/security'
+import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF } from './middleware/session'
 import { authRateLimiter, apiRateLimiter } from './middleware/rateLimit'
 import {
   generateRegistration,
@@ -19,6 +19,8 @@ import {
 } from './auth/webauthn'
 import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
+import { scanPRFiles } from './scanner/index'
+import { TokenInventoryScanner } from './inventory/tokens'
 
 function generateEnrollmentToken(): string {
   return crypto.randomBytes(16).toString('hex')
@@ -94,14 +96,15 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       }
     },
   }))
-  app.use(cookieParser(config.encryptionKey.toString('hex')))
+  app.use(cookieParser(config.cookieSecret))
+  app.use(csrfProtection(config.serverOrigin, db))
   app.use(express.static(path.join(__dirname, '..', 'public')))
   app.get('/authorize', (_req, res) => {
     res.sendFile(path.join(__dirname, '..', 'public', 'authorize.html'))
   })
 
   // ----- WebAuthn Registration (authenticated) -----
-  app.post('/api/webauthn/register/begin', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/webauthn/register/begin', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const { deviceName } = req.body
       if (!deviceName || typeof deviceName !== 'string') {
@@ -115,7 +118,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/webauthn/register/complete', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/webauthn/register/complete', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const { credential, challenge, deviceName } = req.body
       const result = await verifyRegistration(credential, challenge, db, config.serverOrigin, rpId)
@@ -142,6 +145,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     try {
       const prNumber = req.body?.prNumber ? parseInt(req.body.prNumber, 10) : undefined
       const result = await generateAssertion(db, config.serverOrigin, rpId, prNumber)
+      console.log('[webauthn] assert/begin: challenge=%s', result.challenge)
       res.json(result)
     } catch (err) {
       db.log('error', null, `WebAuthn assert begin: ${err instanceof Error ? err.message : err}`)
@@ -152,15 +156,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   app.post('/api/webauthn/assert/complete', authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const { credential, challenge } = req.body
+      console.log('[webauthn] assert/complete: receivedChallenge=%s credentialId=%s', challenge, credential?.id?.slice(0, 20))
       const result = await verifyAssertion(credential, challenge, db, config.serverOrigin, rpId)
       if (!result.verified) {
-        return res.status(401).json({ error: 'Authentication failed' })
+        console.log('[webauthn] assert/complete: FAILED reason=%s', result.error)
+        return res.status(401).json({ error: result.error || 'Authentication failed' })
       }
+      console.log('[webauthn] assert/complete: OK credentialId=%s', result.credentialId)
       const device = db.getDeviceByCredentialId(result.credentialId)
 
       if (result.credentialId && !result.prNumber) {
-        const sessionId = db.createSession(result.credentialId, device?.name || 'unknown', getSessionTTL())
-        res.setHeader('Set-Cookie', createSessionCookie(sessionId))
+        const cookie = createSessionCookie(result.credentialId, device?.name || 'unknown', req.headers['user-agent'] || '')
+        res.cookie(cookie.name, cookie.value, cookie.options)
         db.log('session_created', null, `Session for device "${device?.name || 'unknown'}"`)
       }
 
@@ -174,28 +181,79 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   // ----- Session -----
   app.get('/api/session/check', (req, res) => {
-    const sessionId = req.signedCookies?.sentinel_session
-    if (!sessionId) return res.json({ authenticated: false })
-    const session = db.getSession(sessionId)
-    if (!session) {
-      res.setHeader('Set-Cookie', clearSessionCookie())
-      return res.json({ authenticated: false })
+    const raw = req.signedCookies?.sentinel_session
+    if (!raw || typeof raw !== 'string') return res.json({ authenticated: false })
+    try {
+      const session = JSON.parse(raw)
+      if (Date.now() > session.exp) {
+        const cookie = clearSessionCookie()
+        res.cookie(cookie.name, cookie.value, cookie.options)
+        return res.json({ authenticated: false })
+      }
+      res.json({ authenticated: true, deviceName: session.deviceName })
+    } catch {
+      const cookie = clearSessionCookie()
+      res.cookie(cookie.name, cookie.value, cookie.options)
+      res.json({ authenticated: false })
     }
-    res.json({ authenticated: true, deviceName: session.deviceName })
   })
 
   app.post('/api/session/logout', (req, res) => {
-    const sessionId = req.signedCookies?.sentinel_session
-    if (sessionId) {
-      db.deleteSession(sessionId)
-      db.log('session_logout', null, 'Session explicitly terminated')
-    }
-    res.setHeader('Set-Cookie', clearSessionCookie())
+    const cookie = clearSessionCookie()
+    res.cookie(cookie.name, cookie.value, cookie.options)
+    db.log('session_logout', null, 'Session explicitly terminated')
     res.json({ loggedOut: true })
   })
 
+  app.get('/api/session/csrf-token', requireAuth(), (req, res) => {
+    res.json({ csrfToken: (req as any).session.csrfToken })
+  })
+
+  // ----- Re-assertion (for sensitive actions) -----
+  app.post('/api/auth/re-assert', requireAuth(), async (req, res) => {
+    const session = (req as any).session
+    try {
+      const assertion = await generateAssertion(db, config.serverOrigin, config.rpId)
+      const actionHint = (req.body?.action as string) || ''
+      db.setConfig(`reassert_action_${assertion.challenge}`, JSON.stringify({
+        action: actionHint,
+        sessionId: session.id,
+        createdAt: Date.now(),
+      }))
+      res.json({ ...assertion, action: actionHint })
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to generate re-assertion challenge' })
+    }
+  })
+
+  app.post('/api/auth/re-assert/complete', requireAuth(), async (req, res) => {
+    const session = (req as any).session
+    try {
+      const { credential, challenge } = req.body
+      const storedRaw = db.getConfig(`reassert_action_${challenge}`)
+      if (!storedRaw) return res.status(400).json({ error: 'Invalid or expired challenge' })
+      const stored = JSON.parse(storedRaw)
+      if (stored.sessionId !== session.id) {
+        return res.status(403).json({ error: 'Challenge belongs to different session' })
+      }
+      db.setConfig(`reassert_action_${challenge}`, '')
+      const result = await verifyAssertion(credential, challenge, db, config.serverOrigin, config.rpId)
+      if (!result.verified) return res.status(401).json({ error: 'Re-assertion failed' })
+      const reAssertToken = require('crypto').randomBytes(32).toString('hex')
+      db.setConfig(`reassert_token_${reAssertToken}`, JSON.stringify({
+        sessionId: session.id,
+        credentialId: result.credentialId,
+        createdAt: Date.now(),
+        ttl: 60000,
+      }))
+      res.json({ verified: true, reAssertToken })
+    } catch (err: any) {
+      res.status(500).json({ error: 'Re-assertion verification failed' })
+    }
+  })
+
   // ----- Enrollment -----
-  app.post('/api/config/password', requireAuth(db), authRateLimiter(5, 60000), (req, res) => {
+  app.post('/api/config/password', requireAuth(), authRateLimiter(5, 60000), (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body
       if (!newPassword || newPassword.length < 4) {
@@ -268,8 +326,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.setConfig('enrollment_completed', 'true')
       db.log('device_enrolled', null, `First device "${deviceName}" enrolled and registered`)
 
-      const sessionId = db.createSession(result.credentialId, deviceName || 'Admin Device', getSessionTTL())
-      res.setHeader('Set-Cookie', createSessionCookie(sessionId))
+      const cookie = createSessionCookie(result.credentialId, deviceName || 'Admin Device', req.headers['user-agent'] || '')
+      res.cookie(cookie.name, cookie.value, cookie.options)
 
       res.json({ verified: true, credentialId: result.credentialId })
     } catch (err) {
@@ -279,7 +337,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Authorization (authenticated) -----
-  app.get('/api/prs', requireAuth(db), apiRateLimiter(30, 60000), async (_req, res) => {
+  app.get('/api/prs', requireAuth(), apiRateLimiter(30, 60000), async (_req, res) => {
     try {
       try {
         await pollPRs(client, db)
@@ -292,7 +350,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.get('/api/prs/history', requireAuth(db), apiRateLimiter(30, 60000), (_req, res) => {
+  app.get('/api/prs/history', requireAuth(), apiRateLimiter(30, 60000), (_req, res) => {
     try {
       const prs = db.getCompletedPRs()
       res.json(prs)
@@ -302,10 +360,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/prs/:number/authorize', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), (req, res) => {
+  app.post('/api/prs/:number/authorize', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
-      const challenge = queue.initiateAuthorization(prNumber)
+      const challenge = await queue.initiateAuthorization(prNumber)
       if (!challenge) {
         const locked = queue.isLocked()
         return res.status(locked ? 423 : 404).json({
@@ -319,7 +377,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/prs/:number/confirm', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/prs/:number/confirm', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
       const { challengeId, credential, challenge: webauthnChallenge, reason, password } = req.body
@@ -349,8 +407,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/prs/:number/reject', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/prs/:number/reject', requireAuth(), requireCSRF(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
+      const token = (req.body?.reAssertToken as string) || ''
+      if (!token) return res.status(403).json({ error: 'Re-assertion token required' })
+      const tokenRaw = db.getConfig(`reassert_token_${token}`)
+      if (!tokenRaw) return res.status(403).json({ error: 'Invalid or expired re-assertion token' })
+      const tokenData = JSON.parse(tokenRaw)
+      if (Date.now() - tokenData.createdAt > tokenData.ttl) {
+        db.setConfig(`reassert_token_${token}`, '')
+        return res.status(403).json({ error: 'Re-assertion token expired' })
+      }
+      db.setConfig(`reassert_token_${token}`, '')
       const prNumber = parseInt(req.params.number as string, 10)
       const { reason } = req.body
       await queue.rejectAuthorization(prNumber, reason)
@@ -361,8 +429,72 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- PR Scan (independent verification — optional) -----
+  app.post('/api/prs/:number/scan', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    if (!config.scanEnabled) {
+      return res.status(404).json({ error: 'PR scanning is not enabled. Set scanEnabled: true in config.json' })
+    }
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const files = await client.getPRFiles(prNumber)
+      if (files.length === 0) {
+        return res.status(404).json({ error: 'No files found for this PR' })
+      }
+      db.storePRFiles(prNumber, files)
+      const pr = db.getPRByNumber(prNumber)
+      const sha = pr ? pr.sha : ''
+      const result = scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha)
+      db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L)`)
+      const prFiles = db.getPRFiles(prNumber)
+      res.json({ ...result, files: prFiles })
+    } catch (err) {
+      db.log('error', null, `PR scan: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to scan PR' })
+    }
+  })
+
+  // ----- Check Run (create or update) -----
+  app.post('/api/check-run', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.body.prNumber as string, 10)
+      const conclusion = (req.body.conclusion as string) || 'action_required'
+
+      if (isNaN(prNumber)) {
+        return res.status(400).json({ error: 'Invalid prNumber' })
+      }
+
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) {
+        return res.status(404).json({ error: 'PR not found in database' })
+      }
+
+      const validConclusions = ['action_required', 'success', 'failure', 'neutral', 'cancelled', 'timed_out']
+      if (!validConclusions.includes(conclusion)) {
+        return res.status(400).json({ error: `Invalid conclusion. Must be one of: ${validConclusions.join(', ')}` })
+      }
+
+      if (pr.checkRunId) {
+        await client.updateCheckRun(pr.checkRunId, conclusion, `Check Run updated to ${conclusion} via API`)
+        db.log('check_run_updated', prNumber, `Check Run #${pr.checkRunId} updated to ${conclusion}`)
+        return res.json({ updated: true, checkRunId: pr.checkRunId, conclusion })
+      }
+
+      const checkRun = await client.createCheckRun(prNumber, pr.sha, conclusion, `Check Run created via API — ${conclusion}`)
+      if (!checkRun || !checkRun.id) {
+        return res.status(502).json({ error: 'Failed to create Check Run on GitHub' })
+      }
+
+      db.setCheckRunId(prNumber, checkRun.id)
+      db.log('check_run_created', prNumber, `Check Run #${checkRun.id} created with conclusion ${conclusion}`)
+      res.json({ created: true, checkRunId: checkRun.id, conclusion })
+    } catch (err) {
+      db.log('error', null, `Check Run API: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to manage Check Run' })
+    }
+  })
+
   // ----- Devices (authenticated) -----
-  app.get('/api/devices', requireAuth(db), apiRateLimiter(30, 60000), (_req, res) => {
+  app.get('/api/devices', requireAuth(), apiRateLimiter(30, 60000), (_req, res) => {
     try {
       const devices = db.listDevices().map(d => ({
         id: d.id,
@@ -377,8 +509,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/devices/:credentialId/revoke', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), (req, res) => {
+  app.post('/api/devices/:credentialId/revoke', requireAuth(), requireCSRF(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), (req, res) => {
     try {
+      const token = (req.body?.reAssertToken as string) || ''
+      if (!token) return res.status(403).json({ error: 'Re-assertion token required' })
+      const tokenRaw = db.getConfig(`reassert_token_${token}`)
+      if (!tokenRaw) return res.status(403).json({ error: 'Invalid or expired re-assertion token' })
+      const tokenData = JSON.parse(tokenRaw)
+      if (Date.now() - tokenData.createdAt > tokenData.ttl) {
+        db.setConfig(`reassert_token_${token}`, '')
+        return res.status(403).json({ error: 'Re-assertion token expired' })
+      }
+      db.setConfig(`reassert_token_${token}`, '')
       const credentialId = req.params.credentialId as string
       const ok = queue.revokeDevice(credentialId)
       if (!ok) return res.status(404).json({ error: 'Device not found' })
@@ -390,8 +532,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Lockdown (authenticated) -----
-  app.post('/api/lockdown', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (_req, res) => {
+  app.post('/api/lockdown', requireAuth(), requireCSRF(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
+      const token = (req.body?.reAssertToken as string) || ''
+      if (!token) return res.status(403).json({ error: 'Re-assertion token required' })
+      const tokenRaw = db.getConfig(`reassert_token_${token}`)
+      if (!tokenRaw) return res.status(403).json({ error: 'Invalid or expired re-assertion token' })
+      const tokenData = JSON.parse(tokenRaw)
+      if (Date.now() - tokenData.createdAt > tokenData.ttl) {
+        db.setConfig(`reassert_token_${token}`, '')
+        return res.status(403).json({ error: 'Re-assertion token expired' })
+      }
+      db.setConfig(`reassert_token_${token}`, '')
       await queue.lockdown()
       res.json({ locked: true })
     } catch (err) {
@@ -399,8 +551,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
-  app.post('/api/unlock', requireAuth(db), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (_req, res) => {
+  app.post('/api/unlock', requireAuth(), requireCSRF(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
+      const token = (req.body?.reAssertToken as string) || ''
+      if (!token) return res.status(403).json({ error: 'Re-assertion token required' })
+      const tokenRaw = db.getConfig(`reassert_token_${token}`)
+      if (!tokenRaw) return res.status(403).json({ error: 'Invalid or expired re-assertion token' })
+      const tokenData = JSON.parse(tokenRaw)
+      if (Date.now() - tokenData.createdAt > tokenData.ttl) {
+        db.setConfig(`reassert_token_${token}`, '')
+        return res.status(403).json({ error: 'Re-assertion token expired' })
+      }
+      db.setConfig(`reassert_token_${token}`, '')
       await queue.unlock()
       res.json({ locked: false })
     } catch (err) {
@@ -409,7 +571,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Audit (authenticated) -----
-  app.get('/api/audit', requireAuth(db), apiRateLimiter(30, 60000), (req, res) => {
+  app.get('/api/audit', requireAuth(), apiRateLimiter(30, 60000), (req, res) => {
     try {
       const limit = Math.max(1, Math.min(parseInt(req.query.limit as string, 10) || 100, 500))
       const log = db.getAuditLog(limit)
@@ -420,7 +582,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Token Info (authenticated) -----
-  app.get('/api/github/token-info', requireAuth(db), apiRateLimiter(30, 60000), async (_req, res) => {
+  app.get('/api/github/token-info', requireAuth(), apiRateLimiter(30, 60000), async (_req, res) => {
     try {
       const info = await client.getTokenInfo()
       res.json(info)
@@ -431,7 +593,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Branch Protection Status -----
-  app.get('/api/status/branch-protection', requireAuth(db), apiRateLimiter(10, 60000), async (_req, res) => {
+  app.get('/api/status/branch-protection', requireAuth(), apiRateLimiter(10, 60000), async (_req, res) => {
     try {
       const protection = await client.getBranchProtection('main')
       const issues: string[] = []
@@ -466,22 +628,139 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- PR check details -----
-  app.get('/api/prs/:number/checks', requireAuth(db), apiRateLimiter(30, 60000), async (req, res) => {
+  app.get('/api/prs/:number/checks', requireAuth(), apiRateLimiter(30, 60000), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
       const pr = db.getPRByNumber(prNumber)
       if (!pr) return res.status(404).json({ error: 'PR not found' })
       const checks = await client.getCheckRunDetails(pr.sha)
-      const diff = await client.compareCommits(pr.sha + '~1', pr.sha).catch(() => null)
-      res.json({ checks, diff })
+      const rawDiff = await client.compareCommits(pr.sha + '~1', pr.sha).catch(() => null)
+      const diff = rawDiff && rawDiff.files ? {
+        files: rawDiff.files.length,
+        additions: rawDiff.files.reduce((s: number, f: any) => s + (f.additions || 0), 0),
+        deletions: rawDiff.files.reduce((s: number, f: any) => s + (f.deletions || 0), 0),
+        fileDetails: rawDiff.files.map((f: any) => ({
+          filename: f.filename,
+          status: f.status,
+          additions: f.additions || 0,
+          deletions: f.deletions || 0,
+          changes: (f.additions || 0) + (f.deletions || 0),
+          sizeBytes: f.patch ? Buffer.byteLength(f.patch, 'utf-8') : 0,
+        })),
+      } : null
+      const prFiles = db.getPRFiles(prNumber)
+      const history = prFiles.length > 0
+        ? db.getFileHistory(prFiles[0].filename).slice(0, 5)
+        : []
+      res.json({ checks, diff, prFiles, history })
     } catch (err) {
       db.log('error', null, `PR checks: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to fetch PR checks' })
     }
   })
 
-  // ----- Metrics -----
-  app.get('/api/metrics', requireAuth(db), apiRateLimiter(20, 60000), (_req, res) => {
+  // ----- File history (timing graph data) -----
+  app.get('/api/prs/:number/file-history/:filename', requireAuth(), apiRateLimiter(20, 60000), async (req, res) => {
+    try {
+      const filename = req.params.filename as string
+      const history = db.getFileHistory(filename, 100)
+      if (history.length === 0) {
+        return res.json({ filename, history: [], workflow: [] })
+      }
+      const entries = history.map((h: any) => ({
+        prNumber: h.prNumber,
+        additions: h.additions,
+        deletions: h.deletions,
+        sizeBytes: h.sizeBytes,
+        scannedAt: h.scannedAt,
+        totalChanges: (h.additions || 0) + (h.deletions || 0),
+      }))
+      entries.reverse()
+      let workflowHistory = db.getWorkflowHistory(filename)
+      if (workflowHistory.length === 0) {
+        // Auto-fetch workflow durations from GitHub on first chart view
+        try {
+          const wfData = await client.getWorkflowDurationsForFile(filename)
+          if (wfData.length > 0) {
+            const wfEntries = wfData.map(w => ({
+              sha: w.sha,
+              prNumber: 0,
+              checkName: w.checkName,
+              durationMs: w.durationMs,
+            }))
+            db.storeWorkflowTimes(filename, wfEntries)
+            workflowHistory = db.getWorkflowHistory(filename)
+          }
+        } catch (_e) {
+          // Non-critical — chart shows what we have
+        }
+      }
+      const wfEntries = workflowHistory.map(w => ({
+        sha: w.sha,
+        prNumber: w.prNumber,
+        checkName: w.checkName,
+        durationMs: w.durationMs,
+        scannedAt: w.scannedAt,
+      }))
+      const maxChanges = Math.max(...entries.map((e: any) => e.totalChanges), 1)
+      const maxSize = Math.max(...entries.map((e: any) => e.sizeBytes), 1)
+      const maxDuration = Math.max(...wfEntries.map((w: any) => w.durationMs), 1)
+      res.json({ filename, history: entries, workflow: wfEntries, maxChanges, maxSize, maxDuration })
+    } catch (err) {
+      db.log('error', null, `File history: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to fetch file history' })
+    }
+  })
+
+  // ----- Backfill history (full repo PR archive) -----
+  let backfillRunning = false
+  let backfillProgress = { total: 0, current: 0, errors: 0, lastError: '', done: false }
+
+  app.get('/api/admin/backfill-status', requireAuth(), (_req, res) => {
+    res.json(backfillProgress)
+  })
+
+  app.post('/api/admin/backfill-history', requireAuth(), async (req, res) => {
+    if (backfillRunning) return res.status(409).json({ error: 'Backfill already running' })
+    backfillRunning = true
+    backfillProgress = { total: 0, current: 0, errors: 0, lastError: '', done: false }
+    res.json({ status: 'started', message: 'Backfill started in background' })
+
+    try {
+      const checkpoint = db.getBackfillCheckpoint()
+      const prs = await client.listAllPRs('closed')
+      const merged = prs.filter((p: any) => p.merged_at)
+      backfillProgress.total = merged.length
+      db.log('backfill', null, `Starting backfill: ${merged.length} merged PRs total, checkpoint at PR #${checkpoint}`)
+
+      for (const pr of merged) {
+        if (pr.number <= checkpoint) continue
+        try {
+          const files = await client.getPRFiles(pr.number)
+          if (files.length > 0) {
+            db.storePRFiles(pr.number, files, 'authorized')
+          }
+          db.setBackfillCheckpoint(pr.number)
+          backfillProgress.current = merged.indexOf(pr) + 1
+        } catch (err: any) {
+          backfillProgress.errors++
+          backfillProgress.lastError = `PR #${pr.number}: ${err.message}`
+          db.log('error', null, `Backfill PR #${pr.number}: ${err.message}`)
+        }
+        if (pr.number % 5 === 0) {
+          db.log('backfill', null, `Backfill progress: PR #${pr.number} / ${merged[merged.length - 1].number}`)
+        }
+      }
+      backfillProgress.done = true
+      db.log('backfill', null, `Backfill complete: ${merged.length} PRs processed, ${backfillProgress.errors} errors`)
+    } catch (err: any) {
+      backfillProgress.lastError = err.message
+      db.log('error', null, `Backfill failed: ${err.message}`)
+    } finally {
+      backfillRunning = false
+    }
+  })
+  app.get('/api/metrics', requireAuth(), apiRateLimiter(20, 60000), (_req, res) => {
     try {
       const completed = db.getCompletedPRs()
       const pending = db.getPendingPRs()
@@ -529,8 +808,73 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- Token Inventory (authenticated) -----
+  const tokenScanner = new TokenInventoryScanner(client, db)
+
+  app.get('/api/inventory/tokens', requireAuth(), apiRateLimiter(30, 60000), (_req, res) => {
+    try {
+      const tokens = db.getAllTokens()
+      res.json(tokens)
+    } catch (err) {
+      db.log('error', null, `List tokens: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to list tokens' })
+    }
+  })
+
+  app.get('/api/inventory/tokens/stats', requireAuth(), apiRateLimiter(30, 60000), (_req, res) => {
+    try {
+      const stats = db.getTokenStats()
+      res.json(stats)
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get token stats' })
+    }
+  })
+
+  app.post('/api/inventory/tokens/scan', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (_req, res) => {
+    try {
+      const result = await tokenScanner.fullScan()
+      db.log('token_scan_complete', null, `Scan: ${result.tokensFound} new, ${result.tokensUpdated} updated`)
+      res.json(result)
+    } catch (err) {
+      db.log('error', null, `Token scan: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to scan tokens' })
+    }
+  })
+
+  app.post('/api/inventory/tokens/:id/refresh', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    try {
+      const result = await tokenScanner.scanGitHubTokens()
+      res.json(result)
+    } catch (err) {
+      db.log('error', null, `Refresh token: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to refresh token' })
+    }
+  })
+
+  app.delete('/api/inventory/tokens/:id', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), (req, res) => {
+    try {
+      const id = parseInt(req.params.id as string, 10)
+      if (isNaN(id)) return res.status(400).json({ error: 'Invalid token id' })
+      db.deleteToken(id)
+      db.log('token_deleted', null, `Token #${id} removed from inventory`)
+      res.json({ deleted: true })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to delete token' })
+    }
+  })
+
+  app.get('/api/inventory/tokens/drift', requireAuth(), apiRateLimiter(10, 60000), async (_req, res) => {
+    try {
+      const drift = await tokenScanner.detectDrift()
+      res.json(drift)
+    } catch (err) {
+      db.log('error', null, `Drift check: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to check drift' })
+    }
+  })
+
   function verifyGitHubWebhook(payload: string, signature: string, secret: string): boolean {
-    if (!secret) return true
+    if (!secret) return false
     const sig = signature.startsWith('sha256=') ? signature.slice(7) : signature
     const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex')
     if (sig.length !== expected.length) return false
@@ -598,6 +942,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       locked: queue.isLocked(),
       setupRequired: !db.getConfig('enrollment_completed'),
       authMode: client.authMode,
+      scanEnabled: config.scanEnabled,
       version: '1.0.0',
     })
   })
@@ -607,6 +952,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   function startPolling(intervalMs = 30000) {
     if (pollInterval) clearInterval(pollInterval)
+    let tokenScanInterval: ReturnType<typeof setInterval> | null = null
     pollInterval = setInterval(async () => {
       try {
         if (queue.isLocked()) return
@@ -614,6 +960,17 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         queue.expireStaleChallenges()
         if (result.newPRs > 0 || result.updatedPRs > 0) {
           db.log('poll_complete', null, `Polled: ${result.newPRs} new, ${result.updatedPRs} updated`)
+        }
+
+        const lastTokenScan = parseInt(db.getConfig('last_token_scan') || '0', 10)
+        if (Date.now() - lastTokenScan > 3600000) {
+          try {
+            const scanResult = await tokenScanner.scanGitHubTokens()
+            if (scanResult.tokensFound > 0 || scanResult.tokensUpdated > 0) {
+              db.log('token_scan_auto', null, `Auto-scan: ${scanResult.tokensFound} new, ${scanResult.tokensUpdated} updated`)
+            }
+            db.setConfig('last_token_scan', String(Date.now()))
+          } catch {}
         }
       } catch (err) {
         db.log('error', null, `Poll failed: ${err instanceof Error ? err.message : err}`)

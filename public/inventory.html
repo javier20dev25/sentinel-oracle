@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Token Inventory — Sentinel Oracle</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+.nav { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #161b22; border-bottom: 1px solid #30363d; }
+.nav a { color: #58a6ff; text-decoration: none; font-size: 0.85rem; }
+.nav a:hover { text-decoration: underline; }
+.stats-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.stat-card { flex: 1; min-width: 120px; padding: 1rem; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
+.stat-card .stat-value { font-size: 1.5rem; font-weight: 600; color: #f0f6fc; }
+.stat-card .stat-label { font-size: 0.75rem; color: #8b949e; margin-top: 0.25rem; }
+.stat-card.high-risk { border-color: #f85149; }
+.stat-card.expiring { border-color: #d29922; }
+.toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th { text-align: left; padding: 0.5rem 0.5rem; color: #8b949e; border-bottom: 1px solid #30363d; font-weight: 600; }
+td { padding: 0.5rem; border-bottom: 1px solid #21262d; }
+tr:hover td { background: #161b22; }
+.token-type { font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 8px; }
+.token-type.github_pat { background: #382f1b; color: #d29922; }
+.token-type.github_app { background: #1b3820; color: #3fb950; }
+.token-type.github_oauth { background: #1b2a4a; color: #58a6ff; }
+.token-type.found_secret { background: #381b1b; color: #f85149; }
+.token-type.generic { background: #21262d; color: #8b949e; }
+.risk-low { color: #3fb950; }
+.risk-medium { color: #d29922; }
+.risk-high { color: #f85149; }
+.risk-critical { color: #f85149; font-weight: 600; }
+.delete-btn { background: #da3633; font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+.delete-btn:hover { background: #f85149; }
+#scan-status { margin-top: 0.5rem; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div class="nav">
+  <span style="color:#f0f6fc;font-weight:600;">Token Inventory</span>
+  <a href="/">&larr; Back to Dashboard</a>
+</div>
+
+<main class="container">
+  <section class="section">
+    <div class="stats-row" id="stats-row">
+      <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">Total Tokens</div></div>
+      <div class="stat-card high-risk"><div class="stat-value" id="stat-high-risk">-</div><div class="stat-label">High Risk</div></div>
+      <div class="stat-card expiring"><div class="stat-value" id="stat-expiring">-</div><div class="stat-label">Expiring Soon</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-expired">-</div><div class="stat-label">Expired</div></div>
+    </div>
+
+    <div class="toolbar">
+      <button id="scan-btn" style="background:#1f6feb">Scan Now</button>
+      <button id="drift-btn" style="background:#8957e5">Check Drift</button>
+    </div>
+    <div id="scan-status"></div>
+    <div id="drift-results" style="display:none;margin-bottom:1rem;"></div>
+  </section>
+
+  <section class="section">
+    <h2>Tokens</h2>
+    <div id="token-table-wrapper">
+      <table id="token-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Scopes</th>
+            <th>Risk</th>
+            <th>First Seen</th>
+            <th>Last Seen</th>
+            <th>Expires</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="token-tbody">
+          <tr><td colspan="8" style="text-align:center;color:#8b949e;font-style:italic;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  async function api(path, options) {
+    const res = await fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options?.headers || {}),
+      },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(function () { return {} });
+      throw new Error(body.error || 'Request failed (' + res.status + ')');
+    }
+    return res.json();
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function riskClass(score) {
+    if (score === 'critical') return 'risk-critical';
+    if (score === 'high') return 'risk-high';
+    if (score === 'medium') return 'risk-medium';
+    return 'risk-low';
+  }
+
+  function formatTime(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString();
+  }
+
+  function formatDate(ts) {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleDateString();
+  }
+
+  function renderTokenRow(token) {
+    var tr = document.createElement('tr');
+
+    var scopesDisplay = '-';
+    if (token.scopes) {
+      try {
+        var parsed = JSON.parse(token.scopes);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          scopesDisplay = parsed.map(function (s) { return '<span class="badge scope-badge low">' + escapeHtml(s) + '</span>'; }).join(' ');
+        } else if (typeof parsed === 'string') {
+          scopesDisplay = escapeHtml(parsed);
+        }
+      } catch (e) {
+        scopesDisplay = escapeHtml(token.scopes);
+      }
+    }
+
+    tr.innerHTML =
+      '<td><strong>' + escapeHtml(token.name) + '</strong></td>' +
+      '<td><span class="token-type ' + escapeHtml(token.tokenType) + '">' + escapeHtml(token.tokenType) + '</span></td>' +
+      '<td><div class="scope-list">' + scopesDisplay + '</div></td>' +
+      '<td><span class="' + riskClass(token.riskScore) + '">' + escapeHtml(token.riskScore) + '</span></td>' +
+      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.firstSeenAt) + '</td>' +
+      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.lastSeenAt) + '</td>' +
+      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.expiresAt) + '</td>' +
+      '<td><button class="delete-btn" data-id="' + token.id + '">Delete</button></td>';
+
+    return tr;
+  }
+
+  async function loadTokens() {
+    var tbody = document.getElementById('token-tbody');
+    try {
+      var tokens = await api('/api/inventory/tokens');
+      if (tokens.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#8b949e;font-style:italic;">No tokens in inventory.</td></tr>';
+      } else {
+        tbody.innerHTML = '';
+        tokens.forEach(function (token) {
+          tbody.appendChild(renderTokenRow(token));
+        });
+        document.querySelectorAll('.delete-btn').forEach(function (btn) {
+          btn.addEventListener('click', async function () {
+            if (!confirm('Delete token #' + this.dataset.id + '?')) return;
+            try {
+              await api('/api/inventory/tokens/' + this.dataset.id, { method: 'DELETE' });
+              this.closest('tr').remove();
+            } catch (err) {
+              alert('Delete failed: ' + err.message);
+            }
+          });
+        });
+      }
+    } catch (err) {
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#f85149;">Error: ' + escapeHtml(err.message) + '</td></tr>';
+    }
+  }
+
+  async function loadStats() {
+    try {
+      var stats = await api('/api/inventory/tokens/stats');
+      document.getElementById('stat-total').textContent = stats.total || 0;
+      document.getElementById('stat-high-risk').textContent = stats.highRisk || 0;
+      document.getElementById('stat-expiring').textContent = stats.expiringSoon || 0;
+      document.getElementById('stat-expired').textContent = stats.expired || 0;
+    } catch (err) {
+      console.error('Stats load failed', err);
+    }
+  }
+
+  document.getElementById('scan-btn').addEventListener('click', async function () {
+    var btn = this;
+    var statusEl = document.getElementById('scan-status');
+    btn.disabled = true;
+    statusEl.textContent = 'Scanning...';
+    statusEl.className = 'status info';
+    try {
+      var result = await api('/api/inventory/tokens/scan', { method: 'POST' });
+      statusEl.textContent = 'Scan complete: ' + result.tokensFound + ' new, ' + result.tokensUpdated + ' updated';
+      statusEl.className = 'status success';
+      await loadTokens();
+      await loadStats();
+    } catch (err) {
+      statusEl.textContent = 'Scan failed: ' + err.message;
+      statusEl.className = 'status error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('drift-btn').addEventListener('click', async function () {
+    var btn = this;
+    var resultsEl = document.getElementById('drift-results');
+    btn.disabled = true;
+    resultsEl.style.display = 'block';
+    resultsEl.innerHTML = '<p style="color:#8b949e;">Checking for permission drift...</p>';
+    try {
+      var drift = await api('/api/inventory/tokens/drift');
+      if (drift.length === 0) {
+        resultsEl.innerHTML = '<p style="color:#3fb950;">No permission drift detected.</p>';
+      } else {
+        var html = '<h3 style="font-size:0.9rem;margin-bottom:0.5rem;color:#d29922;">Permission Drift Detected</h3>';
+        drift.forEach(function (d) {
+          var cls = d.riskIncreased ? 'risk-critical' : 'risk-high';
+          html += '<div style="padding:0.5rem;margin-bottom:0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;">';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+          html += '<strong>' + escapeHtml(d.name) + '</strong>';
+          html += '<span class="' + cls + '">' + (d.riskIncreased ? 'Risk Increased' : 'Drifted') + '</span>';
+          html += '</div>';
+          html += '<div style="font-size:0.8rem;margin-top:0.25rem;color:#8b949e;">';
+          html += 'Stored: ' + (d.storedScopes.length ? d.storedScopes.join(', ') : '(none)');
+          html += '</div>';
+          html += '<div style="font-size:0.8rem;color:#8b949e;">';
+          html += 'Current: ' + (d.currentScopes.length ? d.currentScopes.join(', ') : '(none)');
+          html += '</div></div>';
+        });
+        resultsEl.innerHTML = html;
+      }
+    } catch (err) {
+      resultsEl.innerHTML = '<p style="color:#f85149;">Drift check failed: ' + escapeHtml(err.message) + '</p>';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  loadTokens();
+  loadStats();
+  setInterval(loadTokens, 15000);
+  setInterval(loadStats, 30000);
+})();
+</script>
+</body>
+</html>

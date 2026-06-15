@@ -7,3 +7,6 @@ coverage/
 *.sqlite-shm
 *.log
 config.local.json
+*.pem
+*.key
+.sentinel-oracle/

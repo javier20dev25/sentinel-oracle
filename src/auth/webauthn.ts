@@ -127,22 +127,26 @@ export async function verifyAssertion(
   origin: string,
   rpId: string,
   expectedPrNumber?: number,
-): Promise<{ verified: boolean; credentialId: string; prNumber?: number }> {
+): Promise<{ verified: boolean; credentialId: string; prNumber?: number; error?: string }> {
   const storedJson = db.getConfig(`webauthn_assertion_${expectedChallenge}`)
-  if (!storedJson) return { verified: false, credentialId: '' }
+  if (!storedJson) return { verified: false, credentialId: '', error: 'Challenge not found or expired. Please try again.' }
 
   const stored = JSON.parse(storedJson)
   const originalPrNumber: number | undefined = stored.prNumber || undefined
   db.setConfig(`webauthn_assertion_${expectedChallenge}`, '')
 
   if (expectedPrNumber !== undefined && originalPrNumber !== expectedPrNumber) {
-    return { verified: false, credentialId: '' }
+    return { verified: false, credentialId: '', error: 'PR number mismatch in challenge.' }
   }
 
   const credentialData = credential as any
   const credentialId = credentialData?.id || ''
   const device = db.getDeviceByCredentialId(credentialId)
-  if (!device) return { verified: false, credentialId: '' }
+  if (!device) return { verified: false, credentialId: '', error: `Device not found for credential ${credentialId.slice(0,12)}...` }
+
+  const receivedOrigin = credentialData?.response?.clientDataJSON
+    ? (() => { try { return JSON.parse(Buffer.from(credentialData.response.clientDataJSON, 'base64url').toString()).origin } catch { return '?' } })()
+    : '?'
 
   const verification = await verifyAuthenticationResponse({
     response: credentialData,
@@ -157,7 +161,11 @@ export async function verifyAssertion(
     },
   })
 
-  if (!verification.verified) return { verified: false, credentialId: '' }
+  console.log('[webauthn] verifyAssertion: expectedOrigin=%s receivedOrigin=%s rpId=%s verified=%s', origin, receivedOrigin, rpId, verification.verified)
+
+  if (!verification.verified) {
+    return { verified: false, credentialId: '', error: `WebAuthn assertion verification failed. expectedOrigin="${origin}" receivedOrigin="${receivedOrigin}" rpId="${rpId}"` }
+  }
 
   db.updateDeviceCounter(device.credentialId, verification.authenticationInfo.newCounter)
 

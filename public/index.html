@@ -27,6 +27,8 @@
     <div id="enrollment-status" class="status"></div>
   </section>
 
+  <div id="conn-indicator" class="conn-ok" title="Connected to GitHub"></div>
+
   <section id="setup-section" class="section" style="display:none">
     <h2>Register Device</h2>
     <p>Add another passkey to authorize merges.</p>
@@ -90,6 +92,7 @@
   <section id="token-section" class="section" style="display:none">
     <h2>Credential Inspector</h2>
     <div id="token-info"></div>
+    <div style="margin-top:1rem;font-size:0.85rem;"><a href="/inventory.html" style="color:#58a6ff;">View Full Token Inventory &rarr;</a></div>
   </section>
 
   <section id="auth-mode-section" class="section" style="display:none">
@@ -107,6 +110,12 @@
     <div id="metrics-info"></div>
   </section>
 
+  <section id="admin-section" class="section" style="display:none">
+    <h2>Admin</h2>
+    <button id="backfill-btn" class="btn" style="margin-bottom:0.5rem;">Backfill File History (all merged PRs)</button>
+    <div id="backfill-status" style="font-size:0.85rem;color:#8b949e;"></div>
+  </section>
+
   <section id="webhook-section" class="section" style="display:none">
     <h2>Webhook</h2>
     <div id="webhook-info"></div>
@@ -118,9 +127,17 @@
       <p class="empty">Loading...</p>
     </div>
   </section>
+  <div id="reassert-modal" class="modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1.5rem;max-width:400px;text-align:center;">
+      <h3 style="margin:0 0 0.5rem;color:#f0f6fc;">Confirm Identity</h3>
+      <p style="color:#8b949e;font-size:0.85rem;margin:0 0 1rem;">Tap your security key to authorize this action</p>
+      <div id="reassert-status" style="color:#8b949e;font-size:0.8rem;"></div>
+      <button id="reassert-cancel" style="margin-top:1rem;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:0.4rem 1rem;border-radius:6px;cursor:pointer;">Cancel</button>
+    </div>
+  </div>
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+<script src="/qrcode.min.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

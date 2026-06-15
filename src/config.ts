@@ -23,11 +23,14 @@ export interface Config {
   rateLimitAuth: number
   rateLimitWindowMs: number
   encryptionKey: Buffer
+  cookieSecret: string
+  hmacSeed: Buffer
   approveReasonRequired: boolean
   locked: boolean
   passwordHash: string
   enrollmentTokenTtlMs: number
   githubWebhookSecret: string
+  scanEnabled: boolean
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -41,6 +44,30 @@ function loadOrCreateEncryptionKey(dataDir: string): Buffer {
     fs.mkdirSync(dataDir, { recursive: true })
     fs.writeFileSync(keyPath, key, { mode: 0o600 })
     return key
+  }
+}
+
+function loadOrCreateCookieSecret(dataDir: string): string {
+  const keyPath = path.join(dataDir, '.cookie_secret')
+  try {
+    return fs.readFileSync(keyPath, 'utf8').trim()
+  } catch {
+    const secret = randomBytes(32).toString('hex')
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(keyPath, secret, { mode: 0o600 })
+    return secret
+  }
+}
+
+function loadOrCreateHmacSeed(dataDir: string): Buffer {
+  const keyPath = path.join(dataDir, '.hmac_seed')
+  try {
+    return fs.readFileSync(keyPath)
+  } catch {
+    const seed = randomBytes(32)
+    fs.mkdirSync(dataDir, { recursive: true })
+    fs.writeFileSync(keyPath, seed, { mode: 0o600 })
+    return seed
   }
 }
 
@@ -160,18 +187,21 @@ export function loadConfig(): Config {
     rateLimitAuth: 5,
     rateLimitWindowMs: 60000,
     encryptionKey: loadOrCreateEncryptionKey(dataDir),
+    cookieSecret: process.env.SENTINEL_COOKIE_SECRET || loadOrCreateCookieSecret(dataDir),
+    hmacSeed: process.env.SENTINEL_HMAC_SEED ? Buffer.from(process.env.SENTINEL_HMAC_SEED, 'hex') : loadOrCreateHmacSeed(dataDir),
     approveReasonRequired: false,
     locked: false,
     passwordHash: '',
     enrollmentTokenTtlMs: 120000,
     githubWebhookSecret: '',
+    scanEnabled: false,
   }
 
   try {
     if (fs.existsSync(CONFIG_PATH)) {
       const raw = fs.readFileSync(CONFIG_PATH, 'utf8')
       const user = JSON.parse(raw)
-      const merged = { ...defaults, ...user, encryptionKey: defaults.encryptionKey }
+      const merged = { ...defaults, ...user, encryptionKey: defaults.encryptionKey, cookieSecret: defaults.cookieSecret, hmacSeed: defaults.hmacSeed }
 
       // Auto-override loopback bindAddress with detected IP
       if (merged.bindAddress === '127.0.0.1' || merged.bindAddress === 'localhost') {
@@ -233,7 +263,7 @@ export function saveConfig(partial: Partial<Config>): void {
     }
   } catch {}
   for (const [k, v] of Object.entries(partial)) {
-    if (k !== 'encryptionKey') {
+    if (!['encryptionKey', 'cookieSecret', 'hmacSeed'].includes(k)) {
       existing[k] = v
     }
   }

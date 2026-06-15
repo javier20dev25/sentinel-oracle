@@ -39,8 +39,14 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 createdAt: Date.now(),
                 authorizedAt: null,
                 deviceName: null,
+                checkRunId: null,
             });
             result.newPRs++;
+
+            const checkRun = await client.createCheckRun(pr.number, pr.sha, 'action_required', 'Sentinel Oracle review required before merge')
+            if (checkRun && checkRun.id) {
+                db.setCheckRunId(pr.number, checkRun.id)
+            }
         }
 
         if (existing && (existing.sha !== pr.sha || existing.authStatus === 'expired')) {
@@ -57,8 +63,14 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 createdAt: Date.now(),
                 authorizedAt: null,
                 deviceName: null,
+                checkRunId: null,
             });
             result.updatedPRs++;
+
+            const checkRun = await client.createCheckRun(pr.number, pr.sha, 'action_required', 'Sentinel Oracle review required before merge')
+            if (checkRun && checkRun.id) {
+                db.setCheckRunId(pr.number, checkRun.id)
+            }
         }
 
         const statuses = await getPRStatuses(client, pr.sha);
@@ -73,10 +85,6 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
                 authStatus: current.authStatus === 'expired' ? 'pending' : current.authStatus,
                 sha: pr.sha,
             });
-
-            if (allPassed && current.authStatus === 'pending') {
-                await client.setCommitStatus(pr.sha, 'pending', 'Awaiting physical authorization');
-            }
         }
     }
 

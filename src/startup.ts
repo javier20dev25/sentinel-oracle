@@ -21,8 +21,9 @@ export async function printStartupBanner(config: Config, db: DatabaseStore): Pro
   const url = config.serverOrigin
 
   let qrLines: string[] = []
+  const enrollUrl = !enrolled && token ? `${url}/?enroll=${token}` : url
   try {
-    const raw: string = await (QRCode as any).toString(url, { type: 'utf8', small: true })
+    const raw: string = await (QRCode as any).toString(enrollUrl, { type: 'utf8', small: true })
     qrLines = raw.split('\n').filter(l => l.trim())
   } catch {}
 
@@ -56,7 +57,7 @@ export async function printStartupBanner(config: Config, db: DatabaseStore): Pro
     for (const l of qrLines) {
       console.log(' ' + l)
     }
-    console.log(` ${GRY}Scan to open: ${url}${R}`)
+    console.log(` ${GRY}Scan to open: ${enrollUrl}${R}`)
     console.log()
   }
 }

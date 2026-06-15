@@ -16,6 +16,7 @@ export interface PendingPR {
     createdAt: number;
     authorizedAt: number | null;
     deviceName: string | null;
+    checkRunId: number | null;
 }
 
 export interface AuthDevice {
@@ -36,6 +37,8 @@ export interface Session {
     createdAt: number
     expiresAt: number
     lastUsedAt: number
+    csrfToken?: string
+    userAgent?: string
 }
 
 export interface AuditEntry {
@@ -44,6 +47,29 @@ export interface AuditEntry {
     action: string;
     prNumber: number | null;
     detail: string;
+}
+
+export interface TokenInventory {
+  id: number
+  tokenType: 'github_pat' | 'github_app' | 'github_oauth' | 'generic' | 'found_secret'
+  name: string
+  source: 'github_api' | 'repo_scan' | 'manual'
+  scopes: string | null
+  fingerprint: string
+  firstSeenAt: number
+  lastSeenAt: number | null
+  expiresAt: number | null
+  lastRotation: number | null
+  riskScore: string
+  notes: string | null
+  metadata: string | null
+}
+
+export interface TokenStats {
+  total: number
+  highRisk: number
+  expiringSoon: number
+  expired: number
 }
 
 export class DatabaseStore {
@@ -57,6 +83,14 @@ export class DatabaseStore {
         this.encryptionKey = encryptionKey || Buffer.alloc(0);
         this.idleTimeoutMs = idleTimeoutMs;
         this.migrate();
+    }
+
+    private runMigration(sql: string): void {
+      try {
+        this.db.prepare(sql).run()
+      } catch (err) {
+        console.error(`[db] Migration warning: ${sql} — ${err instanceof Error ? err.message : err}`)
+      }
     }
 
     private migrate(): void {
@@ -115,20 +149,71 @@ export class DatabaseStore {
                 value TEXT NOT NULL
             );
         `);
-        try { this.db.prepare('ALTER TABLE pending_prs ADD COLUMN device_name TEXT').run() } catch {}
+        this.runMigration('ALTER TABLE pending_prs ADD COLUMN device_name TEXT')
+        this.runMigration('ALTER TABLE pending_prs ADD COLUMN check_run_id INTEGER')
+        this.runMigration('ALTER TABLE sessions ADD COLUMN csrf_token TEXT DEFAULT \'\'')
+        this.runMigration('ALTER TABLE sessions ADD COLUMN user_agent TEXT DEFAULT \'\'')
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS token_inventory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                token_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                source TEXT NOT NULL,
+                scopes TEXT,
+                fingerprint TEXT NOT NULL UNIQUE,
+                first_seen_at INTEGER NOT NULL,
+                last_seen_at INTEGER,
+                expires_at INTEGER,
+                last_rotation INTEGER,
+                risk_score TEXT DEFAULT 'unknown',
+                notes TEXT,
+                metadata TEXT
+            );
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS pr_files (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_number INTEGER NOT NULL,
+                filename TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'modified',
+                additions INTEGER DEFAULT 0,
+                deletions INTEGER DEFAULT 0,
+                size_bytes INTEGER DEFAULT 0,
+                scanned_at INTEGER NOT NULL,
+                auth_status TEXT NOT NULL DEFAULT 'pending'
+            );
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS workflow_times (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                pr_number INTEGER,
+                check_name TEXT NOT NULL,
+                duration_ms INTEGER,
+                scanned_at INTEGER NOT NULL,
+                UNIQUE(filename, sha, check_name)
+            );
+        `)
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_pr_files_pr ON pr_files(pr_number);
+            CREATE INDEX IF NOT EXISTS idx_pr_files_filename ON pr_files(filename);
+            CREATE INDEX IF NOT EXISTS idx_pr_files_auth ON pr_files(auth_status);
+        `)
     }
 
     upsertPR(pr: Omit<PendingPR, 'id'>): void {
         this.db.prepare(`
-            INSERT INTO pending_prs (pr_number, owner, repo, title, author, sha, ci_status, sentinel_status, auth_status, created_at, authorized_at, device_name)
-            VALUES (@prNumber, @owner, @repo, @title, @author, @sha, @ciStatus, @sentinelStatus, @authStatus, @createdAt, @authorizedAt, @deviceName)
+            INSERT INTO pending_prs (pr_number, owner, repo, title, author, sha, ci_status, sentinel_status, auth_status, created_at, authorized_at, device_name, check_run_id)
+            VALUES (@prNumber, @owner, @repo, @title, @author, @sha, @ciStatus, @sentinelStatus, @authStatus, @createdAt, @authorizedAt, @deviceName, @checkRunId)
             ON CONFLICT(pr_number) DO UPDATE SET
                 sha = excluded.sha,
                 ci_status = excluded.ci_status,
                 sentinel_status = excluded.sentinel_status,
                 auth_status = excluded.auth_status,
                 title = excluded.title,
-                device_name = excluded.device_name
+                device_name = excluded.device_name,
+                check_run_id = excluded.check_run_id
         `).run(pr);
     }
 
@@ -147,6 +232,7 @@ export class DatabaseStore {
             createdAt: row.created_at,
             authorizedAt: row.authorized_at,
             deviceName: row.device_name || null,
+            checkRunId: row.check_run_id || null,
         }
     }
 
@@ -175,6 +261,90 @@ export class DatabaseStore {
         this.db.prepare(
             'UPDATE pending_prs SET auth_status = ?, authorized_at = ?, device_name = ? WHERE pr_number = ?'
         ).run(status, status === 'authorized' ? Date.now() : null, deviceName || null, prNumber);
+        if (status === 'authorized' || status === 'rejected') {
+            this.updatePRFilesAuthStatus(prNumber, status)
+        }
+    }
+
+    setCheckRunId(prNumber: number, checkRunId: number): void {
+        this.db.prepare(
+            'UPDATE pending_prs SET check_run_id = ? WHERE pr_number = ?'
+        ).run(checkRunId, prNumber);
+    }
+
+    storePRFiles(prNumber: number, files: { filename: string; status: string; additions: number; deletions: number; patch?: string }[], authStatus = 'pending'): void {
+        const now = Date.now()
+        const del = this.db.prepare('DELETE FROM pr_files WHERE pr_number = ?')
+        const ins = this.db.prepare('INSERT INTO pr_files (pr_number, filename, status, additions, deletions, size_bytes, scanned_at, auth_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+        const tx = this.db.transaction(() => {
+            del.run(prNumber)
+            for (const f of files) {
+                const sizeBytes = f.patch ? Buffer.byteLength(f.patch, 'utf-8') : 0
+                ins.run(prNumber, f.filename, f.status, f.additions, f.deletions, sizeBytes, now, authStatus)
+            }
+        })
+        tx()
+    }
+
+    getPRFiles(prNumber: number): { filename: string; status: string; additions: number; deletions: number; sizeBytes: number; scannedAt: number }[] {
+        return this.db.prepare('SELECT filename, status, additions, deletions, size_bytes as sizeBytes, scanned_at as scannedAt FROM pr_files WHERE pr_number = ? ORDER BY filename').all(prNumber) as any
+    }
+
+    getFileHistory(filename: string, limit = 100): { prNumber: number; additions: number; deletions: number; sizeBytes: number; scannedAt: number }[] {
+        return this.db.prepare(`
+            SELECT f.pr_number, f.additions, f.deletions, f.size_bytes as sizeBytes, f.scanned_at as scannedAt
+            FROM pr_files f
+            WHERE f.filename = ?
+            ORDER BY f.scanned_at ASC
+            LIMIT ?
+        `).all(filename, limit) as any
+    }
+
+    storeWorkflowTimes(filename: string, entries: { sha: string; prNumber: number; checkName: string; durationMs: number }[]): void {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO workflow_times (filename, sha, pr_number, check_name, duration_ms, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `)
+        const now = Date.now()
+        for (const e of entries) {
+            stmt.run(filename, e.sha, e.prNumber, e.checkName, e.durationMs, now)
+        }
+    }
+
+    getWorkflowHistory(filename: string): { sha: string; prNumber: number; checkName: string; durationMs: number; scannedAt: number }[] {
+        return this.db.prepare(`
+            SELECT sha, pr_number as prNumber, check_name as checkName, duration_ms as durationMs, scanned_at as scannedAt
+            FROM workflow_times
+            WHERE filename = ?
+            ORDER BY scanned_at ASC
+        `).all(filename) as any
+    }
+
+    getRepoFileAverages(): { filename: string; avgAdditions: number; avgDeletions: number; avgSizeBytes: number; count: number }[] {
+        return this.db.prepare(`
+            SELECT filename,
+                   ROUND(AVG(additions)) as avgAdditions,
+                   ROUND(AVG(deletions)) as avgDeletions,
+                   ROUND(AVG(size_bytes)) as avgSizeBytes,
+                   COUNT(*) as count
+            FROM pr_files
+            WHERE auth_status IN ('authorized','rejected')
+            GROUP BY filename
+            HAVING count > 0
+        `).all() as any
+    }
+
+    updatePRFilesAuthStatus(prNumber: number, authStatus: string): void {
+        this.db.prepare('UPDATE pr_files SET auth_status = ? WHERE pr_number = ?').run(authStatus, prNumber)
+    }
+
+    getBackfillCheckpoint(): number {
+        const row = this.db.prepare("SELECT value FROM config WHERE key = 'backfill_checkpoint'").get() as any
+        return row ? parseInt(row.value, 10) || 0 : 0
+    }
+
+    setBackfillCheckpoint(prNumber: number): void {
+        this.db.prepare("INSERT INTO config (key, value) VALUES ('backfill_checkpoint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(String(prNumber))
     }
 
     registerDevice(device: Omit<AuthDevice, 'id' | 'createdAt' | 'lastUsedAt'>): void {
@@ -270,14 +440,15 @@ export class DatabaseStore {
         return { prNumber: row.pr_number, data, used: row.used };
     }
 
-    createSession(credentialId: string, deviceName: string, ttlMs: number): string {
+    createSession(credentialId: string, deviceName: string, ttlMs: number, csrfToken?: string, userAgent?: string): string {
         const { v4: uuidv4 } = require('uuid')
         const id = uuidv4()
         const now = Date.now()
+        const token = csrfToken || require('crypto').randomBytes(32).toString('hex')
         this.db.prepare(`
-            INSERT INTO sessions (id, credential_id, device_name, created_at, expires_at, last_used_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        `).run(id, credentialId, deviceName, now, now + ttlMs, now)
+            INSERT INTO sessions (id, credential_id, device_name, created_at, expires_at, last_used_at, csrf_token, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, credentialId, deviceName, now, now + ttlMs, now, token, userAgent || '')
         return id
     }
 
@@ -295,6 +466,8 @@ export class DatabaseStore {
             createdAt: row.created_at,
             expiresAt: row.expires_at,
             lastUsedAt: row.last_used_at,
+            csrfToken: row.csrf_token || undefined,
+            userAgent: row.user_agent || undefined,
         }
     }
 
@@ -308,6 +481,11 @@ export class DatabaseStore {
 
     deleteSessionsByCredentialId(credentialId: string): void {
         this.db.prepare('DELETE FROM sessions WHERE credential_id = ?').run(credentialId)
+    }
+
+    getSessionCSRFToken(sessionId: string): string | null {
+        const row = this.db.prepare('SELECT csrf_token FROM sessions WHERE id = ?').get(sessionId) as any
+        return row ? row.csrf_token : null
     }
 
     pruneExpiredSessions(): number {
@@ -347,6 +525,77 @@ export class DatabaseStore {
         this.db.prepare(
             'INSERT INTO config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
         ).run(key, value);
+    }
+
+    addToken(token: Omit<TokenInventory, 'id'>): void {
+        this.db.prepare(`
+            INSERT INTO token_inventory (token_type, name, source, scopes, fingerprint, first_seen_at, last_seen_at, expires_at, last_rotation, risk_score, notes, metadata)
+            VALUES (@tokenType, @name, @source, @scopes, @fingerprint, @firstSeenAt, @lastSeenAt, @expiresAt, @lastRotation, @riskScore, @notes, @metadata)
+        `).run(token)
+    }
+
+    getAllTokens(): TokenInventory[] {
+        const rows = this.db.prepare('SELECT * FROM token_inventory ORDER BY first_seen_at DESC').all()
+        return rows.map(r => ({
+            id: (r as any).id,
+            tokenType: (r as any).token_type,
+            name: (r as any).name,
+            source: (r as any).source,
+            scopes: (r as any).scopes,
+            fingerprint: (r as any).fingerprint,
+            firstSeenAt: (r as any).first_seen_at,
+            lastSeenAt: (r as any).last_seen_at,
+            expiresAt: (r as any).expires_at,
+            lastRotation: (r as any).last_rotation,
+            riskScore: (r as any).risk_score,
+            notes: (r as any).notes,
+            metadata: (r as any).metadata,
+        }))
+    }
+
+    getTokenByFingerprint(fingerprint: string): TokenInventory | undefined {
+        const row = this.db.prepare('SELECT * FROM token_inventory WHERE fingerprint = ?').get(fingerprint) as any
+        if (!row) return undefined
+        return {
+            id: row.id,
+            tokenType: row.token_type,
+            name: row.name,
+            source: row.source,
+            scopes: row.scopes,
+            fingerprint: row.fingerprint,
+            firstSeenAt: row.first_seen_at,
+            lastSeenAt: row.last_seen_at,
+            expiresAt: row.expires_at,
+            lastRotation: row.last_rotation,
+            riskScore: row.risk_score,
+            notes: row.notes,
+            metadata: row.metadata,
+        }
+    }
+
+    updateTokenSeen(fingerprint: string): void {
+        this.db.prepare('UPDATE token_inventory SET last_seen_at = ? WHERE fingerprint = ?').run(Date.now(), fingerprint)
+    }
+
+    updateTokenRisk(fingerprint: string, riskScore: string, notes?: string): void {
+        if (notes !== undefined) {
+            this.db.prepare('UPDATE token_inventory SET risk_score = ?, notes = ? WHERE fingerprint = ?').run(riskScore, notes, fingerprint)
+        } else {
+            this.db.prepare('UPDATE token_inventory SET risk_score = ? WHERE fingerprint = ?').run(riskScore, fingerprint)
+        }
+    }
+
+    deleteToken(id: number): void {
+        this.db.prepare('DELETE FROM token_inventory WHERE id = ?').run(id)
+    }
+
+    getTokenStats(): TokenStats {
+        const total = (this.db.prepare('SELECT COUNT(*) as c FROM token_inventory').get() as any).c
+        const highRisk = (this.db.prepare("SELECT COUNT(*) as c FROM token_inventory WHERE risk_score IN ('high','critical')").get() as any).c
+        const now = Date.now()
+        const expiringSoon = (this.db.prepare('SELECT COUNT(*) as c FROM token_inventory WHERE expires_at IS NOT NULL AND expires_at > ? AND expires_at < ?').get(now, now + 604800000) as any).c
+        const expired = (this.db.prepare('SELECT COUNT(*) as c FROM token_inventory WHERE expires_at IS NOT NULL AND expires_at < ?').get(now) as any).c
+        return { total, highRisk, expiringSoon, expired }
     }
 
     close(): void {

@@ -8,7 +8,7 @@ export function securityHeaders() {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://www.gstatic.com"],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'"],
         frameSrc: ["'none'"],
@@ -36,5 +36,24 @@ export function auditLogger(db: DatabaseStore) {
       db.log('api_request', null, detail)
     }
     next()
+  }
+}
+
+export function csrfProtection(allowedOrigin: string, db: DatabaseStore) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next()
+
+    const origin = req.headers['origin'] as string | undefined
+    const referer = req.headers['referer'] as string | undefined
+    if (!origin && !referer) return next()
+
+    const source = (origin || referer || '').replace(/\/$/, '')
+    const allowed = allowedOrigin.replace(/\/$/, '')
+
+    if (source.startsWith(allowed)) return next()
+    if (source.includes('://localhost') || source.includes('://127.0.0.1')) return next()
+
+    db.log('csrf_blocked', null, `Blocked ${req.method} ${req.path} from ${source}`)
+    res.status(403).json({ error: 'Cross-origin request blocked' })
   }
 }

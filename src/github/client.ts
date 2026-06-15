@@ -10,6 +10,15 @@ export interface PRInfo {
   createdAt: string
 }
 
+export interface PRFile {
+  filename: string
+  status: string
+  additions: number
+  deletions: number
+  patch?: string
+  contents_url: string
+}
+
 export interface CheckStatus {
   context: string
   state: string
@@ -93,6 +102,27 @@ export class GitHubClient {
       'User-Agent': 'sentinel-oracle',
     }
 
+    const maxRetries = 3
+    let lastErr: Error | null = null
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (attempt > 0) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 8000)
+        await new Promise(r => setTimeout(r, delay))
+      }
+      try {
+        return await this._request(url, method, reqHeaders, body)
+      } catch (err: any) {
+        lastErr = err
+        if (err.message && (err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET'))) {
+          continue
+        }
+        throw err
+      }
+    }
+    throw lastErr || new Error('Request failed after retries')
+  }
+
+  private _request(url: string, method: string, headers: Record<string, string>, body?: object): Promise<{ body: string; headers: Record<string, string> }> {
     return new Promise((resolve, reject) => {
       const u = new URL(url)
       const opts: https.RequestOptions = {
@@ -100,7 +130,7 @@ export class GitHubClient {
         port: u.port || 443,
         path: u.pathname + u.search,
         method,
-        headers: reqHeaders,
+        headers,
         timeout: 30000,
       }
       const req = https.request(opts, (res) => {
@@ -187,12 +217,6 @@ export class GitHubClient {
     } catch {
       return []
     }
-  }
-
-  async setCommitStatus(sha: string, state: 'pending' | 'success' | 'failure', description: string): Promise<void> {
-    await this.api('POST', `/repos/${this.owner}/${this.repo}/statuses/${sha}`,
-      { state, context: this.statusContext, description },
-    )
   }
 
   async mergePR(prNumber: number, sha: string): Promise<boolean> {
@@ -308,6 +332,56 @@ export class GitHubClient {
     }
   }
 
+  async createCheckRun(prNumber: number, sha: string, conclusion: string, summary: string, annotations?: { path: string; start_line: number; end_line: number; annotation_level: string; message: string; title?: string }[]): Promise<any> {
+    try {
+      const name = this.statusContext || 'Sentinel Oracle'
+      const status = 'completed'
+      const output: any = {
+        title: `Sentinel Oracle — ${conclusion.toUpperCase()}`,
+        summary,
+        text: `PR #${prNumber} — ${conclusion === 'success' ? 'Authorized' : conclusion === 'failure' ? 'Blocked' : 'Action required'}`,
+      }
+      if (annotations && annotations.length > 0) {
+        output.annotations = annotations
+      }
+      const out = await this.api('POST', `/repos/${this.owner}/${this.repo}/check-runs`, {
+        name,
+        head_sha: sha,
+        status,
+        conclusion,
+        output,
+      })
+      return JSON.parse(out)
+    } catch (err) {
+      const msg = String(err)
+      console.error('[check-run] create failed:', msg)
+      return null
+    }
+  }
+
+  async updateCheckRun(checkRunId: number, conclusion: string, summary: string, annotations?: { path: string; start_line: number; end_line: number; annotation_level: string; message: string; title?: string }[]): Promise<any> {
+    try {
+      const status = 'completed'
+      const output: any = {
+        title: `Sentinel Oracle — ${conclusion.toUpperCase()}`,
+        summary,
+      }
+      if (annotations && annotations.length > 0) {
+        output.annotations = annotations
+      }
+      const out = await this.api('PATCH', `/repos/${this.owner}/${this.repo}/check-runs/${checkRunId}`, {
+        status,
+        conclusion,
+        output,
+      })
+      return JSON.parse(out)
+    } catch (err) {
+      const msg = String(err)
+      console.error('[check-run] update failed:', msg)
+      return null
+    }
+  }
+
   async listCheckSuitesForRef(sha: string): Promise<any[]> {
     try {
       const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/commits/${sha}/check-suites`)
@@ -323,8 +397,59 @@ export class GitHubClient {
     return JSON.parse(out)
   }
 
+  async getPRFiles(prNumber: number): Promise<PRFile[]> {
+    try {
+      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/pulls/${prNumber}/files?per_page=100`)
+      const data: any[] = JSON.parse(out)
+      return data.map(f => ({
+        filename: f.filename,
+        status: f.status,
+        additions: f.additions,
+        deletions: f.deletions,
+        patch: f.patch || '',
+        contents_url: f.contents_url,
+      }))
+    } catch {
+      return []
+    }
+  }
+
   async compareCommits(baseSha: string, headSha: string): Promise<any> {
     const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/compare/${baseSha}...${headSha}`)
     return JSON.parse(out)
+  }
+
+  async listAllPRs(state: 'closed' | 'all' = 'closed', perPage = 100): Promise<any[]> {
+    const allPRs: any[] = []
+    let page = 1
+    while (true) {
+      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/pulls?state=${state}&per_page=${perPage}&page=${page}&sort=created&direction=asc`)
+      const batch: any[] = JSON.parse(out)
+      if (batch.length === 0) break
+      allPRs.push(...batch)
+      page++
+    }
+    return allPRs
+  }
+
+  // Get workflow run durations for all commits that modified a file on main
+  async getWorkflowDurationsForFile(filename: string): Promise<{ sha: string; checkName: string; durationMs: number }[]> {
+    const results: { sha: string; checkName: string; durationMs: number }[] = []
+    try {
+      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/commits?sha=main&path=${encodeURIComponent(filename)}&per_page=50`)
+      const commits: any[] = JSON.parse(out)
+      for (const c of commits) {
+        const sha = c.sha
+        const checks = await this.getCheckRunDetails(sha)
+        for (const chk of checks) {
+          if (chk.durationMs != null && chk.conclusion === 'success') {
+            results.push({ sha, checkName: chk.name, durationMs: chk.durationMs })
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`getWorkflowDurations failed for ${filename}:`, err)
+    }
+    return results
   }
 }

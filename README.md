@@ -238,6 +238,47 @@ API call to prevent race conditions on retry.
 
 ---
 
+## CSRF Protection
+
+Every mutating API endpoint (POST, PUT, DELETE) requires a per-session CSRF
+token. The token is generated at session creation and returned via
+`GET /api/session/csrf-token`. Frontend requests must include the token in the
+`X-CSRF-Token` header:
+
+```http
+POST /api/lockdown
+Cookie: sentinel_session=<sid>
+X-CSRF-Token: <token>
+Content-Type: application/json
+
+{ "reAssertToken": "..." }
+```
+
+Without a valid CSRF token, the server returns 403.
+
+## WebAuthn Re-assertion
+
+Sensitive actions (lockdown, unlock, device revocation, PR rejection) require
+fresh biometric confirmation via WebAuthn re-assertion in addition to the
+session cookie and CSRF token.
+
+The re-assertion flow:
+
+1. Client calls `POST /api/auth/re-assert` with `{ action: "lockdown" }`
+2. Server generates a WebAuthn assertion challenge and stores it in the config
+   table
+3. Client calls `navigator.credentials.get()` with the challenge
+4. Client sends the assertion to `POST /api/auth/re-assert/complete`
+5. Server verifies the assertion and returns a one-time `reAssertToken`
+   (60-second TTL)
+6. Client includes the `reAssertToken` in the sensitive action request body
+
+This ensures that even with an active session, an attacker cannot lock down
+the system, revoke devices, or reject PRs without physical access to a
+registered device.
+
+---
+
 ## Threat Model
 
 ### Attack Vector Analysis
@@ -411,19 +452,40 @@ See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for complete setup instructions
 
 ## API Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/prs` | Request authorization for a PR. Returns QR challenge. |
-| POST | `/api/prs/:number/confirm` | Confirm authorization with WebAuthn assertion. Executes merge. |
-| POST | `/api/prs/:number/reject` | Reject authorization for a PR. |
-| POST | `/api/lockdown` | Emergency lockdown. Invalidates all challenges. |
-| GET | `/api/devices` | List registered WebAuthn credentials. |
-| DELETE | `/api/devices/:id` | Revoke a registered device. |
-| GET | `/api/audit` | Paginated authorization audit log. |
-| GET | `/api/status/branch-protection` | Returns current branch protection status for main branch. Checks for required status checks, admin enforcement, force push settings. |
-| GET | `/api/prs/{number}/checks` | Returns detailed check run results for a specific PR including check names, conclusions, durations, and diff statistics (files changed, additions, deletions). |
-| GET | `/api/metrics` | Returns aggregated metrics for audit and analysis: summary counts, per-PR merge times with approval wait duration, and per-author statistics. |
-| POST | `/api/webhook/github` | GitHub webhook receiver. Accepts pull_request and push events. Used for real-time PR notifications and unauthorized merge detection. |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/status` | None | Server status, uptime, locked state, setup required |
+| GET | `/api/session/check` | Cookie | Session validation. Returns `{ authenticated, deviceName }` |
+| GET | `/api/session/csrf-token` | Cookie | Returns CSRF token for mutating requests |
+| POST | `/api/session/logout` | Cookie | Destroy current session |
+| POST | `/api/webauthn/register/begin` | Cookie | Start WebAuthn credential registration |
+| POST | `/api/webauthn/register/complete` | Cookie | Complete WebAuthn credential registration |
+| POST | `/api/webauthn/assert/begin` | None | Start WebAuthn assertion (login) |
+| POST | `/api/webauthn/assert/complete` | None | Complete WebAuthn assertion (login) |
+| POST | `/api/auth/re-assert` | Cookie | Generate re-assertion challenge for sensitive actions |
+| POST | `/api/auth/re-assert/complete` | Cookie | Verify re-assertion, returns one-time token |
+| GET | `/api/prs` | Cookie | List pending PRs (triggers poll) |
+| GET | `/api/prs/history` | Cookie | List completed/authorized PRs |
+| POST | `/api/prs/:number/authorize` | Cookie | Initiate authorization, returns QR challenge |
+| POST | `/api/prs/:number/confirm` | Cookie | Confirm with WebAuthn assertion, executes merge |
+| POST | `/api/prs/:number/reject` | Cookie+CSRF+RA | Reject authorization (needs re-assertion token) |
+| POST | `/api/prs/:number/scan` | Cookie | Trigger SAST scan on PR files |
+| GET | `/api/prs/:number/checks` | Cookie | Check run results for a PR |
+| GET | `/api/prs/:number/file-history/:filename` | Cookie | File modification history + CI duration chart data |
+| POST | `/api/lockdown` | Cookie+CSRF+RA | Emergency lockdown (needs re-assertion token) |
+| POST | `/api/unlock` | Cookie+CSRF+RA | Deactivate lockdown (needs re-assertion token) |
+| GET | `/api/devices` | Cookie | List registered WebAuthn credentials |
+| POST | `/api/devices/:credentialId/revoke` | Cookie+CSRF+RA | Revoke a device (needs re-assertion token) |
+| GET | `/api/audit` | Cookie | Authorization audit log |
+| GET | `/api/metrics` | Cookie | Aggregated metrics and per-author stats |
+| GET | `/api/status/branch-protection` | Cookie | Branch protection status for main |
+| POST | `/api/admin/backfill-history` | Cookie | Backfill historical PR data for charts |
+| GET | `/api/admin/backfill-status` | Cookie | Backfill progress (current/total/done) |
+| POST | `/api/webhook/github` | HMAC | GitHub webhook receiver |
+| GET | `/api/inventory/tokens` | Cookie | Token inventory listing |
+| POST | `/api/inventory/tokens/scan` | Cookie | Scan repo for leaked tokens |
+
+**Auth key:** Cookie = `sentinel_session` cookie. CSRF = `X-CSRF-Token` header. RA = `reAssertToken` in request body.
 
 ### POST /api/prs
 
@@ -569,30 +631,111 @@ SQLite database at `{dataDir}/oracle.db`. Three tables:
 | consumed | INTEGER | 0 or 1. One-time consumption flag |
 | created_at | TEXT | ISO 8601 timestamp |
 
-### credentials
+### auth_devices
 
 | Column | Type | Description |
 |--------|------|-------------|
-| id | TEXT | WebAuthn credential ID (base64url) |
-| device_name | TEXT | Human-readable label (e.g., "Pixel 7") |
+| id | INTEGER | Auto-increment primary key |
+| name | TEXT | Human-readable label (e.g., "Pixel 7") |
+| credential_id | TEXT | WebAuthn credential ID (base64url, unique) |
 | public_key | TEXT | COSE-encoded ECDSA P-256 public key |
-| credential_id | TEXT | Raw credential ID buffer (hex) |
-| transports | TEXT | JSON array of authenticator transports |
 | counter | INTEGER | WebAuthn signature counter |
-| created_at | TEXT | ISO 8601 registration timestamp |
-| last_used_at | TEXT | ISO 8601 last authorization timestamp |
+| transports | TEXT | JSON array of authenticator transports |
+| created_at | INTEGER | Unix ms registration timestamp |
+| last_used_at | INTEGER | Nullable. Unix ms last authorization |
+
+### sessions
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | TEXT | UUID v4 session identifier |
+| credential_id | TEXT | WebAuthn credential that created this session |
+| device_name | TEXT | Human-readable device label |
+| created_at | INTEGER | Unix ms creation timestamp |
+| expires_at | INTEGER | Unix ms expiry (24h from creation) |
+| last_used_at | INTEGER | Unix ms last activity (idle timeout 30min) |
+| csrf_token | TEXT | Per-session CSRF token (32 byte hex) |
+| user_agent | TEXT | Browser user agent at session creation |
 
 ### audit_log
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Auto-increment primary key |
-| pr_number | INTEGER | Target PR number |
-| action | TEXT | Event type: authorization_requested, authorization_confirmed, merge_executed, merge_failed, authorization_rejected, lockdown_activated, lockdown_deactivated, device_registered, device_revoked |
-| device_id | TEXT | WebAuthn credential ID that performed the action |
-| challenge_id | TEXT | Associated challenge UUID |
-| metadata | TEXT | JSON blob with error messages, reasons, PR titles, commit SHAs |
-| created_at | TEXT | ISO 8601 timestamp |
+| timestamp | INTEGER | Unix ms event timestamp |
+| action | TEXT | Event type: challenge_created, authorization_granted, authorization_rejected, merge_executed, merge_failed, lockdown_activated, lockdown_deactivated, device_registered, device_revoked, backfill, etc. |
+| pr_number | INTEGER | Nullable. Target PR number |
+| detail | TEXT | Free-text detail or JSON metadata |
+
+### pending_prs
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| pr_number | INTEGER | Unique PR number |
+| owner | TEXT | GitHub owner |
+| repo | TEXT | GitHub repo |
+| title | TEXT | PR title |
+| author | TEXT | PR author login |
+| sha | TEXT | HEAD commit SHA |
+| ci_status | TEXT | CI pass/fail/pending |
+| sentinel_status | TEXT | Sentinel scan result |
+| auth_status | TEXT | pending/authorized/rejected/expired |
+| created_at | INTEGER | Unix ms PR creation |
+| authorized_at | INTEGER | Nullable. Unix ms authorization |
+| device_name | TEXT | Device that authorized |
+| check_run_id | INTEGER | GitHub check run ID |
+
+### pr_files
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| pr_number | INTEGER | PR number |
+| filename | TEXT | File path |
+| sha | TEXT | Commit SHA |
+| status | TEXT | added/modified/removed |
+| additions | INTEGER | Lines added |
+| deletions | INTEGER | Lines removed |
+| auth_status | TEXT | pending/authorized/rejected |
+| scanned_at | INTEGER | Unix ms scan timestamp |
+
+### workflow_times
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| filename | TEXT | File path |
+| sha | TEXT | Commit SHA |
+| pr_number | INTEGER | PR number |
+| check_name | TEXT | CI check name |
+| duration_ms | INTEGER | Check duration in ms |
+| scanned_at | INTEGER | Unix ms when fetched |
+
+### token_inventory
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| token_type | TEXT | github_pat / github_app / github_oauth / generic / found_secret |
+| name | TEXT | Token name/label |
+| source | TEXT | github_api / repo_scan / manual |
+| scopes | TEXT | Comma-separated scopes |
+| fingerprint | TEXT | SHA256 fingerprint (never stores raw token) |
+| first_seen_at | INTEGER | Unix ms discovery |
+| last_seen_at | INTEGER | Nullable. Unix ms last verification |
+| expires_at | INTEGER | Nullable. Unix ms token expiry |
+| last_rotation | INTEGER | Nullable. Unix ms last rotation |
+| risk_score | TEXT | low / medium / high / critical |
+| notes | TEXT | Free-text notes |
+| metadata | TEXT | JSON blob |
+
+### config
+
+| Column | Type | Description |
+|--------|------|-------------|
+| key | TEXT | Unique config key |
+| value | TEXT | Config value |
 
 ---
 

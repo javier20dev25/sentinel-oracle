@@ -36,14 +36,14 @@ export class AuthorizationQueue {
     return this.db.getPendingPRs()
   }
 
-  initiateAuthorization(prNumber: number): ChallengeResult | null {
+  async initiateAuthorization(prNumber: number): Promise<ChallengeResult | null> {
     if (this.isLocked()) return null
 
     const pr = this.db.getPRByNumber(prNumber)
     if (!pr) return null
     if (pr.authStatus !== 'pending') return null
 
-    const challenge = createAuthChallenge(prNumber, this.db, this.challengeTtlMs, this.serverOrigin)
+    const challenge = await createAuthChallenge(prNumber, this.db, this.challengeTtlMs, this.serverOrigin)
     this.db.log('challenge_created', prNumber, `Challenge ${challenge.challengeId} created with TTL ${this.challengeTtlMs}ms`)
     return challenge
   }
@@ -90,7 +90,14 @@ export class AuthorizationQueue {
       return { success: false, error: 'Challenge data malformed' }
     }
 
-    // 3. Verify WebAuthn assertion (PR-bound)
+    // 3. Consume challenge first (atomic — prevents double-use race)
+    const consumed = this.db.consumeChallenge(challengeId)
+    if (!consumed) {
+      this.db.log('challenge_race_lost', prNumber, `Challenge ${challengeId} consumed by concurrent request`)
+      return { success: false, error: 'Challenge already used' }
+    }
+
+    // 4. Verify WebAuthn assertion (PR-bound)
     const assertionResult = await verifyAssertion(
       webauthnCredential,
       webauthnChallenge,
@@ -102,13 +109,6 @@ export class AuthorizationQueue {
     if (!assertionResult.verified) {
       this.db.log('webauthn_failed', prNumber, `WebAuthn assertion verification failed for challenge ${challengeId}`)
       return { success: false, error: 'Biometric authentication failed' }
-    }
-
-    // 4. Consume challenge (atomic — prevents double-use race)
-    const consumed = this.db.consumeChallenge(challengeId)
-    if (!consumed) {
-      this.db.log('challenge_race_lost', prNumber, `Challenge ${challengeId} consumed by concurrent request`)
-      return { success: false, error: 'Challenge already used' }
     }
 
     const pr = this.db.getPRByNumber(prNumber)
@@ -132,10 +132,12 @@ export class AuthorizationQueue {
 
     let statusOk = false
     try {
-      await this.client.setCommitStatus(pr.sha, 'success', 'Authorized via physical authentication')
+      if (pr.checkRunId) {
+        await this.client.updateCheckRun(pr.checkRunId, 'success', `Authorized by ${deviceName}${reason ? ` — ${reason}` : ''}`)
+      }
       statusOk = true
     } catch (err) {
-      this.db.log('status_update_failed', prNumber, `GitHub status update failed: ${err}`)
+      this.db.log('check_run_update_failed', prNumber, `Check Run update failed: ${err}`)
     }
 
     // 7. Execute merge
@@ -166,9 +168,9 @@ export class AuthorizationQueue {
     this.db.log('authorization_rejected', prNumber, `Rejected by administrator${reason ? `: ${reason}` : ''}`)
 
     const pr = this.db.getPRByNumber(prNumber)
-    if (pr) {
+    if (pr && pr.checkRunId) {
       try {
-        await this.client.setCommitStatus(pr.sha, 'failure', 'Authorization rejected')
+        await this.client.updateCheckRun(pr.checkRunId, 'failure', `Authorization rejected${reason ? `: ${reason}` : ''}`)
       } catch {}
     }
   }
@@ -182,6 +184,9 @@ export class AuthorizationQueue {
         if (old > 3600000) {
           this.db.setAuthStatus(pr.prNumber, 'expired')
           this.db.log('authorization_expired', pr.prNumber, 'PR authorization expired after 1 hour')
+          if (pr.checkRunId) {
+            this.client.updateCheckRun(pr.checkRunId, 'timed_out', 'Authorization request expired after 1 hour').catch(() => {})
+          }
           count++
         }
       }
@@ -198,9 +203,11 @@ export class AuthorizationQueue {
     for (const pr of prs) {
       if (pr.authStatus === 'pending') {
         this.db.setAuthStatus(pr.prNumber, 'rejected')
-        try {
-          await this.client.setCommitStatus(pr.sha, 'failure', 'System locked down')
-        } catch {}
+        if (pr.checkRunId) {
+          try {
+            await this.client.updateCheckRun(pr.checkRunId, 'failure', 'System locked down')
+          } catch {}
+        }
       }
     }
   }

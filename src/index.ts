@@ -69,6 +69,8 @@ function validatePermissions(configDir: string): void {
     { path: `${configDir}\\server.key`, required: 'file' },
     { path: `${configDir}\\server.cert`, required: 'file' },
     { path: `${configDir}\\.encryption_key`, required: 'file' },
+    { path: `${configDir}\\.cookie_secret`, required: 'file' },
+    { path: `${configDir}\\.hmac_seed`, required: 'file' },
   ]
   for (const item of items) {
     try {
@@ -123,7 +125,7 @@ async function main() {
   configWarnings.push(...warnings)
 
   const db = new DatabaseStore(config.dataDir, config.encryptionKey)
-  initHmacKey(config.encryptionKey)
+  initHmacKey(config.hmacSeed)
   initEnrollment(config, db)
 
   const client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
