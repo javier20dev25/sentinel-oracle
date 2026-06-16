@@ -21,6 +21,7 @@
   <div class="auth-box">
     <h1>Sentinel Oracle</h1>
     <p class="subtitle">Authorize Merge</p>
+    <div id="expiry-countdown" style="font-size:0.9rem;color:#d29922;margin-bottom:0.5rem;"></div>
     <div id="status" class="status"></div>
     <div id="details" class="detail"></div>
     <div class="password-field">
@@ -68,8 +69,36 @@
     if (!challengeId || !prNumber) {
       setStatus('Invalid authorization link', 'error');
     } else {
+      // Countdown timer (fetch challenge expiry from storage via hidden field or endpoint)
+      let expireAt = Date.now() + 120000; // fallback 2 min
+      document.getElementById('expiry-countdown').textContent = 'Expires in ' + Math.round((expireAt - Date.now()) / 1000) + 's';
+      const countdownInterval = setInterval(() => {
+        const remaining = Math.round((expireAt - Date.now()) / 1000);
+        if (remaining <= 0) {
+          clearInterval(countdownInterval);
+          document.getElementById('expiry-countdown').textContent = 'Expired';
+          document.getElementById('expiry-countdown').style.color = '#f85149';
+          setStatus('Authorization link expired. Please scan a new QR code.', 'error');
+          document.getElementById('confirm-btn').disabled = true;
+        } else {
+          document.getElementById('expiry-countdown').textContent = 'Expires in ' + remaining + 's';
+        }
+      }, 1000);
+
+      // Check if authorization password is configured
+      let passwordRequired = false;
+      fetch('/api/status').then(r => r.json()).then(s => {
+        passwordRequired = !!s.passwordRequired;
+        if (!passwordRequired) {
+          document.querySelector('.password-field').style.display = 'none';
+          showDetail('Tap Confirm with your passkey to authorize');
+        } else {
+          showDetail('Enter the authorization password and tap Confirm with your passkey');
+        }
+      }).catch(() => {
+        showDetail('Enter the authorization password and tap Confirm with your passkey');
+      });
       setStatus('PR #' + prNumber + ' ready for authorization', 'info');
-      showDetail('Enter the password and tap Confirm with your passkey');
       document.getElementById('confirm-btn').style.display = 'block';
     }
 

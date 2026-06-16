@@ -514,7 +514,13 @@
         }, timeLeft);
       }
     } catch (err) {
-      setStatus('pr-list', `Authorization failed: ${err.message}`, 'error');
+      const msg = err.message;
+      if (msg.includes('not found') || msg.includes('not awaiting')) {
+        setStatus('pr-list', '⚠️ PR not ready yet. Page will refresh automatically — please try again in a moment.', 'warning');
+        setTimeout(() => loadPRs(), 3000);
+      } else {
+        setStatus('pr-list', `Authorization failed: ${msg}`, 'error');
+      }
     } finally {
       e.target.disabled = false;
     }

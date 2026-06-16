@@ -165,7 +165,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       console.log('[webauthn] assert/complete: OK credentialId=%s', result.credentialId)
       const device = db.getDeviceByCredentialId(result.credentialId)
 
-      if (result.credentialId && !result.prNumber) {
+      if (result.credentialId) {
         const cookie = createSessionCookie(result.credentialId, device?.name || 'unknown', req.headers['user-agent'] || '')
         res.cookie(cookie.name, cookie.value, cookie.options)
         db.log('session_created', null, `Session for device "${device?.name || 'unknown'}"`)
@@ -370,14 +370,14 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           error: locked ? 'System is locked down' : 'PR not found or not awaiting authorization',
         })
       }
-      res.json(challenge)
+      res.json({ ...challenge, passwordRequired: !!config.passwordHash })
     } catch (err) {
       db.log('error', null, `Initiate authorization: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to initiate authorization' })
     }
   })
 
-  app.post('/api/prs/:number/confirm', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+  app.post('/api/prs/:number/confirm', authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
       const { challengeId, credential, challenge: webauthnChallenge, reason, password } = req.body
@@ -943,6 +943,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       setupRequired: !db.getConfig('enrollment_completed'),
       authMode: client.authMode,
       scanEnabled: config.scanEnabled,
+      passwordRequired: !!config.passwordHash,
       version: '1.0.0',
     })
   })

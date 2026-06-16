@@ -183,7 +183,7 @@ export function loadConfig(): Config {
     githubStatusContext: 'Sentinel Authorization',
     serverOrigin: `https://${lanIp}:3443`,
     rpId: lanIp,
-    challengeTtlMs: 45000,
+    challengeTtlMs: 120000,
     rateLimitAuth: 5,
     rateLimitWindowMs: 60000,
     encryptionKey: loadOrCreateEncryptionKey(dataDir),
