@@ -292,7 +292,7 @@ export class GitHubClient {
     }
   }
 
-  async getBranchProtection(branch: string = 'main'): Promise<BranchProtection> {
+  async getBranchProtection(branch: string): Promise<BranchProtection> {
     try {
       const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/branches/${branch}/protection`)
       const data = JSON.parse(out)
@@ -392,6 +392,16 @@ export class GitHubClient {
     }
   }
 
+  async getDefaultBranch(): Promise<string> {
+    try {
+      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}`)
+      const data = JSON.parse(out)
+      return data.default_branch || 'main'
+    } catch {
+      return 'main'
+    }
+  }
+
   async getPullRequest(prNumber: number): Promise<any> {
     const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/pulls/${prNumber}`)
     return JSON.parse(out)
@@ -432,11 +442,11 @@ export class GitHubClient {
     return allPRs
   }
 
-  // Get workflow run durations for all commits that modified a file on main
-  async getWorkflowDurationsForFile(filename: string): Promise<{ sha: string; checkName: string; durationMs: number }[]> {
+  // Get workflow run durations for all commits that modified a file on the default branch
+  async getWorkflowDurationsForFile(filename: string, defaultBranch = 'main'): Promise<{ sha: string; checkName: string; durationMs: number }[]> {
     const results: { sha: string; checkName: string; durationMs: number }[] = []
     try {
-      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/commits?sha=main&path=${encodeURIComponent(filename)}&per_page=50`)
+      const out = await this.api('GET', `/repos/${this.owner}/${this.repo}/commits?sha=${encodeURIComponent(defaultBranch)}&path=${encodeURIComponent(filename)}&per_page=50`)
       const commits: any[] = JSON.parse(out)
       for (const c of commits) {
         const sha = c.sha

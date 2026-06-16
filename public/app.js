@@ -100,9 +100,10 @@
     authenticated = session.authenticated;
 
     // Fetch CSRF token
-    api('/api/session/csrf-token').then(function (r) {
-      window.__csrfToken = r.csrfToken
-    }).catch(function () {})
+    try {
+      const r = await api('/api/session/csrf-token');
+      window.__csrfToken = r.csrfToken;
+    } catch (e) {}
 
     if (status.setupRequired) {
       show('enrollment-section');
@@ -251,9 +252,10 @@
         setStatus('enrollment-status', 'Enrollment successful!', 'success');
         hide('enrollment-section');
         // Fetch CSRF token
-        api('/api/session/csrf-token').then(function (r) {
-          window.__csrfToken = r.csrfToken
-        }).catch(function () {})
+        try {
+          const r = await api('/api/session/csrf-token');
+          window.__csrfToken = r.csrfToken;
+        } catch (e) {}
         await checkSetup();
       } else {
         setStatus('enrollment-status', 'Enrollment failed', 'error');
@@ -333,10 +335,12 @@
         if (!authenticated) {
           throw new Error('Session was not created — try re-authenticating');
         }
-        // Fetch CSRF token
-        api('/api/session/csrf-token').then(function (r) {
-          window.__csrfToken = r.csrfToken
-        }).catch(function () {})
+        // Fetch CSRF token (clearing stale token first)
+        window.__csrfToken = null;
+        try {
+          const r = await api('/api/session/csrf-token');
+          window.__csrfToken = r.csrfToken;
+        } catch (e) {}
         setStatus('auth-status', 'Authenticated successfully!', 'success');
         hide('auth-section');
         hide('enrollment-section');
@@ -411,6 +415,7 @@
             </div>
             <div class="actions">
               <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
+              <button class="direct-auth-btn" data-pr="${pr.prNumber}" style="background:#2ea043">Authorize (Same Device)</button>
               <button class="reject-btn" data-pr="${pr.prNumber}" style="background:#da3633">Reject</button>
               ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}" style="background:#1f6feb">Scan</button>` : ''}
             </div>
@@ -424,6 +429,9 @@
 
         document.querySelectorAll('.auth-btn').forEach(btn => {
           btn.addEventListener('click', authorizePR);
+        });
+        document.querySelectorAll('.direct-auth-btn').forEach(btn => {
+          btn.addEventListener('click', authorizeDirectPR);
         });
         document.querySelectorAll('.reject-btn').forEach(btn => {
           btn.addEventListener('click', rejectPR);
@@ -523,6 +531,54 @@
       }
     } finally {
       e.target.disabled = false;
+    }
+  }
+
+  async function authorizeDirectPR(e) {
+    const prNumber = parseInt(e.target.dataset.pr, 10);
+    const btn = e.target;
+    btn.disabled = true;
+    setStatus('pr-list', 'Initiating authorization...', 'info');
+
+    try {
+      const { challengeId } = await api(`/api/prs/${prNumber}/authorize`, { method: 'POST' });
+
+      setStatus('pr-list', `Authenticating for PR #${prNumber}...`, 'info');
+
+      const { options, challenge } = await api('/api/webauthn/assert/begin', {
+        method: 'POST',
+        body: JSON.stringify({ prNumber }),
+      });
+
+      setStatus('pr-list', 'Touch your passkey to authorize...', 'info');
+
+      const credential = await navigator.credentials.get({ publicKey: prepareOptions(options) });
+
+      setStatus('pr-list', 'Verifying authorization...', 'info');
+
+      const result = await api(`/api/prs/${prNumber}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify({
+          challengeId,
+          credential: credential.toJSON(),
+          challenge,
+        }),
+      });
+
+      if (result.authorized) {
+        setStatus('pr-list', `✓ PR #${prNumber} authorized successfully!`, 'success');
+        setTimeout(() => loadPRs(), 2000);
+      } else {
+        setStatus('pr-list', `✗ Authorization failed: ${result.error || 'Unknown error'}`, 'error');
+      }
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
+        setStatus('pr-list', 'Authentication cancelled', 'error');
+      } else {
+        setStatus('pr-list', `Authorization failed: ${err.message || 'Connection failed'}`, 'error');
+      }
+    } finally {
+      btn.disabled = false;
     }
   }
 

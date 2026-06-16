@@ -1,5 +1,6 @@
 // Restart persistence test: verify challenges survive server restart
 // Run: node tests/restart_test.cjs
+const https = require('https');
 const { createCipheriv, createHmac, randomBytes } = require('crypto');
 const { readFileSync } = require('fs');
 const path = require('path');
@@ -8,6 +9,25 @@ const Database = require('better-sqlite3');
 
 const ALGORITHM = 'aes-256-gcm';
 const url = 'https://desktop-ki5app4.tail35419a.ts.net';
+
+function post(path, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url + path);
+    const data = JSON.stringify(body);
+    const req = https.request({
+      hostname: u.hostname, port: u.port, path: u.pathname,
+      method: 'POST', rejectUnauthorized: false, agent: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, res => {
+      let text = '';
+      res.on('data', c => text += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 function encrypt(plaintext, key) {
     const iv = randomBytes(16);
@@ -62,19 +82,16 @@ async function main() {
     reason: 'Restart test'
   });
 
-  const r1 = await fetch(`${url}/api/prs/${prNumber}/confirm`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body
-  });
-  const d1 = await r1.json();
-  console.log('Status:', r1.status, '=>', JSON.stringify(d1));
+  const r1 = await post(`/api/prs/${prNumber}/confirm`, JSON.parse(body));
+  console.log('Status:', r1.status, '=>', JSON.stringify(r1.body));
 
-  if (d1.error === 'Biometric authentication failed') {
+  if (r1.body.error === 'Biometric authentication failed') {
     console.log('PASS: Challenge survived restart (reached WebAuthn step)');
-  } else if (d1.error === 'Challenge expired or invalid' || d1.error === 'Challenge integrity check failed') {
+  } else if (r1.body.error === 'Challenge expired or invalid' || r1.body.error === 'Challenge integrity check failed') {
     console.log('FAIL: Challenge invalid after restart');
     process.exit(1);
   } else {
-    console.log('UNKNOWN:', d1.error);
+    console.log('UNKNOWN:', r1.body.error);
   }
 
   // Test 2: Consumed challenge stays consumed
@@ -84,13 +101,11 @@ async function main() {
 
   if (consumed) {
     console.log('\n=== TEST 2: Consumed challenge stays consumed ===');
-    const r2 = await fetch(`${url}/api/prs/${consumed.pr_number}/confirm`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ challengeId: consumed.id, credential: {}, challenge: 'test' })
+    const r2 = await post(`/api/prs/${consumed.pr_number}/confirm`, {
+      challengeId: consumed.id, credential: {}, challenge: 'test'
     });
-    const d2 = await r2.json();
-    console.log('Status:', r2.status, '=>', JSON.stringify(d2));
-    if (d2.error === 'Challenge already used') {
+    console.log('Status:', r2.status, '=>', JSON.stringify(r2.body));
+    if (r2.body.error === 'Challenge already used') {
       console.log('PASS: Consumed challenge stays consumed');
     } else {
       console.log('FAIL: Expected "Challenge already used"');

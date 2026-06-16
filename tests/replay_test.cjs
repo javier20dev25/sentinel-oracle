@@ -1,9 +1,28 @@
 // Replay attack test: try to reuse a consumed challenge
 // Run: node tests/replay_test.cjs
+const https = require('https');
 const url = 'https://desktop-ki5app4.tail35419a.ts.net';
 
+function post(path, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url + path);
+    const data = JSON.stringify(body);
+    const req = https.request({
+      hostname: u.hostname, port: u.port, path: u.pathname,
+      method: 'POST', rejectUnauthorized: false, agent: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, res => {
+      let text = '';
+      res.on('data', c => text += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
 async function main() {
-  // First, get a consumed challenge from the DB
   const Database = require('better-sqlite3');
   const path = require('path');
   const os = require('os');
@@ -19,23 +38,16 @@ async function main() {
   console.log('=== REPLAY TEST ===');
   console.log('Challenge:', consumed.id, 'PR:', consumed.pr_number);
 
-  const body = JSON.stringify({
+  const r = await post(`/api/prs/${consumed.pr_number}/confirm`, {
     challengeId: consumed.id,
     credential: {},
     challenge: 'deadbeef',
     reason: 'Replay test'
   });
 
-  const res = await fetch(`${url}/api/prs/${consumed.pr_number}/confirm`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body
-  });
-  const data = await res.json();
+  console.log('Status:', r.status, '=>', JSON.stringify(r.body));
 
-  console.log('Status:', res.status, '=>', JSON.stringify(data));
-
-  if (data.error === 'Challenge already used') {
+  if (r.body.error === 'Challenge already used') {
     console.log('PASS: Replay correctly rejected');
     process.exit(0);
   } else {

@@ -1,5 +1,6 @@
 // Race condition test: fire 2 simultaneous confirms for the same challenge
 // Run: node tests/race_test.cjs
+const https = require('https');
 const { createCipheriv, createHmac, randomBytes } = require('crypto');
 const { readFileSync } = require('fs');
 const path = require('path');
@@ -8,6 +9,25 @@ const Database = require('better-sqlite3');
 
 const ALGORITHM = 'aes-256-gcm';
 const url = 'https://desktop-ki5app4.tail35419a.ts.net';
+
+function post(path, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url + path);
+    const data = JSON.stringify(body);
+    const req = https.request({
+      hostname: u.hostname, port: u.port, path: u.pathname,
+      method: 'POST', rejectUnauthorized: false, agent: false,
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    }, res => {
+      let text = '';
+      res.on('data', c => text += c);
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
 function encrypt(plaintext, key) {
     const iv = randomBytes(16);
@@ -64,21 +84,19 @@ async function main() {
   });
 
   const [r1, r2] = await Promise.all([
-    fetch(`${url}/api/prs/${prNumber}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body }),
-    fetch(`${url}/api/prs/${prNumber}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body })
+    post(`/api/prs/${prNumber}/confirm`, JSON.parse(body)),
+    post(`/api/prs/${prNumber}/confirm`, JSON.parse(body))
   ]);
 
-  const [d1, d2] = await Promise.all([r1.json(), r2.json()]);
-
-  console.log('Request 1 - Status:', r1.status, '=>', JSON.stringify(d1));
-  console.log('Request 2 - Status:', r2.status, '=>', JSON.stringify(d2));
+  console.log('Request 1 - Status:', r1.status, '=>', JSON.stringify(r1.body));
+  console.log('Request 2 - Status:', r2.status, '=>', JSON.stringify(r2.body));
 
   const db2 = new Database(dbPath);
   const check = db2.prepare('SELECT id, used FROM challenges WHERE id = ?').get(challengeId);
   db2.close();
   console.log('DB state:', JSON.stringify(check));
 
-  const errors = [d1.error, d2.error];
+  const errors = [r1.body.error, r2.body.error];
   const usedCount = errors.filter(e => e === 'Challenge already used').length;
 
   if (usedCount >= 1 && check && check.used === 1) {

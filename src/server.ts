@@ -8,7 +8,7 @@ import type { GitHubClient } from './github/client'
 import { AuthorizationQueue } from './queue/authorization'
 import { pollPRs } from './github/monitor'
 import { securityHeaders, corsBlock, auditLogger, csrfProtection } from './middleware/security'
-import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF } from './middleware/session'
+import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF, initSessionDb } from './middleware/session'
 import { authRateLimiter, apiRateLimiter } from './middleware/rateLimit'
 import {
   generateRegistration,
@@ -77,6 +77,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   const app = express()
   const rpId = getRpId(config)
   const queue = new AuthorizationQueue(db, client, config.challengeTtlMs, config.serverOrigin, rpId)
+  initSessionDb(db)
 
   app.disable('x-powered-by')
   app.set('trust proxy', 1)
@@ -595,11 +596,12 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   // ----- Branch Protection Status -----
   app.get('/api/status/branch-protection', requireAuth(), apiRateLimiter(10, 60000), async (_req, res) => {
     try {
-      const protection = await client.getBranchProtection('main')
+      const defaultBranch = await client.getDefaultBranch()
+      const protection = await client.getBranchProtection(defaultBranch)
       const issues: string[] = []
 
       if (!protection.enabled) {
-        issues.push('Branch protection is not enabled on main')
+        issues.push(`Branch protection is not enabled on ${defaultBranch}`)
       } else {
         if (!protection.requiredStatusChecks.includes(config.githubStatusContext)) {
           issues.push(`Required status check "${config.githubStatusContext}" is missing from branch protection`)
@@ -611,7 +613,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           issues.push('Pull request reviews are not required')
         }
         if (protection.allowsForcePushes) {
-          issues.push('Force pushes are allowed on main')
+          issues.push(`Force pushes are allowed on ${defaultBranch}`)
         }
       }
 
@@ -680,7 +682,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (workflowHistory.length === 0) {
         // Auto-fetch workflow durations from GitHub on first chart view
         try {
-          const wfData = await client.getWorkflowDurationsForFile(filename)
+          const defaultBranch = await client.getDefaultBranch()
+          const wfData = await client.getWorkflowDurationsForFile(filename, defaultBranch)
           if (wfData.length > 0) {
             const wfEntries = wfData.map(w => ({
               sha: w.sha,
@@ -795,13 +798,19 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       }))
 
       res.json({
-        totalPRs: completed.length + pending.length,
-        pendingPRs: pending.length,
-        authorizedPRs: completed.filter(p => p.authStatus === 'authorized').length,
-        rejectedPRs: completed.filter(p => p.authStatus === 'rejected').length,
-        expiredPRs: completed.filter(p => p.authStatus === 'expired').length,
-        totalMergeTime,
-        authorStats,
+        totalPrs: completed.length + pending.length,
+        pending: pending.length,
+        authorized: completed.filter(p => p.authStatus === 'authorized').length,
+        rejected: completed.filter(p => p.authStatus === 'rejected').length,
+        expired: completed.filter(p => p.authStatus === 'expired').length,
+        recentMergeTimes: totalMergeTime.map(m => ({
+          ...m,
+          waitTime: m.waitHours,
+        })),
+        authorStats: authorStats.map(a => ({
+          ...a,
+          avgWait: a.avgWaitHours,
+        })),
       })
     } catch (err) {
       res.status(500).json({ error: 'Failed to compute metrics' })
@@ -957,8 +966,13 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     pollInterval = setInterval(async () => {
       try {
         if (queue.isLocked()) return
-        const result = await pollPRs(client, db)
+        const defaultBranch = await client.getDefaultBranch()
+        const result = await pollPRs(client, db, defaultBranch)
         queue.expireStaleChallenges()
+        const expiredChallengeCount = db.pruneExpiredWebAuthnChallenges(config.challengeTtlMs)
+        if (expiredChallengeCount > 0) {
+          db.log('cleanup', null, `Cleaned up ${expiredChallengeCount} expired WebAuthn challenges`)
+        }
         if (result.newPRs > 0 || result.updatedPRs > 0) {
           db.log('poll_complete', null, `Polled: ${result.newPRs} new, ${result.updatedPRs} updated`)
         }

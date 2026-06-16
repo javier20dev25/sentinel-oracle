@@ -493,6 +493,34 @@ export class DatabaseStore {
         return result.changes
     }
 
+    pruneExpiredWebAuthnChallenges(ttlMs: number): number {
+        const keys = this.db.prepare(
+            "SELECT key, value FROM config WHERE key LIKE 'webauthn_challenge_%' OR key LIKE 'webauthn_assertion_%'"
+        ).all() as { key: string; value: string }[]
+        const now = Date.now()
+        let removed = 0
+        for (const row of keys) {
+            if (!row.value) {
+                this.db.prepare('DELETE FROM config WHERE key = ?').run(row.key)
+                removed++
+                continue
+            }
+            try {
+                const data = JSON.parse(row.value)
+                const createdAt = data.createdAt || 0
+                if (now - createdAt > ttlMs) {
+                    this.db.prepare('DELETE FROM config WHERE key = ?').run(row.key)
+                    removed++
+                }
+            } catch {
+                this.log('cleanup', null, `Deleting malformed WebAuthn entry: ${row.key}`)
+                this.db.prepare('DELETE FROM config WHERE key = ?').run(row.key)
+                removed++
+            }
+        }
+        return removed
+    }
+
     log(action: string, prNumber: number | null, detail: string): void {
         this.db.prepare(
             'INSERT INTO audit_log (timestamp, action, pr_number, detail) VALUES (?, ?, ?, ?)'

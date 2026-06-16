@@ -10,7 +10,7 @@ export interface MonitorResult {
     authorizedPRs: number;
 }
 
-export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<MonitorResult> {
+export async function pollPRs(client: GitHubClient, db: DatabaseStore, defaultBranch = 'main'): Promise<MonitorResult> {
     const result: MonitorResult = { newPRs: 0, updatedPRs: 0, authorizedPRs: 0 };
 
     let prs;
@@ -90,8 +90,8 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore): Promise<
 
     // Check branch protection once per poll cycle
     try {
-        const protection = await client.getBranchProtection('main');
-        checkBranchProtection(protection, db);
+        const protection = await client.getBranchProtection(defaultBranch);
+        checkBranchProtection(protection, db, defaultBranch);
     } catch {}
 
     return result;
@@ -128,9 +128,9 @@ function evaluateStatuses(statuses: {
     return statuses.allRequiredPass;
 }
 
-function checkBranchProtection(protection: BranchProtection, db: DatabaseStore): void {
+function checkBranchProtection(protection: BranchProtection, db: DatabaseStore, defaultBranch = 'main'): void {
     if (!protection.enabled) {
-        db.log('branch_protection_warning', null, 'Branch protection is NOT enabled on main — merges can bypass Sentinel Oracle');
+        db.log('branch_protection_warning', null, `Branch protection is NOT enabled on ${defaultBranch} — merges can bypass Sentinel Oracle`);
         return;
     }
 

@@ -50,6 +50,12 @@ export async function printStartupBanner(config: Config, db: DatabaseStore): Pro
   if (locked) {
     console.log(` ${BLD}\x1b[38;2;255;70;70mSystem in lockdown${R}${DIM} — POST /api/unlock to deactivate${R}`)
   }
+  if (!config.githubWebhookSecret) {
+    console.log(` \x1b[38;2;255;200;0m⚠ Webhook secret not configured${R}${DIM} — set githubWebhookSecret in config.json to verify incoming webhooks${R}`)
+  }
+  if (!config.scanEnabled) {
+    console.log(` \x1b[38;2;255;200;0m💡 PR scanning is disabled${R}${DIM} — set "scanEnabled": true in config.json to enable code analysis${R}`)
+  }
   console.log()
 
   // QR code
