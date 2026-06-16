@@ -5,7 +5,7 @@ import https from 'https'
 export interface GitHubAppConfig {
   appId: string
   installationId: string
-  privateKeyPath: string
+  privateKeyPath?: string
 }
 
 interface CachedToken {
@@ -71,15 +71,30 @@ export class GitHubAppAuth {
   private cachedToken: CachedToken | null = null
 
   constructor(config: GitHubAppConfig) {
-    if (!config.appId || !config.installationId || !config.privateKeyPath) {
-      throw new Error('GitHub App requires appId, installationId, and privateKeyPath')
+    if (!config.appId || !config.installationId) {
+      throw new Error('GitHub App requires appId and installationId')
     }
     this.appId = config.appId
     this.installationId = config.installationId
-    this.privateKeyPem = readFileSync(config.privateKeyPath, 'utf8')
+
+    const envKey = process.env.SENTINEL_GITHUB_PRIVATE_KEY
+    const envKeyPath = process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH
+
+    if (envKey) {
+      this.privateKeyPem = Buffer.from(envKey, 'base64').toString('utf8')
+    } else if (envKeyPath) {
+      this.privateKeyPem = readFileSync(envKeyPath, 'utf8')
+    } else if (config.privateKeyPath) {
+      this.privateKeyPem = readFileSync(config.privateKeyPath, 'utf8')
+    } else {
+      throw new Error(
+        'GitHub App private key not found. Provide via SENTINEL_GITHUB_PRIVATE_KEY env (base64) ' +
+        'or SENTINEL_GITHUB_PRIVATE_KEY_PATH env or privateKeyPath in config',
+      )
+    }
 
     if (!this.privateKeyPem.includes('BEGIN')) {
-      throw new Error(`Private key at ${config.privateKeyPath} does not appear to be a valid PEM file`)
+      throw new Error('Private key does not appear to be a valid PEM file')
     }
   }
 

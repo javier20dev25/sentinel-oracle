@@ -16,14 +16,15 @@ function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrCon
   const warnings: string[] = []
 
   const hasPat = !!config.githubToken
-  const hasApp = !!config.githubAppId && !!config.githubInstallationId && !!config.githubPrivateKeyPath
+  const hasEnvKey = !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH
+  const hasApp = !!config.githubAppId && !!config.githubInstallationId && (!!config.githubPrivateKeyPath || hasEnvKey)
 
   if (hasPat && hasApp) {
     warnings.push('Both githubToken and GitHub App credentials provided — using GitHub App mode')
   }
 
   if (hasApp) {
-    if (!fs.existsSync(config.githubPrivateKeyPath)) {
+    if (config.githubPrivateKeyPath && !hasEnvKey && !fs.existsSync(config.githubPrivateKeyPath)) {
       console.error(`GitHub App private key not found at: ${config.githubPrivateKeyPath}`)
       process.exit(1)
     }
@@ -41,14 +42,19 @@ function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrCon
     return { tokenOrConfig: config.githubToken, warnings }
   }
 
-  console.error('Missing credentials: provide either githubToken (PAT) OR (githubAppId + githubInstallationId + githubPrivateKeyPath)')
+  console.error(
+    'Missing credentials: provide either githubToken (PAT) OR ' +
+    '(githubAppId + githubInstallationId + githubPrivateKeyPath) ' +
+    'or set SENTINEL_GITHUB_PRIVATE_KEY / SENTINEL_GITHUB_PRIVATE_KEY_PATH env vars',
+  )
   process.exit(1)
 }
 
 function ensureCredentials(config: ReturnType<typeof loadConfig>) {
   const missing: string[] = []
   const hasPat = !!config.githubToken
-  const hasApp = !!config.githubAppId && !!config.githubInstallationId && !!config.githubPrivateKeyPath
+  const hasEnvKey = !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH
+  const hasApp = !!config.githubAppId && !!config.githubInstallationId && (!!config.githubPrivateKeyPath || hasEnvKey)
 
   if (!hasPat && !hasApp) {
     missing.push('githubToken OR (githubAppId + githubInstallationId + githubPrivateKeyPath)')
@@ -68,6 +74,7 @@ function validatePermissions(configDir: string): void {
     { path: `${configDir}\\config.json`, required: 'optional' },
     { path: `${configDir}\\server.key`, required: 'file' },
     { path: `${configDir}\\server.cert`, required: 'file' },
+    { path: `${configDir}\\private-key.pem`, required: 'optional' },
     { path: `${configDir}\\.encryption_key`, required: 'file' },
     { path: `${configDir}\\.cookie_secret`, required: 'file' },
     { path: `${configDir}\\.hmac_seed`, required: 'file' },
