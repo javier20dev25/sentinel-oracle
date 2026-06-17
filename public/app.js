@@ -396,21 +396,34 @@
           card.innerHTML = `
             <div class="pr-card-split">
               <div class="pr-card-info">
-                <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
-                <div class="meta">${escapeHtml(pr.author)} &middot; ${new Date(pr.createdAt).toLocaleString()}</div>
+                <div class="pr-card-header">
+                  <div class="pr-title-row">
+                    <span class="pr-number">#${pr.prNumber}</span>
+                    <h3 class="pr-title">${escapeHtml(pr.title)}</h3>
+                  </div>
+                  <div class="meta-row">
+                    <span class="pr-author"><span class="meta-icon">👤</span>${escapeHtml(pr.author)}</span>
+                    <span class="meta-divider">&middot;</span>
+                    <span class="pr-date"><span class="meta-icon">📅</span>${new Date(pr.createdAt).toLocaleString()}</span>
+                  </div>
+                </div>
                 <div class="status-row">
                   <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
                   <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
                   <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
                 </div>
-                <div class="actions">
-                  <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
-                  <button class="direct-auth-btn" data-pr="${pr.prNumber}">Authorize (Same Device)</button>
-                  <button class="reject-btn" data-pr="${pr.prNumber}">Reject</button>
-                  ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}">Scan</button>` : ''}
+                <div class="actions-wrapper">
+                  <div class="actions">
+                    <button class="auth-btn" data-pr="${pr.prNumber}"><span class="btn-icon">⚡</span>Authorize</button>
+                    <button class="direct-auth-btn" data-pr="${pr.prNumber}"><span class="btn-icon">📱</span>Authorize (Same Device)</button>
+                    <button class="reject-btn" data-pr="${pr.prNumber}"><span class="btn-icon">🚫</span>Reject</button>
+                    ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}"><span class="btn-icon">🔍</span>Scan</button>` : ''}
+                  </div>
                 </div>
                 <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
-                <button class="checks-toggle-btn" data-pr="${pr.prNumber}">Show Checks</button>
+                <div class="checks-toggle-wrapper">
+                  <button class="checks-toggle-btn" data-pr="${pr.prNumber}">Show Checks</button>
+                </div>
                 <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
               </div>
               <div class="pr-card-scan-panel" id="scan-panel-${pr.prNumber}"></div>
@@ -607,26 +620,74 @@
       const severityClass = result.critical > 0 || result.high > 0 ? 'scan-critical' : result.medium > 0 ? 'scan-warning' : 'scan-clean';
       const severityLabel = result.critical > 0 ? 'CRITICAL' : result.high > 0 ? 'HIGH' : result.medium > 0 ? 'MEDIUM' : 'LOW';
       scanPanel.innerHTML = `
-        <div class="scan-header ${severityClass}">
-          <span class="scan-risk-badge">Risk: ${result.riskScore} (${severityLabel})</span>
-          <span>${result.critical}C ${result.high}H ${result.medium}M ${result.low}L</span>
+        <div class="scan-panel-header">
+          <div class="risk-gauge-container ${severityClass}">
+            <div class="risk-gauge-circle">
+              <span class="risk-score-num">${result.riskScore}</span>
+              <span class="risk-score-lbl">RISK</span>
+            </div>
+          </div>
+          <div class="risk-summary-details">
+            <h3 class="risk-label-title ${severityClass}">${severityLabel} RISK LEVEL</h3>
+            <div class="severity-pill-row">
+              <span class="sev-pill crit" title="Critical">${result.critical}C</span>
+              <span class="sev-pill high" title="High">${result.high}H</span>
+              <span class="sev-pill med" title="Medium">${result.medium}M</span>
+              <span class="sev-pill low" title="Low">${result.low}L</span>
+            </div>
+          </div>
         </div>
         ${result.findings.length > 0 ? `
-          <div class="scan-findings">
-            ${result.findings.map(f => `
-              <div class="scan-finding scan-${f.severity}">
-                <div class="finding-severity">${f.severity.toUpperCase()}</div>
-                <div class="finding-body">
-                  <strong>${escapeHtml(f.title)}</strong>
-                  <p>${escapeHtml(f.description)}</p>
-                  ${f.file ? `<code>${escapeHtml(f.file)}${f.line != null ? ':' + f.line : ''}</code>` : ''}
-                  ${f.code ? `<pre class="finding-code"><code>${escapeHtml(f.code)}</code></pre>` : ''}
-                  ${f.prUrl ? `<a href="${escapeHtml(f.prUrl)}" target="_blank" class="btn finding-pr-link">View in PR</a>` : ''}
+          <div class="scan-findings-container">
+            ${result.findings.map(f => {
+              const filename = f.file ? f.file.split('/').pop() : 'source.js';
+              return `
+                <div class="scan-finding-card severity-${f.severity}">
+                  <div class="finding-card-header">
+                    <span class="finding-badge badge-${f.severity}">${f.severity.toUpperCase()}</span>
+                    <h4 class="finding-title">${escapeHtml(f.title)}</h4>
+                  </div>
+                  <div class="finding-card-body">
+                    <p class="finding-desc">${escapeHtml(f.description)}</p>
+                    ${f.file ? `
+                      <div class="finding-location">
+                        <span class="location-icon">📁</span>
+                        <span class="location-path">${escapeHtml(f.file)}${f.line != null ? ':' + f.line : ''}</span>
+                      </div>
+                    ` : ''}
+                    ${f.code ? `
+                      <div class="code-terminal-mockup">
+                        <div class="terminal-header">
+                          <span class="terminal-dots">
+                            <span class="terminal-dot close"></span>
+                            <span class="terminal-dot minimize"></span>
+                            <span class="terminal-dot maximize"></span>
+                          </span>
+                          <span class="terminal-file">${escapeHtml(filename)}</span>
+                        </div>
+                        <pre class="terminal-body"><code>${escapeHtml(f.code)}</code></pre>
+                      </div>
+                    ` : ''}
+                  </div>
+                  ${f.prUrl ? `
+                    <div class="finding-card-footer">
+                      <a href="${escapeHtml(f.prUrl)}" target="_blank" class="view-pr-link">
+                        <span>View Line in GitHub</span>
+                        <span class="link-arrow">&rarr;</span>
+                      </a>
+                    </div>
+                  ` : ''}
                 </div>
-              </div>
-            `).join('')}
+              `;
+            }).join('')}
           </div>
-        ` : '<p class="scan-clean-msg">No issues detected in this PR.</p>'}
+        ` : `
+          <div class="scan-clean-card">
+            <span class="clean-icon">🛡️</span>
+            <h4>No issues detected</h4>
+            <p>This Pull Request complies with all security guidelines and policies analyzed by Sentinel.</p>
+          </div>
+        `}
       `;
       scanPanel.classList.add('active');
       btn.textContent = 'Re-scan';
