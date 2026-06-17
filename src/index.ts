@@ -19,6 +19,13 @@ function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrCon
   const hasEnvKey = !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH
   const hasApp = !!config.githubAppId && !!config.githubInstallationId && (!!config.githubPrivateKeyPath || hasEnvKey)
 
+  if (!hasPat && !hasApp) {
+    return {
+      tokenOrConfig: '',
+      warnings: ['GitHub not configured — starting in setup mode. Configure via Web UI.'],
+    }
+  }
+
   if (hasPat && hasApp) {
     warnings.push('Both githubToken and GitHub App credentials provided — using GitHub App mode')
   }
@@ -50,7 +57,7 @@ function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrCon
   process.exit(1)
 }
 
-function ensureCredentials(config: ReturnType<typeof loadConfig>) {
+function ensureCredentials(config: ReturnType<typeof loadConfig>): boolean {
   const missing: string[] = []
   const hasPat = !!config.githubToken
   const hasEnvKey = !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH
@@ -62,10 +69,11 @@ function ensureCredentials(config: ReturnType<typeof loadConfig>) {
   if (!config.githubOwner) missing.push('githubOwner')
   if (!config.githubRepo) missing.push('githubRepo')
   if (missing.length > 0) {
-    console.error(`Missing required config: ${missing.join(', ')}`)
-    console.error(`Set them in ${require('os').homedir()}\\.sentinel-oracle\\config.json`)
-    gracefulExit(1)
+    console.warn(`[setup] Missing GitHub config: ${missing.join(', ')}`)
+    console.warn(`[setup] Server will start in setup mode — configure via web UI`)
+    return false
   }
+  return true
 }
 
 function validatePermissions(configDir: string): void {
@@ -125,7 +133,7 @@ async function main() {
   const config = loadConfig()
   console.warn = origWarn
 
-  ensureCredentials(config)
+  const hasCredentials = ensureCredentials(config)
   validatePermissions(config.dataDir)
 
   const { tokenOrConfig, warnings } = resolveCredentials(config)
@@ -141,7 +149,12 @@ async function main() {
     await dns.resolve('api.github.com')
   } catch {}
 
-  const skipVerify = process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1'
+  const setupMode = !hasCredentials
+  if (setupMode) {
+    configWarnings.push('[setup] Server running in setup mode — configure GitHub App at /setup')
+  }
+
+  const skipVerify = process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1' || setupMode
   if (skipVerify) {
     configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
   } else {
@@ -171,7 +184,9 @@ async function main() {
     }
   })
 
-  startPolling()
+  if (!setupMode) {
+    startPolling()
+  }
 
   process.on('SIGINT', () => {
     stopPolling()

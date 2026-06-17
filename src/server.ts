@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import * as fs from 'fs'
 import express from 'express'
 import cookieParser from 'cookie-parser'
 import * as path from 'path'
@@ -965,6 +966,101 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- GitHub Config (unauthenticated in setup mode, authenticated otherwise) -----
+  function configAuth(req: any, res: any, next: () => void): void {
+    const isSetup = !config.githubAppId || !config.githubOwner || !config.githubRepo
+    if (isSetup) return next()
+    requireAuth()(req, res, next)
+  }
+
+  app.get('/api/config/github-status', (_req, res) => {
+    res.json({
+      configured: !!config.githubAppId && !!config.githubOwner && !!config.githubRepo,
+      hasPat: !!config.githubToken,
+      hasApp: !!config.githubAppId && !!config.githubInstallationId,
+      appId: config.githubAppId || '',
+      installationId: config.githubInstallationId || '',
+      owner: config.githubOwner || '',
+      repo: config.githubRepo || '',
+      privateKeyPath: config.githubPrivateKeyPath || '',
+      authMode: client.authMode || 'none',
+      scanEnabled: config.scanEnabled,
+      webhookSecretConfigured: !!config.githubWebhookSecret,
+    })
+  })
+
+  app.post('/api/config/github', configAuth, (req, res) => {
+    try {
+      const { appId, installationId, privateKey, owner, repo } = req.body
+      if (!owner || !repo) {
+        return res.status(400).json({ error: 'Owner and repository are required' })
+      }
+      const toSave: Record<string, unknown> = { githubOwner: owner, githubRepo: repo }
+      if (appId) toSave.githubAppId = String(appId)
+      if (installationId) toSave.githubInstallationId = String(installationId)
+      if (privateKey && typeof privateKey === 'string' && privateKey.includes('BEGIN')) {
+        const keyPath = path.join(config.dataDir, 'private-key.pem')
+        fs.writeFileSync(keyPath, privateKey, { mode: 0o600 })
+        toSave.githubPrivateKeyPath = keyPath
+        config.githubPrivateKeyPath = keyPath
+      }
+      if (appId) config.githubAppId = String(appId)
+      if (installationId) config.githubInstallationId = String(installationId)
+      config.githubOwner = owner
+      config.githubRepo = repo
+      saveConfig(toSave)
+      db.log('config_github', null, `GitHub config updated: ${owner}/${repo}`)
+      res.json({ success: true, message: 'Configuration saved. Restart server to apply changes.' })
+    } catch (err) {
+      db.log('error', null, `GitHub config save: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to save configuration' })
+    }
+  })
+
+  app.post('/api/config/webhook', configAuth, (req, res) => {
+    try {
+      const { secret } = req.body
+      if (typeof secret !== 'string') {
+        return res.status(400).json({ error: 'Secret must be a string' })
+      }
+      config.githubWebhookSecret = secret
+      saveConfig({ githubWebhookSecret: secret })
+      db.log('config_webhook', null, 'Webhook secret updated')
+      res.json({ success: true })
+    } catch (err) {
+      db.log('error', null, `Webhook save: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to save webhook secret' })
+    }
+  })
+
+  app.post('/api/config/settings', configAuth, (req, res) => {
+    try {
+      const { scanEnabled, challengeTtlMs, approveReasonRequired } = req.body
+      const toSave: Record<string, unknown> = {}
+      if (typeof scanEnabled === 'boolean') {
+        toSave.scanEnabled = scanEnabled
+        config.scanEnabled = scanEnabled
+      }
+      if (typeof challengeTtlMs === 'number' && challengeTtlMs >= 30000) {
+        toSave.challengeTtlMs = challengeTtlMs
+        config.challengeTtlMs = challengeTtlMs
+      }
+      if (typeof approveReasonRequired === 'boolean') {
+        toSave.approveReasonRequired = approveReasonRequired
+        config.approveReasonRequired = approveReasonRequired
+      }
+      if (Object.keys(toSave).length === 0) {
+        return res.status(400).json({ error: 'No valid settings provided' })
+      }
+      saveConfig(toSave)
+      db.log('config_settings', null, `Settings updated: ${Object.keys(toSave).join(', ')}`)
+      res.json({ success: true })
+    } catch (err) {
+      db.log('error', null, `Settings save: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to save settings' })
+    }
+  })
+
   // ----- Status -----
   app.get('/api/status', (_req, res) => {
     const pendingCount = db.getPendingPRs().length
@@ -978,6 +1074,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       authMode: client.authMode,
       scanEnabled: config.scanEnabled,
       passwordRequired: !!config.passwordHash,
+      githubConfigured: !!config.githubAppId && !!config.githubOwner && !!config.githubRepo,
       version: '1.0.0',
     })
   })

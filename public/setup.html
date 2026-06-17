@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinel Oracle — Setup</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+body { background: var(--bg-primary); font-family: var(--font-mono); color: var(--text-main); min-height: 100vh; display: flex; flex-direction: column; font-size: 0.75rem; }
+.setup-container { max-width: 640px; margin: 3rem auto; padding: 0 1.5rem; width: 100%; }
+.setup-header { margin-bottom: 2rem; text-align: center; }
+.setup-header h1 { font-size: 0.85rem; font-weight: 700; letter-spacing: 0.25em; text-transform: uppercase; color: var(--text-bright); margin-bottom: 0.25rem; }
+.setup-header p { font-size: 0.7rem; color: var(--text-dark); }
+.steps { display: flex; gap: 0.25rem; margin-bottom: 2rem; counter-reset: step; }
+.step { flex: 1; text-align: center; padding: 0.4rem 0; font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-dark); border-bottom: 2px solid var(--border-color); transition: all 0.15s ease; }
+.step.active { color: var(--text-bright); border-bottom-color: var(--accent-green); }
+.step.done { color: var(--accent-green); border-bottom-color: var(--accent-green); }
+.step-number { display: block; font-size: 0.75rem; font-weight: 700; margin-bottom: 0.15rem; }
+.step-label { display: block; }
+.step-content { display: none; }
+.step-content.active { display: block; }
+.step-content h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-bright); margin-bottom: 1rem; padding-bottom: 0.625rem; border-bottom: 1px solid var(--border-color); }
+.step-content p { font-size: 0.7rem; color: var(--text-dark); margin-bottom: 1.25rem; line-height: 1.4; }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dark); }
+.form-group input, .form-group textarea { width: 100%; padding: 0.5rem 0.75rem; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 0; color: var(--text-bright); font-size: 0.75rem; font-family: var(--font-mono); outline: none; transition: border-color 0.15s; }
+.form-group textarea { min-height: 120px; resize: vertical; }
+.form-group input:focus, .form-group textarea:focus { border-color: var(--text-main); }
+.form-group .hint { font-size: 0.6rem; color: var(--text-dark); margin-top: 0.3rem; }
+.nav-buttons { display: flex; gap: 0.5rem; margin-top: 1.5rem; }
+.nav-buttons button { flex: 1; padding: 0.5rem 1rem; background: transparent; border: 1px solid var(--border-color); border-radius: 0; color: var(--text-main); font-size: 0.7rem; font-weight: 500; letter-spacing: 0.08em; cursor: pointer; font-family: var(--font-mono); text-transform: uppercase; transition: all 0.15s ease; }
+.nav-buttons button:hover:not(:disabled) { background: rgba(255,255,255,0.02); border-color: var(--border-active); color: var(--text-bright); }
+.nav-buttons button:disabled { opacity: 0.25; cursor: not-allowed; }
+.nav-buttons .btn-primary { border-color: rgba(46,164,79,0.3); color: var(--accent-green); }
+.nav-buttons .btn-primary:hover:not(:disabled) { background: rgba(46,164,79,0.05); border-color: var(--accent-green); }
+.btn-test { border-color: rgba(56,139,253,0.3); color: var(--accent-blue); }
+.btn-test:hover:not(:disabled) { background: rgba(56,139,253,0.05); border-color: var(--accent-blue); }
+.result-box { margin-top: 1rem; padding: 0.75rem; border: 1px solid var(--border-color); background: var(--bg-primary); font-size: 0.7rem; }
+.result-box.success { border-color: var(--accent-green); }
+.result-box.error { border-color: var(--accent-red); }
+.result-box .result-title { font-weight: 700; margin-bottom: 0.4rem; display: block; }
+.result-box .result-detail { color: var(--text-dark); }
+.done-section { text-align: center; padding: 2rem 0; }
+.done-section .check { color: var(--accent-green); font-size: 2rem; display: block; margin-bottom: 1rem; }
+.done-section h2 { font-size: 0.85rem; font-weight: 700; color: var(--text-bright); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.2em; }
+.done-section p { color: var(--text-dark); font-size: 0.7rem; margin-bottom: 1.5rem; }
+.error-text { color: var(--accent-red); font-size: 0.65rem; margin-top: 0.25rem; display: none; }
+.auth-prompt { margin-bottom: 2rem; padding: 1.25rem; border: 1px solid var(--border-color); background: var(--bg-secondary); text-align: center; }
+.auth-prompt h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; color: var(--text-bright); margin-bottom: 0.75rem; }
+.auth-prompt p { font-size: 0.7rem; color: var(--text-dark); margin-bottom: 1rem; }
+#setup-status { margin-top: 0.75rem; font-size: 0.7rem; font-family: var(--font-mono); padding: 0.5rem 0.75rem; border: 1px solid transparent; display: none; }
+#setup-status.success { display: block; color: var(--accent-green); border-color: rgba(46,164,79,0.3); background: rgba(46,164,79,0.02); }
+#setup-status.error { display: block; color: var(--accent-red); border-color: rgba(211,47,47,0.3); background: rgba(211,47,47,0.02); }
+#setup-status.info { display: block; color: var(--text-main); border-color: var(--border-color); background: var(--bg-primary); }
+</style>
+</head>
+<body>
+<div class="setup-container">
+  <div class="setup-header">
+    <h1>SENTINEL ORACLE</h1>
+    <p>Initial Configuration</p>
+  </div>
+
+  <div id="auth-prompt" class="auth-prompt" style="display:none">
+    <h2>Authenticate Required</h2>
+    <p>You must authenticate with your passkey to configure the server.</p>
+    <button id="setup-auth-btn" class="auth-btn">Authenticate</button>
+    <div id="setup-auth-status" class="status"></div>
+  </div>
+
+  <div id="wizard-steps" class="steps">
+    <div class="step active" data-step="1"><span class="step-number">01</span><span class="step-label">Repository</span></div>
+    <div class="step" data-step="2"><span class="step-number">02</span><span class="step-label">GitHub App</span></div>
+    <div class="step" data-step="3"><span class="step-number">03</span><span class="step-label">Settings</span></div>
+    <div class="step" data-step="4"><span class="step-number">04</span><span class="step-label">Test</span></div>
+    <div class="step" data-step="5"><span class="step-number">05</span><span class="step-label">Done</span></div>
+  </div>
+
+  <div id="setup-status"></div>
+
+  <!-- Step 1: Repository -->
+  <div id="step-1" class="step-content active">
+    <h2>Repository</h2>
+    <p>Enter the GitHub owner and repository that Sentinel Oracle will monitor and protect.</p>
+    <div class="form-group">
+      <label for="gh-owner">Repository Owner</label>
+      <input type="text" id="gh-owner" placeholder="e.g. octocat" required>
+      <span class="hint">GitHub username or organization name</span>
+    </div>
+    <div class="form-group">
+      <label for="gh-repo">Repository Name</label>
+      <input type="text" id="gh-repo" placeholder="e.g. my-repo" required>
+      <span class="hint">The repository to protect with merge authorization</span>
+    </div>
+    <div class="nav-buttons">
+      <button id="to-step-2" class="btn-primary">Next</button>
+    </div>
+  </div>
+
+  <!-- Step 2: GitHub App -->
+  <div id="step-2" class="step-content">
+    <h2>GitHub App</h2>
+    <p>Enter your GitHub App credentials. If you don't have an App, <a href="https://github.com/settings/apps" target="_blank" style="color:var(--accent-blue)">create one</a> with<br><span style="color:var(--text-dark);font-size:0.65rem">Repository permissions: Pull requests (write), Checks (write), Contents (write)</span></p>
+    <div class="form-group">
+      <label for="gh-app-id">App ID</label>
+      <input type="text" id="gh-app-id" placeholder="e.g. 4039818">
+    </div>
+    <div class="form-group">
+      <label for="gh-installation-id">Installation ID</label>
+      <input type="text" id="gh-installation-id" placeholder="e.g. 139924356">
+    </div>
+    <div class="form-group">
+      <label for="gh-private-key">Private Key (PEM)</label>
+      <textarea id="gh-private-key" placeholder="Paste your GitHub App private key content here (-----BEGIN RSA PRIVATE KEY-----)"></textarea>
+      <span class="hint">Or set the SENTINEL_GITHUB_PRIVATE_KEY environment variable (base64) or SENTINEL_GITHUB_PRIVATE_KEY_PATH</span>
+    </div>
+    <div class="nav-buttons">
+      <button id="to-step-1" class="">Back</button>
+      <button id="to-step-3" class="btn-primary">Next</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Settings -->
+  <div id="step-3" class="step-content">
+    <h2>Settings</h2>
+    <p>Configure scanner and optional features.</p>
+    <div class="form-group" style="display:flex;align-items:center;gap:0.75rem">
+      <input type="checkbox" id="scan-enabled" style="width:auto;margin:0">
+      <label for="scan-enabled" style="margin:0;cursor:pointer">Enable PR Security Scanner</label>
+    </div>
+    <div class="form-group">
+      <label for="webhook-secret">Webhook Secret <span style="color:var(--text-dark);font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+      <input type="text" id="webhook-secret" placeholder="Leave blank to skip webhook verification">
+      <span class="hint">Set a webhook secret to verify incoming GitHub webhook payloads</span>
+    </div>
+    <div class="nav-buttons">
+      <button id="to-step-2" class="">Back</button>
+      <button id="to-step-4" class="btn-primary">Next</button>
+    </div>
+  </div>
+
+  <!-- Step 4: Test -->
+  <div id="step-4" class="step-content">
+    <h2>Test Connection</h2>
+    <p>Verify that your GitHub credentials are valid before saving.</p>
+    <div class="nav-buttons">
+      <button id="to-step-3" class="">Back</button>
+      <button id="test-connection" class="btn-test">Test Connection</button>
+      <button id="save-config" class="btn-primary" disabled>Save Configuration</button>
+    </div>
+    <div id="test-result" class="result-box" style="display:none"></div>
+  </div>
+
+  <!-- Step 5: Done -->
+  <div id="step-5" class="step-content">
+    <div class="done-section">
+      <span class="check">//</span>
+      <h2>Configuration Saved</h2>
+      <p>The server must be restarted to apply the new GitHub configuration.</p>
+      <div id="saved-details" style="margin-bottom:1.5rem;text-align:left;padding:0.75rem;background:var(--bg-primary);border:1px solid var(--border-color);font-size:0.68rem;line-height:1.5">
+        <div><span style="color:var(--text-dark)">Owner:</span> <span id="saved-owner" style="color:var(--text-bright)"></span></div>
+        <div><span style="color:var(--text-dark)">Repository:</span> <span id="saved-repo" style="color:var(--text-bright)"></span></div>
+        <div><span style="color:var(--text-dark)">Config:</span> <span style="color:var(--text-dark)">~/.sentinel-oracle/config.json</span></div>
+      </div>
+      <p style="color:var(--accent-orange);font-size:0.65rem">Stop the server (Ctrl+C) and run <code style="background:var(--bg-primary);padding:0.1rem 0.3rem;border:1px solid var(--border-color)">npm start</code> to apply.</p>
+      <button id="goto-dashboard" style="margin-top:1rem">Go to Dashboard</button>
+    </div>
+  </div>
+</div>
+
+<script>
+async function api(method, path, opts) {
+  const res = await fetch(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || res.statusText)
+  return data
+}
+
+let configured = false
+let stepData = { owner: '', repo: '', appId: '', installationId: '', privateKey: '', scanEnabled: false, webhookSecret: '' }
+let authenticated = false
+
+function showStep(n) {
+  document.querySelectorAll('.step-content').forEach(el => el.classList.remove('active'))
+  document.querySelectorAll('.step').forEach(el => el.classList.remove('active'))
+  document.getElementById('step-' + n).classList.add('active')
+  document.querySelector('.step[data-step="' + n + '"]').classList.add('active')
+  for (let i = 1; i < n; i++) {
+    document.querySelector('.step[data-step="' + i + '"]').classList.add('done')
+  }
+}
+
+async function checkStatus() {
+  try {
+    const status = await api('GET', '/api/config/github-status')
+    configured = status.configured
+    if (status.configured && !window.location.hash) {
+      if (status.owner) {
+        stepData.owner = status.owner
+        stepData.repo = status.repo
+        stepData.appId = status.appId
+        stepData.installationId = status.installationId
+        stepData.scanEnabled = status.scanEnabled
+        document.getElementById('saved-owner').textContent = status.owner
+        document.getElementById('saved-repo').textContent = status.repo
+        showStep(5)
+      } else {
+        window.location.href = '/'
+      }
+    }
+    if (status.owner) {
+      document.getElementById('gh-owner').value = status.owner
+      document.getElementById('gh-repo').value = status.repo
+      document.getElementById('gh-app-id').value = status.appId
+      document.getElementById('gh-installation-id').value = status.installationId
+      document.getElementById('scan-enabled').checked = status.scanEnabled
+    }
+  } catch (err) {
+    // Server not reachable
+  }
+}
+
+async function checkSession() {
+  try {
+    const res = await fetch('/api/session/check')
+    const data = await res.json()
+    authenticated = data.authenticated
+    if (authenticated) {
+      document.getElementById('auth-prompt').style.display = 'none'
+    } else {
+      document.getElementById('auth-prompt').style.display = 'block'
+    }
+  } catch {
+    document.getElementById('auth-prompt').style.display = 'block'
+  }
+}
+
+// Auth
+document.getElementById('setup-auth-btn').addEventListener('click', async () => {
+  const el = document.getElementById('setup-auth-status')
+  el.textContent = 'Authenticating...'
+  el.className = 'status info'
+  el.style.display = 'block'
+  try {
+    const begin = await api('POST', '/api/webauthn/assert/begin')
+    const credential = await navigator.credentials.get({ publicKey: begin.publicKey })
+    if (!credential) throw new Error('Assertion cancelled')
+    await api('POST', '/api/webauthn/assert/complete', {
+      body: JSON.stringify({ credential: credential.toJSON(), challenge: begin.challenge }),
+    })
+    authenticated = true
+    document.getElementById('auth-prompt').style.display = 'none'
+    el.style.display = 'none'
+  } catch (err) {
+    el.textContent = err.message
+    el.className = 'status error'
+  }
+})
+
+// Nav
+document.getElementById('to-step-2').addEventListener('click', () => {
+  const owner = document.getElementById('gh-owner').value.trim()
+  const repo = document.getElementById('gh-repo').value.trim()
+  if (!owner || !repo) {
+    document.getElementById('setup-status').textContent = 'Owner and repository are required'
+    document.getElementById('setup-status').className = 'error'
+    return
+  }
+  stepData.owner = owner
+  stepData.repo = repo
+  document.getElementById('setup-status').className = ''
+  document.getElementById('setup-status').style.display = 'none'
+  showStep(2)
+})
+
+document.getElementById('to-step-1').addEventListener('click', () => showStep(1))
+document.getElementById('to-step-3').addEventListener('click', () => {
+  stepData.appId = document.getElementById('gh-app-id').value.trim()
+  stepData.installationId = document.getElementById('gh-installation-id').value.trim()
+  stepData.privateKey = document.getElementById('gh-private-key').value
+  showStep(3)
+})
+
+document.getElementById('to-step-4').addEventListener('click', () => {
+  stepData.scanEnabled = document.getElementById('scan-enabled').checked
+  stepData.webhookSecret = document.getElementById('webhook-secret').value.trim()
+  showStep(4)
+})
+
+document.getElementById('to-step-3').addEventListener('click', () => showStep(3))
+
+// Test connection
+document.getElementById('test-connection').addEventListener('click', async () => {
+  const btn = document.getElementById('test-connection')
+  const resultEl = document.getElementById('test-result')
+  btn.disabled = true
+  btn.textContent = 'Testing...'
+  resultEl.style.display = 'block'
+  resultEl.className = 'result-box'
+  resultEl.innerHTML = '<span class="result-title">Testing GitHub Connection...</span>'
+
+  // First save the config
+  try {
+    const saveBody = {
+      owner: stepData.owner,
+      repo: stepData.repo,
+    }
+    if (stepData.appId) saveBody.appId = stepData.appId
+    if (stepData.installationId) saveBody.installationId = stepData.installationId
+    if (stepData.privateKey && stepData.privateKey.includes('BEGIN')) saveBody.privateKey = stepData.privateKey
+
+    await api('POST', '/api/config/github', { body: JSON.stringify(saveBody) })
+
+    resultEl.className = 'result-box success'
+    resultEl.innerHTML = '<span class="result-title">// Config Saved</span><span class="result-detail">GitHub configuration written to disk.</span>'
+
+    // Now try to reach GitHub with saved config
+    // We test by hitting the token-info endpoint
+    try {
+      const info = await api('GET', '/api/github/token-info')
+      resultEl.className = resultEl.className = 'result-box success'
+      resultEl.innerHTML = '<span class="result-title">// Connection Verified</span><span class="result-detail">GitHub App authenticated successfully.</span>'
+      document.getElementById('save-config').disabled = false
+      document.getElementById('save-config').textContent = 'Save & Finish'
+    } catch (err) {
+      resultEl.className = 'result-box'
+      resultEl.innerHTML = '<span class="result-title" style="color:var(--accent-orange)">⚠ Config Saved</span><span class="result-detail">Configuration saved but connection test failed. Verify your GitHub App permissions and restart the server.</span>'
+      document.getElementById('save-config').disabled = false
+      document.getElementById('save-config').textContent = 'Save & Finish'
+    }
+  } catch (err) {
+    resultEl.className = 'result-box error'
+    resultEl.innerHTML = '<span class="result-title">// Error</span><span class="result-detail">' + err.message + '</span>'
+  } finally {
+    btn.disabled = false
+    btn.textContent = 'Test Connection'
+  }
+})
+
+// Save & Finish
+document.getElementById('save-config').addEventListener('click', async () => {
+  try {
+    document.getElementById('save-config').disabled = true
+    document.getElementById('save-config').textContent = 'Saving...'
+
+    document.getElementById('saved-owner').textContent = stepData.owner
+    document.getElementById('saved-repo').textContent = stepData.repo
+
+    // Also save webhook secret if provided
+    if (stepData.webhookSecret) {
+      await api('POST', '/api/config/webhook', { body: JSON.stringify({ secret: stepData.webhookSecret }) }).catch(() => {})
+    }
+
+    // Save scan setting
+    await api('POST', '/api/config/settings', { body: JSON.stringify({ scanEnabled: stepData.scanEnabled }) }).catch(() => {})
+
+    showStep(5)
+  } catch (err) {
+    document.getElementById('setup-status').textContent = 'Error: ' + err.message
+    document.getElementById('setup-status').className = 'error'
+    document.getElementById('save-config').disabled = false
+    document.getElementById('save-config').textContent = 'Save & Finish'
+  }
+})
+
+document.getElementById('goto-dashboard').addEventListener('click', () => {
+  window.location.href = '/'
+})
+
+checkStatus()
+checkSession()
+</script>
+</body>
+</html>

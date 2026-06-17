@@ -333,13 +333,14 @@
           window.__csrfToken = r.csrfToken;
         } catch (e) {}
         setStatus('auth-status', 'Authenticated successfully!', 'success');
-        showPanel('pr-section');
+      showPanel('pr-section');
         await loadPRs();
         panelsLoaded['devices-section'] = true
         panelsLoaded['token-section'] = true
         panelsLoaded['auth-mode-section'] = true
         panelsLoaded['branch-protection-section'] = true
         panelsLoaded['metrics-section'] = true
+        panelsLoaded['github-config-section'] = true
         panelsLoaded['webhook-section'] = true
         panelsLoaded['history-section'] = true
         await loadDevices();
@@ -347,6 +348,7 @@
         await loadAuthMode();
         await loadBranchProtection();
         await loadMetrics();
+        await loadGithubConfig();
         await loadWebhookInfo();
       } else {
         setStatus('auth-status', 'Authentication failed', 'error');
@@ -1170,6 +1172,33 @@
     }
   }
 
+  // GitHub Config
+  async function loadGithubConfig() {
+    if (!authenticated) return;
+    const el = document.getElementById('github-config-display');
+    try {
+      const cfg = await api('/api/config/github-status');
+      let html = '<div class="token-header"><span class="badge risk-badge ' + (cfg.configured ? 'success' : 'error') + '">' + (cfg.configured ? 'CONFIGURED' : 'NOT CONFIGURED') + '</span></div>';
+      html += '<div class="token-detail"><span class="token-label">Owner</span><code>' + escapeHtml(cfg.owner || '(not set)') + '</code></div>';
+      html += '<div class="token-detail"><span class="token-label">Repository</span><code>' + escapeHtml(cfg.repo || '(not set)') + '</code></div>';
+      html += '<div class="token-detail"><span class="token-label">Auth Mode</span><span>' + (cfg.hasApp ? 'GitHub App' : cfg.hasPat ? 'PAT' : 'None') + '</span></div>';
+      if (cfg.hasApp) {
+        html += '<div class="token-detail"><span class="token-label">App ID</span><code>' + escapeHtml(cfg.appId) + '</code></div>';
+        html += '<div class="token-detail"><span class="token-label">Installation</span><code>' + escapeHtml(cfg.installationId) + '</code></div>';
+        html += '<div class="token-detail"><span class="token-label">Private Key</span><span>' + (cfg.privateKeyPath ? 'Stored at ' + cfg.privateKeyPath : 'Not stored') + '</span></div>';
+      }
+      // Show scanner status
+      html += '<div class="token-detail"><span class="token-label">Scanner</span><span class="badge ' + (cfg.scanEnabled ? 'success' : '') + '">' + (cfg.scanEnabled ? 'Enabled' : 'Disabled') + '</span></div>';
+      html += '<div class="token-detail"><span class="token-label">Webhook Secret</span><span class="badge ' + (cfg.webhookSecretConfigured ? 'success' : '') + '">' + (cfg.webhookSecretConfigured ? 'Configured' : 'Not set') + '</span></div>';
+      html += '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);display:flex;gap:0.5rem;flex-wrap:wrap">';
+      html += '<a href="/setup.html" style="display:inline-flex;align-items:center;padding:0.5rem 1rem;background:transparent;border:1px solid var(--border-color);border-radius:0;color:var(--text-main);font-size:0.7rem;font-weight:500;letter-spacing:0.08em;cursor:pointer;font-family:var(--font-mono);text-transform:uppercase;transition:all 0.15s ease;text-decoration:none">Open Setup Wizard</a>';
+      html += '</div>';
+      el.innerHTML = html;
+    } catch (err) {
+      el.innerHTML = '<p class="empty">Failed to load configuration</p>';
+    }
+  }
+
   // Webhook Info
   async function loadWebhookInfo() {
     if (!authenticated) return;
@@ -1210,6 +1239,7 @@
           case 'branch-protection-section': loadBranchProtection(); break
           case 'metrics-section': loadMetrics(); break
           case 'webhook-section': loadWebhookInfo(); break
+          case 'github-config-section': loadGithubConfig(); break
           case 'history-section': loadHistory(); break
           case 'audit-section': loadAudit(); break
         }
