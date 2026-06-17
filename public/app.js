@@ -1185,7 +1185,7 @@
       if (cfg.hasApp) {
         html += '<div class="token-detail"><span class="token-label">App ID</span><code>' + escapeHtml(cfg.appId) + '</code></div>';
         html += '<div class="token-detail"><span class="token-label">Installation</span><code>' + escapeHtml(cfg.installationId) + '</code></div>';
-        html += '<div class="token-detail"><span class="token-label">Private Key</span><span>' + (cfg.privateKeyPath ? 'Stored at ' + cfg.privateKeyPath : 'Not stored') + '</span></div>';
+        html += '<div class="token-detail"><span class="token-label">Private Key</span><span class="badge ' + (cfg.privateKeyConfigured ? 'success' : 'error') + '">' + (cfg.privateKeyConfigured ? 'Configured' : 'Not set') + '</span></div>';
       }
       // Show scanner status
       html += '<div class="token-detail"><span class="token-label">Scanner</span><span class="badge ' + (cfg.scanEnabled ? 'success' : '') + '">' + (cfg.scanEnabled ? 'Enabled' : 'Disabled') + '</span></div>';

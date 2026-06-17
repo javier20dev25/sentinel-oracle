@@ -982,7 +982,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       installationId: config.githubInstallationId || '',
       owner: config.githubOwner || '',
       repo: config.githubRepo || '',
-      privateKeyPath: config.githubPrivateKeyPath || '',
+      privateKeyConfigured: !!config.githubPrivateKeyPath || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH,
       authMode: client.authMode || 'none',
       scanEnabled: config.scanEnabled,
       webhookSecretConfigured: !!config.githubWebhookSecret,
