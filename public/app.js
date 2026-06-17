@@ -398,31 +398,31 @@
               <div class="pr-card-info">
                 <div class="pr-card-header">
                   <div class="pr-title-row">
-                    <span class="pr-number">#${pr.prNumber}</span>
+                    <span class="pr-number">PR-${pr.prNumber}</span>
                     <h3 class="pr-title">${escapeHtml(pr.title)}</h3>
                   </div>
                   <div class="meta-row">
-                    <span class="pr-author"><span class="meta-icon">👤</span>${escapeHtml(pr.author)}</span>
-                    <span class="meta-divider">&middot;</span>
-                    <span class="pr-date"><span class="meta-icon">📅</span>${new Date(pr.createdAt).toLocaleString()}</span>
+                    <span class="pr-author">AUTHOR: ${escapeHtml(pr.author)}</span>
+                    <span class="meta-divider">//</span>
+                    <span class="pr-date">CREATED: ${new Date(pr.createdAt).toLocaleString().toUpperCase()}</span>
                   </div>
                 </div>
                 <div class="status-row">
-                  <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
-                  <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
-                  <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
+                  <span class="badge ${pr.ciStatus}">CI // ${pr.ciStatus}</span>
+                  <span class="badge ${pr.sentinelStatus}">SENTINEL // ${pr.sentinelStatus}</span>
+                  <span class="badge ${pr.authStatus}">GATEWAY // ${pr.authStatus}</span>
                 </div>
                 <div class="actions-wrapper">
                   <div class="actions">
-                    <button class="auth-btn" data-pr="${pr.prNumber}"><span class="btn-icon">⚡</span>Authorize</button>
-                    <button class="direct-auth-btn" data-pr="${pr.prNumber}"><span class="btn-icon">📱</span>Authorize (Same Device)</button>
-                    <button class="reject-btn" data-pr="${pr.prNumber}"><span class="btn-icon">🚫</span>Reject</button>
-                    ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}"><span class="btn-icon">🔍</span>Scan</button>` : ''}
+                    <button class="auth-btn" data-pr="${pr.prNumber}">AUTHORIZE MERGE</button>
+                    <button class="direct-auth-btn" data-pr="${pr.prNumber}">DIRECT AUTH</button>
+                    <button class="reject-btn" data-pr="${pr.prNumber}">REJECT</button>
+                    ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}">SCAN ANALYSIS</button>` : ''}
                   </div>
                 </div>
                 <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
                 <div class="checks-toggle-wrapper">
-                  <button class="checks-toggle-btn" data-pr="${pr.prNumber}">Show Checks</button>
+                  <button class="checks-toggle-btn" data-pr="${pr.prNumber}">EXPAND TELEMETRY & CHECKS</button>
                 </div>
                 <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
               </div>
@@ -621,19 +621,17 @@
       const severityLabel = result.critical > 0 ? 'CRITICAL' : result.high > 0 ? 'HIGH' : result.medium > 0 ? 'MEDIUM' : 'LOW';
       scanPanel.innerHTML = `
         <div class="scan-panel-header">
-          <div class="risk-gauge-container ${severityClass}">
-            <div class="risk-gauge-circle">
-              <span class="risk-score-num">${result.riskScore}</span>
-              <span class="risk-score-lbl">RISK</span>
-            </div>
+          <div class="threat-score-block ${severityClass}">
+            <span class="threat-label">RISK LEVEL</span>
+            <span class="threat-value">${result.riskScore}%</span>
           </div>
-          <div class="risk-summary-details">
-            <h3 class="risk-label-title ${severityClass}">${severityLabel} RISK LEVEL</h3>
-            <div class="severity-pill-row">
-              <span class="sev-pill crit" title="Critical">${result.critical}C</span>
-              <span class="sev-pill high" title="High">${result.high}H</span>
-              <span class="sev-pill med" title="Medium">${result.medium}M</span>
-              <span class="sev-pill low" title="Low">${result.low}L</span>
+          <div class="threat-breakdown">
+            <h3 class="risk-label-title ${severityClass}">${severityLabel} RISK STATE</h3>
+            <div class="severity-grid">
+              <span class="sev-cell crit">CRIT: ${result.critical}</span>
+              <span class="sev-cell high">HIGH: ${result.high}</span>
+              <span class="sev-cell med">MED: ${result.medium}</span>
+              <span class="sev-cell low">LOW: ${result.low}</span>
             </div>
           </div>
         </div>
@@ -651,29 +649,22 @@
                     <p class="finding-desc">${escapeHtml(f.description)}</p>
                     ${f.file ? `
                       <div class="finding-location">
-                        <span class="location-icon">📁</span>
-                        <span class="location-path">${escapeHtml(f.file)}${f.line != null ? ':' + f.line : ''}</span>
+                        <span class="location-path">PATH // ${escapeHtml(f.file)}${f.line != null ? ':' + f.line : ''}</span>
                       </div>
                     ` : ''}
                     ${f.code ? `
-                      <div class="code-terminal-mockup">
-                        <div class="terminal-header">
-                          <span class="terminal-dots">
-                            <span class="terminal-dot close"></span>
-                            <span class="terminal-dot minimize"></span>
-                            <span class="terminal-dot maximize"></span>
-                          </span>
-                          <span class="terminal-file">${escapeHtml(filename)}</span>
+                      <div class="code-telemetry-box">
+                        <div class="code-box-header">
+                          <span class="code-file-label">SOURCE DELTA // ${escapeHtml(filename)}</span>
                         </div>
-                        <pre class="terminal-body"><code>${escapeHtml(f.code)}</code></pre>
+                        <pre class="code-box-body"><code>${escapeHtml(f.code)}</code></pre>
                       </div>
                     ` : ''}
                   </div>
                   ${f.prUrl ? `
                     <div class="finding-card-footer">
                       <a href="${escapeHtml(f.prUrl)}" target="_blank" class="view-pr-link">
-                        <span>View Line in GitHub</span>
-                        <span class="link-arrow">&rarr;</span>
+                        <span>[ VIEW PATH ON GITHUB ]</span>
                       </a>
                     </div>
                   ` : ''}
@@ -683,9 +674,8 @@
           </div>
         ` : `
           <div class="scan-clean-card">
-            <span class="clean-icon">🛡️</span>
-            <h4>No issues detected</h4>
-            <p>This Pull Request complies with all security guidelines and policies analyzed by Sentinel.</p>
+            <span class="clean-status-label">// Cryptographically Clean</span>
+            <p>Static analyzer reports 0 policy breaches or anomalies for commit payload.</p>
           </div>
         `}
       `;
