@@ -168,6 +168,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
       if (result.credentialId) {
         const cookie = createSessionCookie(result.credentialId, device?.name || 'unknown', req.headers['user-agent'] || '')
+        console.log('[webauthn] assert/complete: Created session cookie:', { name: cookie.name, options: cookie.options })
         res.cookie(cookie.name, cookie.value, cookie.options)
         db.log('session_created', null, `Session for device "${device?.name || 'unknown'}"`)
       }
@@ -182,19 +183,43 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   // ----- Session -----
   app.get('/api/session/check', (req, res) => {
+    console.log(`[session/check] Incoming request to /api/session/check`)
+    console.log(`[session/check] Headers cookie: ${req.headers.cookie}`)
+    console.log(`[session/check] req.cookies: ${JSON.stringify(req.cookies)}`)
+    console.log(`[session/check] req.signedCookies: ${JSON.stringify(req.signedCookies)}`)
+    
     const raw = req.signedCookies?.sentinel_session
-    if (!raw || typeof raw !== 'string') return res.json({ authenticated: false })
+    if (!raw || typeof raw !== 'string') {
+      console.log(`[session/check] No valid sentinel_session signed cookie present`)
+      db.log('session_check', null, 'No session cookie present')
+      return res.json({ authenticated: false })
+    }
     try {
-      const session = JSON.parse(raw)
-      if (Date.now() > session.exp) {
+      console.log(`[session/check] Raw session cookie value: ${raw}`)
+      const cookieData = JSON.parse(raw)
+      if (!cookieData.id) {
+        console.warn(`[session/check] Cookie missing session ID`)
         const cookie = clearSessionCookie()
         res.cookie(cookie.name, cookie.value, cookie.options)
+        db.log('session_check', null, 'Cookie missing session ID')
         return res.json({ authenticated: false })
       }
-      res.json({ authenticated: true, deviceName: session.deviceName })
-    } catch {
+      const dbSession = db.getSession(cookieData.id)
+      if (!dbSession) {
+        console.warn(`[session/check] Session ${cookieData.id} not found in database or expired`)
+        const cookie = clearSessionCookie()
+        res.cookie(cookie.name, cookie.value, cookie.options)
+        db.log('session_check', null, `Session ${cookieData.id} not found in DB`)
+        return res.json({ authenticated: false, reason: 'session_not_found' })
+      }
+      console.log(`[session/check] Valid session found: id=${dbSession.id} deviceName=${dbSession.deviceName}`)
+      db.touchSession(cookieData.id)
+      res.json({ authenticated: true, deviceName: dbSession.deviceName })
+    } catch (e) {
+      console.error(`[session/check] Error parsing/verifying session cookie:`, e)
       const cookie = clearSessionCookie()
       res.cookie(cookie.name, cookie.value, cookie.options)
+      db.log('session_check', null, `Session check error: ${e instanceof Error ? e.message : e}`)
       res.json({ authenticated: false })
     }
   })

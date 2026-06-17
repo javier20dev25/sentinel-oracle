@@ -23,7 +23,11 @@ export function securityHeaders() {
   })
 }
 
-export function corsBlock(_req: Request, res: Response, next: NextFunction) {
+export function corsBlock(req: Request, res: Response, next: NextFunction) {
+  const origin = req.headers['origin']
+  if (origin) {
+    console.log(`[cors] Request from origin: ${origin}`)
+  }
   res.setHeader('Access-Control-Allow-Origin', 'null')
   next()
 }
@@ -45,15 +49,28 @@ export function csrfProtection(allowedOrigin: string, db: DatabaseStore) {
 
     const origin = req.headers['origin'] as string | undefined
     const referer = req.headers['referer'] as string | undefined
-    if (!origin && !referer) return next()
+    if (!origin && !referer) {
+      console.log(`[csrf] check: Passed (no origin/referer header) for ${req.method} ${req.path}`)
+      return next()
+    }
 
     const source = (origin || referer || '').replace(/\/$/, '')
     const allowed = allowedOrigin.replace(/\/$/, '')
 
-    if (source.startsWith(allowed)) return next()
-    if (source.includes('://localhost') || source.includes('://127.0.0.1')) return next()
+    console.log(`[csrf] check: method=${req.method} path=${req.path} origin=${origin} referer=${referer} source=${source} allowed=${allowed}`)
 
-    db.log('csrf_blocked', null, `Blocked ${req.method} ${req.path} from ${source}`)
+    if (source.startsWith(allowed)) {
+      console.log(`[csrf] check: Passed (source starts with allowedOrigin)`)
+      return next()
+    }
+    if (source.includes('://localhost') || source.includes('://127.0.0.1')) {
+      console.log(`[csrf] check: Passed (localhost/127.0.0.1 exception)`)
+      return next()
+    }
+
+    const msg = `Blocked ${req.method} ${req.path} from ${source} (allowedOrigin is ${allowed})`
+    console.warn(`[csrf] check: FAILED! ${msg}`)
+    db.log('csrf_blocked', null, msg)
     res.status(403).json({ error: 'Cross-origin request blocked' })
   }
 }

@@ -46,6 +46,7 @@ function createTestConfig(dataDir: string): Config {
     rateLimitAuth: 100,
     rateLimitWindowMs: 60000,
     encryptionKey: Buffer.alloc(0),
+    cookieSecret: 'test-cookie-secret',
     approveReasonRequired: false,
     locked: false,
     passwordHash: '',
@@ -118,8 +119,15 @@ describe('E2E: full HTTP API flow', () => {
       })
     })
 
-    // Create the session cookie
-    sessionCookie = `sentinel_session=${sid}`
+    // Create the session cookie (properly formatted and signed)
+    const cookieVal = JSON.stringify({ id: sid })
+    const signature = require('crypto')
+      .createHmac('sha256', 'test-cookie-secret')
+      .update(cookieVal)
+      .digest('base64')
+      .replace(/=+$/, '')
+    const signedCookie = 's:' + cookieVal + '.' + signature
+    sessionCookie = `sentinel_session=${encodeURIComponent(signedCookie)}`
   })
 
   afterAll(async () => {
@@ -203,7 +211,7 @@ describe('E2E: full HTTP API flow', () => {
     const res = await fetch('GET', `${baseUrl}/api/metrics`, { Cookie: sessionCookie })
     expect(res.status).toBe(200)
     const data = JSON.parse(res.body)
-    expect(data).toHaveProperty('totalPRs')
+    expect(data).toHaveProperty('totalPrs')
   })
 
   it('prints backfill status (not running)', async () => {

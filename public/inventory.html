@@ -6,42 +6,45 @@
 <title>Token Inventory — Sentinel Oracle</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-.nav { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #161b22; border-bottom: 1px solid #30363d; }
-.nav a { color: #58a6ff; text-decoration: none; font-size: 0.85rem; }
-.nav a:hover { text-decoration: underline; }
-.stats-row { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
-.stat-card { flex: 1; min-width: 120px; padding: 1rem; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; text-align: center; }
-.stat-card .stat-value { font-size: 1.5rem; font-weight: 600; color: #f0f6fc; }
-.stat-card .stat-label { font-size: 0.75rem; color: #8b949e; margin-top: 0.25rem; }
-.stat-card.high-risk { border-color: #f85149; }
-.stat-card.expiring { border-color: #d29922; }
-.toolbar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-th { text-align: left; padding: 0.5rem 0.5rem; color: #8b949e; border-bottom: 1px solid #30363d; font-weight: 600; }
-td { padding: 0.5rem; border-bottom: 1px solid #21262d; }
-tr:hover td { background: #161b22; }
-.token-type { font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 8px; }
-.token-type.github_pat { background: #382f1b; color: #d29922; }
-.token-type.github_app { background: #1b3820; color: #3fb950; }
-.token-type.github_oauth { background: #1b2a4a; color: #58a6ff; }
-.token-type.found_secret { background: #381b1b; color: #f85149; }
-.token-type.generic { background: #21262d; color: #8b949e; }
-.risk-low { color: #3fb950; }
-.risk-medium { color: #d29922; }
-.risk-high { color: #f85149; }
-.risk-critical { color: #f85149; font-weight: 600; }
-.delete-btn { background: #da3633; font-size: 0.75rem; padding: 0.25rem 0.5rem; }
-.delete-btn:hover { background: #f85149; }
-#scan-status { margin-top: 0.5rem; font-size: 0.85rem; }
+  body { background: #07080a; }
+  .inv-nav { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; background: #0a0c0f; border-bottom: 0.5px solid rgba(255,255,255,0.06); }
+  .inv-nav .nav-title { color: #e6e8eb; font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; }
+  .inv-nav a { color: #388bfd; text-decoration: none; font-size: 0.72rem; }
+  .inv-nav a:hover { text-decoration: underline; }
+  .stats-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.875rem; }
+  .stat-card { flex: 1; min-width: 100px; padding: 0.75rem; background: #14161a; border: 0.5px solid rgba(255,255,255,0.05); text-align: center; }
+  .stat-card .stat-value { font-size: 1.25rem; color: #e6e8eb; font-weight: 400; }
+  .stat-card .stat-label { font-size: 0.6rem; color: #656b75; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+  .stat-card.high-risk { border-color: rgba(240,37,58,0.2); }
+  .stat-card.expiring { border-color: rgba(210,153,34,0.2); }
+  .toolbar { display: flex; gap: 0.4rem; margin-bottom: 0.875rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+  th { text-align: left; padding: 0.35rem 0.4rem; color: #656b75; font-weight: 400; text-transform: uppercase; font-size: 0.62rem; letter-spacing: 0.05em; border-bottom: 0.5px solid rgba(255,255,255,0.06); }
+  td { padding: 0.35rem 0.4rem; border-bottom: 0.5px solid rgba(255,255,255,0.04); }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .token-type { font-size: 0.65rem; padding: 0.1rem 0.35rem; }
+  .token-type.github_pat { color: #d29922; border: 0.5px solid rgba(210,153,34,0.2); background: rgba(210,153,34,0.04); }
+  .token-type.github_app { color: #26cd6b; border: 0.5px solid rgba(38,205,107,0.2); background: rgba(38,205,107,0.04); }
+  .token-type.github_oauth { color: #388bfd; border: 0.5px solid rgba(56,139,253,0.2); background: rgba(56,139,253,0.04); }
+  .token-type.found_secret { color: #f0253a; border: 0.5px solid rgba(240,37,58,0.2); background: rgba(240,37,58,0.04); }
+  .token-type.generic { color: #656b75; border: 0.5px solid rgba(255,255,255,0.08); }
+  .risk-low { color: #26cd6b; }
+  .risk-medium { color: #d29922; }
+  .risk-high { color: #f0253a; }
+  .risk-critical { color: #f0253a; font-weight: 500; }
+  .delete-btn { color: #f0253a; border-color: rgba(240,37,58,0.2); font-size: 0.65rem; padding: 0.2rem 0.5rem; }
+  .delete-btn:hover { background: rgba(240,37,58,0.06); border-color: rgba(240,37,58,0.4); }
+  #scan-status { margin-top: 0.5rem; }
+  .inv-container { max-width: 900px; margin: 0 auto; padding: 1rem; }
 </style>
 </head>
 <body>
-<div class="nav">
-  <span style="color:#f0f6fc;font-weight:600;">Token Inventory</span>
-  <a href="/">&larr; Back to Dashboard</a>
+<div class="inv-nav">
+  <span class="nav-title">Token Inventory</span>
+  <a href="/">&larr; Dashboard</a>
 </div>
 
-<main class="container">
+<main class="inv-container">
   <section class="section">
     <div class="stats-row" id="stats-row">
       <div class="stat-card"><div class="stat-value" id="stat-total">-</div><div class="stat-label">Total Tokens</div></div>
@@ -51,11 +54,11 @@ tr:hover td { background: #161b22; }
     </div>
 
     <div class="toolbar">
-      <button id="scan-btn" style="background:#1f6feb">Scan Now</button>
-      <button id="drift-btn" style="background:#8957e5">Check Drift</button>
+      <button id="scan-btn" class="scan-btn">Scan Now</button>
+      <button id="drift-btn" style="color:#8957e5;border-color:rgba(137,87,229,0.2);">Check Drift</button>
     </div>
     <div id="scan-status"></div>
-    <div id="drift-results" style="display:none;margin-bottom:1rem;"></div>
+    <div id="drift-results" style="display:none;margin-bottom:0.875rem;"></div>
   </section>
 
   <section class="section">
@@ -75,7 +78,7 @@ tr:hover td { background: #161b22; }
           </tr>
         </thead>
         <tbody id="token-tbody">
-          <tr><td colspan="8" style="text-align:center;color:#8b949e;font-style:italic;">Loading...</td></tr>
+          <tr><td colspan="8" class="empty" style="text-align:center;">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -93,9 +96,14 @@ tr:hover td { background: #161b22; }
       headers: {
         'Content-Type': 'application/json',
         ...(options?.headers || {}),
+        ...(window.__csrfToken ? { 'X-CSRF-Token': window.__csrfToken } : {}),
       },
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        window.location.href = '/';
+        return;
+      }
       const body = await res.json().catch(function () { return {} });
       throw new Error(body.error || 'Request failed (' + res.status + ')');
     }
@@ -147,9 +155,9 @@ tr:hover td { background: #161b22; }
       '<td><span class="token-type ' + escapeHtml(token.tokenType) + '">' + escapeHtml(token.tokenType) + '</span></td>' +
       '<td><div class="scope-list">' + scopesDisplay + '</div></td>' +
       '<td><span class="' + riskClass(token.riskScore) + '">' + escapeHtml(token.riskScore) + '</span></td>' +
-      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.firstSeenAt) + '</td>' +
-      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.lastSeenAt) + '</td>' +
-      '<td style="color:#8b949e;font-size:0.8rem;">' + formatDate(token.expiresAt) + '</td>' +
+      '<td>' + formatDate(token.firstSeenAt) + '</td>' +
+      '<td>' + formatDate(token.lastSeenAt) + '</td>' +
+      '<td>' + formatDate(token.expiresAt) + '</td>' +
       '<td><button class="delete-btn" data-id="' + token.id + '">Delete</button></td>';
 
     return tr;
@@ -160,7 +168,7 @@ tr:hover td { background: #161b22; }
     try {
       var tokens = await api('/api/inventory/tokens');
       if (tokens.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#8b949e;font-style:italic;">No tokens in inventory.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty" style="text-align:center;">No tokens in inventory.</td></tr>';
       } else {
         tbody.innerHTML = '';
         tokens.forEach(function (token) {
@@ -179,7 +187,8 @@ tr:hover td { background: #161b22; }
         });
       }
     } catch (err) {
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#f85149;">Error: ' + escapeHtml(err.message) + '</td></tr>';
+      if (err.message === 'Authentication required') return;
+      tbody.innerHTML = '<tr><td colspan="8" class="empty" style="text-align:center;color:#f0253a;">Error: ' + escapeHtml(err.message) + '</td></tr>';
     }
   }
 
@@ -191,7 +200,7 @@ tr:hover td { background: #161b22; }
       document.getElementById('stat-expiring').textContent = stats.expiringSoon || 0;
       document.getElementById('stat-expired').textContent = stats.expired || 0;
     } catch (err) {
-      console.error('Stats load failed', err);
+      if (err.message === 'Authentication required') return;
     }
   }
 
@@ -208,6 +217,7 @@ tr:hover td { background: #161b22; }
       await loadTokens();
       await loadStats();
     } catch (err) {
+      if (err.message === 'Authentication required') return;
       statusEl.textContent = 'Scan failed: ' + err.message;
       statusEl.className = 'status error';
     } finally {
@@ -220,31 +230,32 @@ tr:hover td { background: #161b22; }
     var resultsEl = document.getElementById('drift-results');
     btn.disabled = true;
     resultsEl.style.display = 'block';
-    resultsEl.innerHTML = '<p style="color:#8b949e;">Checking for permission drift...</p>';
+    resultsEl.innerHTML = '<p class="loading-msg">Checking for permission drift...</p>';
     try {
       var drift = await api('/api/inventory/tokens/drift');
       if (drift.length === 0) {
-        resultsEl.innerHTML = '<p style="color:#3fb950;">No permission drift detected.</p>';
+        resultsEl.innerHTML = '<p style="color:#26cd6b;">No permission drift detected.</p>';
       } else {
-        var html = '<h3 style="font-size:0.9rem;margin-bottom:0.5rem;color:#d29922;">Permission Drift Detected</h3>';
+        var html = '<h3 style="font-size:0.72rem;margin-bottom:0.5rem;color:#d29922;text-transform:uppercase;letter-spacing:0.05em;">Permission Drift Detected</h3>';
         drift.forEach(function (d) {
           var cls = d.riskIncreased ? 'risk-critical' : 'risk-high';
-          html += '<div style="padding:0.5rem;margin-bottom:0.5rem;background:#0d1117;border:1px solid #30363d;border-radius:6px;">';
+          html += '<div style="padding:0.5rem;margin-bottom:0.4rem;background:#14161a;border:0.5px solid rgba(255,255,255,0.05);">';
           html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
-          html += '<strong>' + escapeHtml(d.name) + '</strong>';
+          html += '<strong style="color:#e6e8eb;">' + escapeHtml(d.name) + '</strong>';
           html += '<span class="' + cls + '">' + (d.riskIncreased ? 'Risk Increased' : 'Drifted') + '</span>';
           html += '</div>';
-          html += '<div style="font-size:0.8rem;margin-top:0.25rem;color:#8b949e;">';
+          html += '<div style="font-size:0.68rem;margin-top:0.2rem;color:#656b75;">';
           html += 'Stored: ' + (d.storedScopes.length ? d.storedScopes.join(', ') : '(none)');
           html += '</div>';
-          html += '<div style="font-size:0.8rem;color:#8b949e;">';
+          html += '<div style="font-size:0.68rem;color:#656b75;">';
           html += 'Current: ' + (d.currentScopes.length ? d.currentScopes.join(', ') : '(none)');
           html += '</div></div>';
         });
         resultsEl.innerHTML = html;
       }
     } catch (err) {
-      resultsEl.innerHTML = '<p style="color:#f85149;">Drift check failed: ' + escapeHtml(err.message) + '</p>';
+      if (err.message === 'Authentication required') return;
+      resultsEl.innerHTML = '<p style="color:#f0253a;">Drift check failed: ' + escapeHtml(err.message) + '</p>';
     } finally {
       btn.disabled = false;
     }

@@ -7,21 +7,27 @@
 <link rel="stylesheet" href="/style.css">
 <style>
   body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-  .auth-box { text-align: center; max-width: 420px; }
-  .btn { font-size: 1.2rem; padding: 1rem 2rem; }
-  .pr-info { color: #888; margin: 0.5rem 0; }
-  .detail { font-size: 0.85rem; color: #666; margin-top: 0.5rem; }
-  .success-icon { font-size: 3rem; margin-bottom: 0.5rem; }
-  .password-field { margin: 1rem 0; }
-  .password-field input { padding: 0.6rem 1rem; font-size: 1rem; border: 1px solid #444; background: #1a1a1a; color: #ddd; border-radius: 4px; width: 100%; box-sizing: border-box; }
-  .password-field label { display: block; margin-bottom: 0.4rem; color: #888; font-size: 0.85rem; }
+  .auth-wrap { max-width: 400px; width: 100%; margin: 1rem; border: 0.5px solid rgba(255,255,255,0.06); background: #0d0f12; padding: 2rem; text-align: center; }
+  .auth-wrap h1 { font-size: 1rem; font-weight: 500; letter-spacing: 0.15em; text-transform: uppercase; color: #e6e8eb; margin-bottom: 0.5rem; }
+  .auth-wrap .subtitle { color: #656b75; font-size: 0.7rem; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 0.5px solid rgba(255,255,255,0.06); }
+  .auth-wrap .status { margin: 1rem 0 0.5rem; }
+  .auth-wrap .detail { color: #656b75; font-size: 0.72rem; margin-top: 0.5rem; }
+  .auth-wrap .password-field { margin: 1rem 0; text-align: left; }
+  .auth-wrap .password-field input { padding: 0.5rem 0.75rem; font-size: 0.8rem; border: 0.5px solid rgba(255,255,255,0.08); background: #07080a; color: #e6e8eb; border-radius: 0; width: 100%; font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace; outline: none; }
+  .auth-wrap .password-field input:focus { border-color: rgba(255,255,255,0.2); }
+  .auth-wrap .password-field label { display: block; margin-bottom: 0.4rem; color: #656b75; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.65rem; }
+  .auth-wrap .btn { padding: 0.6rem 1.5rem; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; border: 0.5px solid rgba(38,205,107,0.25); color: #26cd6b; background: transparent; cursor: pointer; transition: all 0.15s ease; font-family: 'SF Mono', 'JetBrains Mono', 'Consolas', monospace; }
+  .auth-wrap .btn:hover { background: rgba(38,205,107,0.06); border-color: rgba(38,205,107,0.4); }
+  .auth-wrap .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .auth-wrap .btn:disabled:hover { background: transparent; border-color: rgba(38,205,107,0.25); }
+  #expiry-countdown { font-size: 0.72rem; color: #d29922; margin-bottom: 0.75rem; }
 </style>
 </head>
 <body>
-  <div class="auth-box">
+  <div class="auth-wrap">
     <h1>Sentinel Oracle</h1>
     <p class="subtitle">Authorize Merge</p>
-    <div id="expiry-countdown" style="font-size:0.9rem;color:#d29922;margin-bottom:0.5rem;"></div>
+    <div id="expiry-countdown"></div>
     <div id="status" class="status"></div>
     <div id="details" class="detail"></div>
     <div class="password-field">
@@ -69,15 +75,14 @@
     if (!challengeId || !prNumber) {
       setStatus('Invalid authorization link', 'error');
     } else {
-      // Countdown timer (fetch challenge expiry from storage via hidden field or endpoint)
-      let expireAt = Date.now() + 120000; // fallback 2 min
+      let expireAt = Date.now() + 120000;
       document.getElementById('expiry-countdown').textContent = 'Expires in ' + Math.round((expireAt - Date.now()) / 1000) + 's';
       const countdownInterval = setInterval(() => {
         const remaining = Math.round((expireAt - Date.now()) / 1000);
         if (remaining <= 0) {
           clearInterval(countdownInterval);
           document.getElementById('expiry-countdown').textContent = 'Expired';
-          document.getElementById('expiry-countdown').style.color = '#f85149';
+          document.getElementById('expiry-countdown').style.color = '#f0253a';
           setStatus('Authorization link expired. Please scan a new QR code.', 'error');
           document.getElementById('confirm-btn').disabled = true;
         } else {
@@ -85,7 +90,6 @@
         }
       }, 1000);
 
-      // Check if authorization password is configured
       let passwordRequired = false;
       fetch('/api/status').then(r => r.json()).then(s => {
         passwordRequired = !!s.passwordRequired;
@@ -141,11 +145,11 @@
         }).then(r => r.json());
 
         if (result.authorized && result.merged) {
-          setStatus('✓ Merge completed successfully!', 'success');
+          setStatus('Merge completed successfully', 'success');
           showDetail('PR #' + prNumber + ' has been merged to main');
           btn.style.display = 'none';
         } else if (result.authorized) {
-          setStatus('✓ Authorization granted', 'success');
+          setStatus('Authorization granted', 'success');
           showDetail('PR #' + prNumber + ' has been authorized (merge pending)');
           btn.style.display = 'none';
         } else {
@@ -154,7 +158,7 @@
             setStatus('This QR code has already been used', 'error');
             showDetail('If the PR was already merged, check the dashboard. Otherwise, start a new authorization.');
           } else {
-            setStatus('✗ ' + err, 'error');
+            setStatus(err, 'error');
           }
           btn.disabled = false;
         }
@@ -163,7 +167,7 @@
           setStatus('Authentication cancelled', 'error');
           btn.disabled = false;
         } else {
-          setStatus('✗ ' + (err.message || 'Connection failed'), 'error');
+          setStatus(err.message || 'Connection failed', 'error');
           btn.disabled = false;
         }
       }

@@ -51,13 +51,6 @@ export function requireAuth() {
 
     sessionDb.touchSession(cookieData.id)
 
-    const ua = req.headers['user-agent'] || ''
-    if (dbSession.userAgent && ua && dbSession.userAgent !== ua) {
-      sessionDb.deleteSession(cookieData.id)
-      res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' })
-      return res.status(401).json({ error: 'Session user-agent changed', code: 'UA_MISMATCH' })
-    }
-
     const session: SessionData = {
       id: dbSession.id,
       credentialId: dbSession.credentialId,
@@ -100,7 +93,7 @@ export function createSessionCookie(credentialId: string, deviceName: string, us
       secure: true,
       sameSite: 'strict' as const,
       path: '/',
-      maxAge: SESSION_TTL_MS / 1000,
+      maxAge: SESSION_TTL_MS,
       signed: true,
     },
   }

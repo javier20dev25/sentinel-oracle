@@ -46,7 +46,6 @@
   }
 
   async function api(path, options = {}) {
-    // Auto-include CSRF token for mutating requests
     if (!options.method || options.method === 'POST' || options.method === 'PUT' || options.method === 'DELETE' || options.method === 'PATCH') {
       if (!options.headers) options.headers = {}
       if (!options.headers['X-CSRF-Token'] && window.__csrfToken) {
@@ -62,6 +61,11 @@
         },
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          handleUnauthenticated()
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || 'Authentication required')
+        }
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `Request failed (${res.status})`);
       }
@@ -73,6 +77,27 @@
       }
       throw err
     }
+  }
+
+  function handleUnauthenticated() {
+    authenticated = false
+    window.__csrfToken = null
+    const prevPanel = currentPanel
+    showPanel('auth-section')
+    const p = document.querySelector('#auth-section p')
+    if (p) p.textContent = 'Session expired — please re-authenticate with your passkey'
+    // Schedule a session re-check to recover from transient failures
+    setTimeout(function () {
+      if (!authenticated) {
+        api('/api/session/check').then(function (s) {
+          if (s.authenticated) {
+            authenticated = true
+            showPanel(prevPanel || 'pr-section')
+            loadPRs()
+          }
+        }).catch(function () {})
+      }
+    }, 3000)
   }
 
   function show(id) {
@@ -106,55 +131,21 @@
     } catch (e) {}
 
     if (status.setupRequired) {
-      show('enrollment-section');
-      const enrollToken = new URLSearchParams(window.location.search).get('enroll');
-      if (enrollToken) {
-        document.getElementById('enrollment-token').value = enrollToken;
-        document.getElementById('enrollment-btn').click();
-      }
-      hide('setup-section');
-      hide('auth-section');
-      hide('pr-section');
-      hide('devices-section');
-      hide('lockdown-section');
-      hide('auth-mode-section');
-      hide('branch-protection-section');
-      hide('metrics-section');
-      hide('webhook-section');
+      showPanel('enrollment-section');
     } else if (!devicesRegistered) {
-      show('setup-section');
-      hide('enrollment-section');
-      hide('auth-section');
-      hide('pr-section');
-      hide('devices-section');
-      hide('lockdown-section');
-      hide('auth-mode-section');
-      hide('branch-protection-section');
-      hide('metrics-section');
-      hide('webhook-section');
+      showPanel('setup-section');
     } else if (!authenticated) {
-      show('auth-section');
-      hide('setup-section');
-      hide('pr-section');
-      hide('devices-section');
-      hide('lockdown-section');
-      hide('auth-mode-section');
-      hide('branch-protection-section');
-      hide('metrics-section');
-      hide('webhook-section');
+      showPanel('auth-section');
     } else {
-        show('pr-section');
-        show('devices-section');
-        show('lockdown-section');
-        show('token-section');
-        show('auth-mode-section');
-        show('branch-protection-section');
-        show('metrics-section');
-        show('webhook-section');
-        hide('enrollment-section');
-        hide('setup-section');
-        hide('auth-section');
+      showPanel('pr-section');
         await loadPRs();
+        panelsLoaded['devices-section'] = true
+        panelsLoaded['token-section'] = true
+        panelsLoaded['auth-mode-section'] = true
+        panelsLoaded['branch-protection-section'] = true
+        panelsLoaded['metrics-section'] = true
+        panelsLoaded['webhook-section'] = true
+        panelsLoaded['history-section'] = true
         await loadDevices();
         await loadTokenInfo();
         await loadAuthMode();
@@ -342,18 +333,15 @@
           window.__csrfToken = r.csrfToken;
         } catch (e) {}
         setStatus('auth-status', 'Authenticated successfully!', 'success');
-        hide('auth-section');
-        hide('enrollment-section');
-        show('pr-section');
-        show('devices-section');
-        show('lockdown-section');
-        show('token-section');
-        show('auth-mode-section');
-        show('branch-protection-section');
-        show('metrics-section');
-        show('admin-section');
-        show('webhook-section');
+        showPanel('pr-section');
         await loadPRs();
+        panelsLoaded['devices-section'] = true
+        panelsLoaded['token-section'] = true
+        panelsLoaded['auth-mode-section'] = true
+        panelsLoaded['branch-protection-section'] = true
+        panelsLoaded['metrics-section'] = true
+        panelsLoaded['webhook-section'] = true
+        panelsLoaded['history-section'] = true
         await loadDevices();
         await loadTokenInfo();
         await loadAuthMode();
@@ -406,23 +394,27 @@
           card.id = 'pr-card-' + pr.prNumber;
           card.className = 'pr-card';
           card.innerHTML = `
-            <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
-            <div class="meta">${escapeHtml(pr.author)} &middot; ${new Date(pr.createdAt).toLocaleString()}</div>
-            <div class="status-row">
-              <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
-              <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
-              <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
+            <div class="pr-card-split">
+              <div class="pr-card-info">
+                <h3>#${pr.prNumber}: ${escapeHtml(pr.title)}</h3>
+                <div class="meta">${escapeHtml(pr.author)} &middot; ${new Date(pr.createdAt).toLocaleString()}</div>
+                <div class="status-row">
+                  <span class="badge ${pr.ciStatus}">CI: ${pr.ciStatus}</span>
+                  <span class="badge ${pr.sentinelStatus}">Sentinel: ${pr.sentinelStatus}</span>
+                  <span class="badge ${pr.authStatus}">Auth: ${pr.authStatus}</span>
+                </div>
+                <div class="actions">
+                  <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
+                  <button class="direct-auth-btn" data-pr="${pr.prNumber}">Authorize (Same Device)</button>
+                  <button class="reject-btn" data-pr="${pr.prNumber}">Reject</button>
+                  ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}">Scan</button>` : ''}
+                </div>
+                <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
+                <button class="checks-toggle-btn" data-pr="${pr.prNumber}">Show Checks</button>
+                <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
+              </div>
+              <div class="pr-card-scan-panel" id="scan-panel-${pr.prNumber}"></div>
             </div>
-            <div class="actions">
-              <button class="auth-btn" data-pr="${pr.prNumber}">Authorize</button>
-              <button class="direct-auth-btn" data-pr="${pr.prNumber}" style="background:#2ea043">Authorize (Same Device)</button>
-              <button class="reject-btn" data-pr="${pr.prNumber}" style="background:#da3633">Reject</button>
-              ${currentStatus?.scanEnabled ? `<button class="scan-btn" data-pr="${pr.prNumber}" style="background:#1f6feb">Scan</button>` : ''}
-            </div>
-            <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
-            <div class="scan-results" id="scan-results-${pr.prNumber}" style="display:none"></div>
-            <button class="checks-toggle-btn" data-pr="${pr.prNumber}" style="margin-top:0.5rem;font-size:0.8rem;background:transparent;border:1px solid #30363d;">Show Checks</button>
-            <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
           `;
           prList.appendChild(card);
         }
@@ -460,12 +452,10 @@
     const historyList = document.getElementById('history-list');
     try {
       const prs = await api('/api/prs/history');
-      const section = document.getElementById('history-section');
       if (prs.length === 0) {
-        section.style.display = 'none';
+        historyList.innerHTML = '<p class="empty">No authorization history yet.</p>';
         return;
       }
-      section.style.display = 'block';
       historyList.innerHTML = '';
       for (const pr of prs) {
         const card = document.createElement('div');
@@ -552,7 +542,7 @@
 
       setStatus('pr-list', 'Touch your passkey to authorize...', 'info');
 
-      const credential = await navigator.credentials.get({ publicKey: prepareOptions(options) });
+      const credential = await navigator.credentials.get({ publicKey: prepareWebAuthnOptions(options) });
 
       setStatus('pr-list', 'Verifying authorization...', 'info');
 
@@ -602,11 +592,11 @@
   }
 
   async function scanPR(prNumber, btn) {
-    const resultsEl = document.getElementById(`scan-results-${prNumber}`);
-    if (!resultsEl) {
+    const scanPanel = document.getElementById(`scan-panel-${prNumber}`);
+    if (!scanPanel) {
       btn.disabled = false
       btn.textContent = 'Scan (error)'
-      console.error('Scan results element not found for PR #' + prNumber)
+      console.error('Scan panel not found for PR #' + prNumber)
       return
     }
     btn.disabled = true;
@@ -616,7 +606,7 @@
       const result = await api(`/api/prs/${prNumber}/scan`, { method: 'POST' });
       const severityClass = result.critical > 0 || result.high > 0 ? 'scan-critical' : result.medium > 0 ? 'scan-warning' : 'scan-clean';
       const severityLabel = result.critical > 0 ? 'CRITICAL' : result.high > 0 ? 'HIGH' : result.medium > 0 ? 'MEDIUM' : 'LOW';
-      resultsEl.innerHTML = `
+      scanPanel.innerHTML = `
         <div class="scan-header ${severityClass}">
           <span class="scan-risk-badge">Risk: ${result.riskScore} (${severityLabel})</span>
           <span>${result.critical}C ${result.high}H ${result.medium}M ${result.low}L</span>
@@ -631,21 +621,19 @@
                   <p>${escapeHtml(f.description)}</p>
                   ${f.file ? `<code>${escapeHtml(f.file)}${f.line != null ? ':' + f.line : ''}</code>` : ''}
                   ${f.code ? `<pre class="finding-code"><code>${escapeHtml(f.code)}</code></pre>` : ''}
-                  ${f.prUrl ? `<a href="${escapeHtml(f.prUrl)}" target="_blank" class="btn finding-pr-link" style="display:inline-block;margin-top:0.3rem;padding:0.2rem 0.5rem;font-size:0.75rem;background:#1f6feb;color:#fff;border-radius:4px;text-decoration:none;">View in PR</a>` : ''}
+                  ${f.prUrl ? `<a href="${escapeHtml(f.prUrl)}" target="_blank" class="btn finding-pr-link">View in PR</a>` : ''}
                 </div>
               </div>
             `).join('')}
           </div>
         ` : '<p class="scan-clean-msg">No issues detected in this PR.</p>'}
       `;
-      resultsEl.style.display = 'block';
+      scanPanel.classList.add('active');
       btn.textContent = 'Re-scan';
     } catch (err) {
       console.error('Scan failed for PR #' + prNumber + ':', err)
-      if (resultsEl) {
-        resultsEl.innerHTML = `<div class="scan-header scan-critical">Scan failed: ${escapeHtml(err.message)}</div>`;
-        resultsEl.style.display = 'block';
-      }
+      scanPanel.innerHTML = `<div class="scan-header scan-critical">Scan failed: ${escapeHtml(err.message)}</div>`;
+      scanPanel.classList.add('active');
       btn.textContent = 'Scan';
     } finally {
       btn.disabled = false;
@@ -671,7 +659,7 @@
         div.innerHTML = `
           <span><strong>${escapeHtml(device.name)}</strong></span>
           <span class="meta">Registered ${new Date(device.createdAt).toLocaleDateString()}</span>
-          <button class="revoke-btn" data-credential="${device.credentialId}" style="background:#da3633;margin-left:auto;">Revoke</button>
+          <button class="revoke-btn" data-credential="${device.credentialId}">Revoke</button>
         `;
         deviceList.appendChild(div);
       }
@@ -873,10 +861,10 @@
       const overallClass = hasIssues ? 'error' : 'success';
       const overallText = hasIssues ? 'Issues Found' : 'Secure';
 
-      let html = '<div class="token-header"><span class="badge risk-badge ' + overallClass + '" style="font-size:0.9rem;padding:0.3rem 0.8rem;">' + overallText + '</span></div>';
+      let html = '<div class="token-header"><span class="badge risk-badge ' + overallClass + ' overall-badge">' + overallText + '</span></div>';
 
       if (data.issues && data.issues.length > 0) {
-        html += '<ul class="risk-reasons" style="margin-bottom:0.75rem;">';
+        html += '<ul class="risk-reasons">';
         data.issues.forEach(function (issue) {
           html += '<li>' + escapeHtml(issue) + '</li>';
         });
@@ -910,64 +898,64 @@
       return;
     }
     try {
-      section.innerHTML = '<p style="padding:0.5rem;color:#8b949e;">Loading checks...</p>';
+      section.innerHTML = '<p class="loading-msg">Loading checks...</p>';
       section.style.display = 'block';
       btn.textContent = 'Hide Checks';
 
       const data = await api('/api/prs/' + prNumber + '/checks');
 
-      let html = '<div style="padding:0.75rem 0;font-size:0.85rem;">';
-      html += '<table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid #30363d;">';
-      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Check</th>';
-      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Conclusion</th>';
-      html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Duration</th></tr></thead><tbody>';
+      let html = '<div class="checks-table">';
+      html += '<table><thead><tr>';
+      html += '<th>Check</th>';
+      html += '<th>Conclusion</th>';
+      html += '<th>Duration</th></tr></thead><tbody>';
 
       if (data.checks && data.checks.length > 0) {
         var ciChecks = 0
         data.checks.forEach(function (check) {
           var conclusionClass = check.conclusion === 'success' ? 'success' : check.conclusion === 'failure' ? 'error' : 'warning';
-          html += '<tr style="border-bottom:1px solid #21262d;">';
-          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(check.name) + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;"><span class="badge ' + conclusionClass + '">' + escapeHtml(check.conclusion || 'pending') + '</span></td>';
-          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (check.durationMs != null ? Math.round(check.durationMs / 1000) + 's' : check.duration ? check.duration + 's' : '-') + '</td>';
+          html += '<tr>';
+          html += '<td>' + escapeHtml(check.name) + '</td>';
+          html += '<td><span class="badge ' + conclusionClass + '">' + escapeHtml(check.conclusion || 'pending') + '</span></td>';
+          html += '<td class="duration">' + (check.durationMs != null ? Math.round(check.durationMs / 1000) + 's' : check.duration ? check.duration + 's' : '-') + '</td>';
           html += '</tr>';
           if (check.name !== 'Sentinel Authorization' && check.name !== 'Vercel Preview Comments') ciChecks++
         });
         if (ciChecks === 0) {
-          html += '<tr><td colspan="3" style="padding:0.5rem;color:#8b949e;font-style:italic;">No CI workflows ran for this PR commit (workflow may have been added after PR creation)</td></tr>';
+          html += '<tr><td colspan="3" class="empty">No CI workflows ran for this PR commit (workflow may have been added after PR creation)</td></tr>';
         }
       } else {
-        html += '<tr><td colspan="3" style="padding:0.5rem;color:#8b949e;">No checks found</td></tr>';
+        html += '<tr><td colspan="3" class="empty">No checks found</td></tr>';
       }
       html += '</tbody></table>';
 
       if (data.diff) {
-        html += '<div class="token-detail" style="margin-top:0.5rem;"><span class="token-label">Diff</span>';
-        html += '<span>' + data.diff.files + ' files changed, <span style="color:#3fb950;">+' + data.diff.additions + '</span> <span style="color:#f85149;">-' + data.diff.deletions + '</span></span>';
+        html += '<div class="token-detail diff-section"><span class="token-label">Diff</span>';
+        html += '<span>' + data.diff.files + ' files changed, <span class="additions">+' + data.diff.additions + '</span> <span class="deletions">-' + data.diff.deletions + '</span></span>';
         html += '</div>';
 
         if (data.diff.fileDetails && data.diff.fileDetails.length > 0) {
-          html += '<div style="margin-top:0.5rem;font-size:0.8rem;">';
-          html += '<span class="token-label files-toggle" data-target="files-detail-' + prNumber + '" style="cursor:pointer;">Files per file &#9660;</span>';
-          html += '<div id="files-detail-' + prNumber + '" style="display:none;margin-top:0.3rem;">';
-          html += '<table style="width:100%;border-collapse:collapse;"><thead><tr style="border-bottom:1px solid #30363d;">';
-          html += '<th style="text-align:left;padding:0.2rem 0.4rem;color:#8b949e;">File</th>';
-          html += '<th style="text-align:right;padding:0.2rem 0.4rem;color:#8b949e;">+/−</th>';
-          html += '<th style="text-align:right;padding:0.2rem 0.4rem;color:#8b949e;">KB</th>';
-          html += '<th style="text-align:right;padding:0.2rem 0.4rem;color:#8b949e;">Chg</th>';
+          html += '<div class="files-section">';
+          html += '<span class="token-label files-toggle" data-target="files-detail-' + prNumber + '">Files per file &#9660;</span>';
+          html += '<div id="files-detail-' + prNumber + '" class="files-detail">';
+          html += '<table><thead><tr>';
+          html += '<th class="file-col">File</th>';
+          html += '<th class="num-col">+/−</th>';
+          html += '<th class="num-col">KB</th>';
+          html += '<th class="num-col">Chg</th>';
           html += '</tr></thead><tbody>';
           var maxKB = 0
           data.diff.fileDetails.forEach(function (f) { if (f.sizeBytes > maxKB) maxKB = f.sizeBytes })
           data.diff.fileDetails.forEach(function (f) {
             var kb = (f.sizeBytes / 1024).toFixed(1)
-            var isMax = f.sizeBytes === maxKB && maxKB > 0 ? ' style="color:#f85149;font-weight:bold;"' : ''
-            html += '<tr style="border-bottom:1px solid #21262d;">';
-            html += '<td style="padding:0.2rem 0.4rem;word-break:break-all;">' + escapeHtml(f.filename);
-            html += ' <span class="file-history-btn" data-pr="' + prNumber + '" data-file="' + escapeHtml(f.filename) + '" style="cursor:pointer;color:#58a6ff;font-size:0.75em;">[chart]</span>';
+            var isMaxClass = f.sizeBytes === maxKB && maxKB > 0 ? ' max-file' : ''
+            html += '<tr class="file-row' + isMaxClass + '">';
+            html += '<td class="file-col">' + escapeHtml(f.filename);
+            html += ' <span class="file-history-btn" data-pr="' + prNumber + '" data-file="' + escapeHtml(f.filename) + '">[chart]</span>';
             html += '</td>';
-            html += '<td style="padding:0.2rem 0.4rem;text-align:right;color:#3fb950;">+' + f.additions + ' <span style="color:#f85149;">−' + f.deletions + '</span></td>';
-            html += '<td style="padding:0.2rem 0.4rem;text-align:right;"' + isMax + '>' + kb + '</td>';
-            html += '<td style="padding:0.2rem 0.4rem;text-align:right;color:#8b949e;">' + f.changes + '</td>';
+            html += '<td class="num-col add">+' + f.additions + ' <span class="del">−' + f.deletions + '</span></td>';
+            html += '<td class="num-col kb' + isMaxClass + '">' + kb + '</td>';
+            html += '<td class="num-col chg">' + f.changes + '</td>';
             html += '</tr>';
           });
           html += '</tbody></table></div></div>';
@@ -975,12 +963,12 @@
       }
 
       if (data.history && data.history.length > 0) {
-        html += '<div style="margin-top:0.5rem;font-size:0.8rem;">';
-        html += '<span class="token-label" style="color:#d29922;">Historical avg for ' + escapeHtml(data.history[0].filename) + '</span>';
+        html += '<div class="history-summary">';
+        html += '<span class="token-label hist-label">Historical avg for ' + escapeHtml(data.history[0].filename) + '</span>';
         var avgAdd = Math.round(data.history.reduce(function (s, h) { return s + h.additions }, 0) / data.history.length)
         var avgDel = Math.round(data.history.reduce(function (s, h) { return s + h.deletions }, 0) / data.history.length)
-        html += '<span style="margin-left:0.5rem;color:#3fb950;">+' + avgAdd + '</span> <span style="color:#f85149;">−' + avgDel + '</span>';
-        html += '<span style="margin-left:0.5rem;color:#8b949e;">over ' + data.history.length + ' past PRs</span>';
+        html += '<span class="additions">+' + avgAdd + '</span> <span class="deletions">−' + avgDel + '</span>';
+        html += '<span class="over-label">over ' + data.history.length + ' past PRs</span>';
         html += '</div>';
       }
 
@@ -1004,16 +992,12 @@
           }
           var div = document.createElement('div')
           div.id = containerId
-          div.style.marginTop = '0.3rem'
-          div.style.padding = '0.3rem'
-          div.style.background = '#161b22'
-          div.style.borderRadius = '4px'
-          div.style.fontSize = '0.75rem'
-          div.innerHTML = '<span style="color:#8b949e;">Loading history...</span>'
+          div.className = 'chart-container'
+          div.innerHTML = '<span class="loading-msg">Loading history...</span>'
           this.parentElement.appendChild(div)
           api('/api/prs/' + pr + '/file-history/' + encodeURIComponent(file)).then(function (data) {
             if (!data.history || data.history.length < 2) {
-              div.innerHTML = '<span style="color:#8b949e;">Not enough historical data for this file</span>'
+              div.innerHTML = '<span class="loading-msg">Not enough historical data for this file</span>'
               return
             }
             var hist = data.history
@@ -1042,8 +1026,8 @@
             var dotR = n > 40 ? 1.5 : 3
             var fill = n > 40 ? '#58a6ff' : '#58a6ff'
 
-            var svg = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" style="display:block;">'
-            svg += '<rect width="100%" height="100%" fill="#0d1117" rx="4"/>'
+            var svg = '<svg width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '" xmlns="http://www.w3.org/2000/svg" class="chart-svg">'
+            svg += '<rect width="100%" height="100%" fill="#07080a" rx="2"/>'
             svg += '<text x="' + (w / 2) + '" y="12" text-anchor="middle" fill="#8b949e" font-size="10">Changes: ' + escapeHtml(file) + '</text>'
 
             var yTicks = 4
@@ -1068,7 +1052,7 @@
             svg += '</svg>'
             div.innerHTML = svg
           }).catch(function (err) {
-            div.innerHTML = '<span style="color:#f85149;">Error: ' + escapeHtml(err.message) + '</span>'
+            div.innerHTML = '<span class="error-msg">Error: ' + escapeHtml(err.message) + '</span>'
           })
         })
       })
@@ -1085,7 +1069,7 @@
     try {
       const data = await api('/api/metrics');
 
-      let html = '<div class="token-header" style="flex-wrap:wrap;gap:0.75rem;">';
+      let html = '<div class="metrics-header">';
       html += '<span class="badge scope-badge low"><strong>Total PRs:</strong> ' + (data.totalPrs || 0) + '</span>';
       html += '<span class="badge scope-badge low"><strong>Pending:</strong> ' + (data.pending || 0) + '</span>';
       html += '<span class="badge scope-badge low"><strong>Authorized:</strong> ' + (data.authorized || 0) + '</span>';
@@ -1094,33 +1078,33 @@
       html += '</div>';
 
       if (data.recentMergeTimes && data.recentMergeTimes.length > 0) {
-        html += '<h3 style="font-size:0.9rem;margin:0.75rem 0 0.5rem;color:#f0f6fc;">Recent Merge Times</h3>';
-        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;"><thead><tr style="border-bottom:1px solid #30363d;">';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">PR #</th>';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Title</th>';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Wait Time</th></tr></thead><tbody>';
+        html += '<h3 class="metrics-subhead">Recent Merge Times</h3>';
+        html += '<table class="metrics-table"><thead><tr>';
+        html += '<th>PR #</th>';
+        html += '<th>Title</th>';
+        html += '<th>Wait Time</th></tr></thead><tbody>';
         data.recentMergeTimes.forEach(function (m) {
-          html += '<tr style="border-bottom:1px solid #21262d;">';
-          html += '<td style="padding:0.3rem 0.5rem;">#' + m.prNumber + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(m.title) + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (m.waitTime || '-') + '</td></tr>';
+          html += '<tr>';
+          html += '<td>#' + m.prNumber + '</td>';
+          html += '<td>' + escapeHtml(m.title) + '</td>';
+          html += '<td class="wait">' + (m.waitTime || '-') + '</td></tr>';
         });
         html += '</tbody></table>';
       }
 
       if (data.authorStats && data.authorStats.length > 0) {
-        html += '<h3 style="font-size:0.9rem;margin:0.75rem 0 0.5rem;color:#f0f6fc;">Author Stats</h3>';
-        html += '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;"><thead><tr style="border-bottom:1px solid #30363d;">';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Author</th>';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Merged</th>';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Rejected</th>';
-        html += '<th style="text-align:left;padding:0.3rem 0.5rem;color:#8b949e;">Avg Wait</th></tr></thead><tbody>';
+        html += '<h3 class="metrics-subhead">Author Stats</h3>';
+        html += '<table class="metrics-table"><thead><tr>';
+        html += '<th>Author</th>';
+        html += '<th>Merged</th>';
+        html += '<th>Rejected</th>';
+        html += '<th>Avg Wait</th></tr></thead><tbody>';
         data.authorStats.forEach(function (a) {
-          html += '<tr style="border-bottom:1px solid #21262d;">';
-          html += '<td style="padding:0.3rem 0.5rem;">' + escapeHtml(a.author) + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;">' + (a.merged || 0) + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;">' + (a.rejected || 0) + '</td>';
-          html += '<td style="padding:0.3rem 0.5rem;color:#8b949e;">' + (a.avgWait || '-') + '</td></tr>';
+          html += '<tr>';
+          html += '<td>' + escapeHtml(a.author) + '</td>';
+          html += '<td>' + (a.merged || 0) + '</td>';
+          html += '<td>' + (a.rejected || 0) + '</td>';
+          html += '<td class="wait">' + (a.avgWait || '-') + '</td></tr>';
         });
         html += '</tbody></table>';
       }
@@ -1155,15 +1139,61 @@
     }
   }
 
+  // Panel navigation
+  let currentPanel = null
+  let panelsLoaded = {}
+  function showPanel(id) {
+    document.querySelectorAll('.panel').forEach(function (p) { p.style.display = 'none' })
+    if (!id) return
+    const target = document.getElementById(id)
+    if (target) {
+      target.style.display = 'block'
+      currentPanel = id
+      // Lazy-load panel data if not loaded yet
+      if (!panelsLoaded[id] && authenticated) {
+        panelsLoaded[id] = true
+        switch (id) {
+          case 'devices-section': loadDevices(); break
+          case 'token-section': loadTokenInfo(); break
+          case 'auth-mode-section': loadAuthMode(); break
+          case 'branch-protection-section': loadBranchProtection(); break
+          case 'metrics-section': loadMetrics(); break
+          case 'webhook-section': loadWebhookInfo(); break
+          case 'history-section': loadHistory(); break
+          case 'audit-section': loadAudit(); break
+        }
+      }
+    }
+    document.querySelectorAll('.nav-item').forEach(function (n) { n.classList.toggle('active', n.dataset.target === id) })
+    const sidebar = document.getElementById('sidebar')
+    if (sidebar && window.innerWidth <= 768) {
+      sidebar.classList.remove('open')
+    }
+  }
+
+  // Sidebar navigation
+  document.querySelectorAll('.nav-item').forEach(function (item) {
+    item.addEventListener('click', function () {
+      const targetId = this.dataset.target
+      if (targetId) showPanel(targetId)
+    })
+  })
+
+  document.getElementById('sidebar-toggle').addEventListener('click', function () {
+    const sidebar = document.getElementById('sidebar')
+    sidebar.classList.toggle('collapsed')
+    this.textContent = sidebar.classList.contains('collapsed') ? '\u00bb' : '\u00ab'
+  })
+
   // Init
-  checkSetup();
+  checkSetup()
 
   document.getElementById('backfill-btn').addEventListener('click', function () {
     var statusEl = document.getElementById('backfill-status')
     var btn = this
-    statusEl.textContent = 'Starting...'
-    statusEl.style.color = '#8b949e'
-    btn.disabled = true
+      statusEl.textContent = 'Starting...'
+      statusEl.className = 'status info'
+      btn.disabled = true
     api('/api/admin/backfill-history', { method: 'POST' }).then(function (data) {
       statusEl.textContent = 'Backfill running... 0 / ?'
       // poll progress
@@ -1174,7 +1204,7 @@
             btn.disabled = false
             var msg = s.total + ' PRs processed' + (s.errors ? ', ' + s.errors + ' errors' : '')
             statusEl.textContent = msg
-            statusEl.style.color = s.errors ? '#f0883e' : '#3fb950'
+            statusEl.className = 'status ' + (s.errors ? 'error' : 'success')
             if (s.lastError) statusEl.title = s.lastError
             return
           }
@@ -1185,12 +1215,13 @@
       }, 3000)
     }).catch(function (err) {
       statusEl.textContent = 'Error: ' + escapeHtml(err.message)
-      statusEl.style.color = '#f85149'
+      statusEl.className = 'status error'
       btn.disabled = false
     })
   })
 
   loadAudit();
+  panelsLoaded['audit-section'] = true
   setInterval(loadPRs, 15000);
   setInterval(loadAudit, 30000);
   setInterval(loadMetrics, 60000);

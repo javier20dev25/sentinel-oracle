@@ -57,7 +57,7 @@ describe('GitHubAppAuth', () => {
     })
 
     it('throws if privateKeyPath is empty', () => {
-      expect(() => new GitHubAppAuth({ ...config, privateKeyPath: '' })).toThrow('GitHub App requires')
+      expect(() => new GitHubAppAuth({ ...config, privateKeyPath: '' })).toThrow('private key not found')
     })
 
     it('throws if private key file does not exist', () => {

@@ -7,14 +7,53 @@
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header class="header">
-  <h1>Sentinel Oracle</h1>
-  <p class="subtitle">Secure Merge Authorization Server</p>
-  <div id="lockdown-banner" class="lockdown-banner" style="display:none">⚠ SYSTEM LOCKED DOWN — No authorizations will be processed</div>
-</header>
+<nav id="sidebar" class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">SENTINEL<br>ORACLE</div>
+    <div id="conn-indicator" class="conn-ok" title="Connected"></div>
+  </div>
+  <div class="sidebar-nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Operations</div>
+      <a class="nav-item active" data-target="pr-section">Pull Requests</a>
+      <a class="nav-item" data-target="history-section">History</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Devices</div>
+      <a class="nav-item" data-target="devices-section">Registered Devices</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Security</div>
+      <a class="nav-item" data-target="lockdown-section">Lockdown</a>
+      <a class="nav-item" data-target="auth-mode-section">Auth Mode</a>
+      <a class="nav-item" data-target="branch-protection-section">Branch Protection</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Monitoring</div>
+      <a class="nav-item" data-target="metrics-section">Metrics</a>
+      <a class="nav-item" data-target="audit-section">Audit Log</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Configuration</div>
+      <a class="nav-item" data-target="password-section">Password</a>
+      <a class="nav-item" data-target="webhook-section">Webhook</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Admin</div>
+      <a class="nav-item" data-target="token-section">Token Inspector</a>
+      <a class="nav-item" data-target="admin-section">Backfill</a>
+    </div>
+  </div>
+  <div class="sidebar-footer">
+    <span class="sidebar-version">v1.0.0</span>
+    <button id="sidebar-toggle" class="sidebar-collapse-btn" title="Toggle sidebar">&laquo;</button>
+  </div>
+</nav>
 
-<main class="container">
-  <section id="enrollment-section" class="section" style="display:none">
+<main id="main-content" class="main-content">
+  <div id="lockdown-banner" class="lockdown-banner" style="display:none">SYSTEM LOCKED DOWN — No authorizations will be processed</div>
+
+  <section id="enrollment-section" class="section auth-flow panel" style="display:none">
     <h2>First-Time Setup</h2>
     <p>This server has no authorized devices. Complete the enrollment to register the first administrator device.</p>
     <form id="enrollment-form">
@@ -27,9 +66,7 @@
     <div id="enrollment-status" class="status"></div>
   </section>
 
-  <div id="conn-indicator" class="conn-ok" title="Connected to GitHub"></div>
-
-  <section id="setup-section" class="section" style="display:none">
+  <section id="setup-section" class="section auth-flow panel" style="display:none">
     <h2>Register Device</h2>
     <p>Add another passkey to authorize merges.</p>
     <form id="register-form">
@@ -40,35 +77,35 @@
     <div id="register-status" class="status"></div>
   </section>
 
-  <section id="auth-section" class="section" style="display:none">
+  <section id="auth-section" class="section auth-flow panel" style="display:none">
     <h2>Authenticate</h2>
     <p>Authenticate with your passkey to view pending authorizations.</p>
     <button id="auth-btn">Authenticate</button>
     <div id="auth-status" class="status"></div>
   </section>
 
-  <section id="pr-section" class="section" style="display:none">
-    <h2>Pending Pull Requests</h2>
+  <section id="pr-section" class="section panel" style="display:none">
+    <h2>Pull Requests</h2>
     <div id="pr-list">
       <p class="empty">No pending PRs awaiting authorization.</p>
     </div>
   </section>
 
-  <section id="history-section" class="section" style="display:none">
+  <section id="history-section" class="section panel" style="display:none">
     <h2>Authorization History</h2>
     <div id="history-list">
       <p class="empty">No authorizations yet.</p>
     </div>
   </section>
 
-  <section id="devices-section" class="section" style="display:none">
-    <h2>Authorized Devices</h2>
+  <section id="devices-section" class="section panel" style="display:none">
+    <h2>Registered Devices</h2>
     <div id="device-list">
       <p class="empty">No devices registered.</p>
     </div>
   </section>
 
-  <section id="password-section" class="section" style="display:none">
+  <section id="password-section" class="section panel" style="display:none">
     <h2>Authorization Password</h2>
     <p>Set a shared password as a second factor — required alongside the passkey to authorize merges.</p>
     <form id="password-form">
@@ -81,58 +118,59 @@
     <div id="password-status" class="status"></div>
   </section>
 
-  <section id="lockdown-section" class="section" style="display:none">
-    <h2>Emergency</h2>
+  <section id="lockdown-section" class="section panel" style="display:none">
+    <h2>Lockdown</h2>
     <p>Lock down the system to prevent all merges and reject all pending authorizations.</p>
-    <button id="lockdown-btn" style="background:#da3633">ACTIVATE LOCKDOWN</button>
-    <button id="unlock-btn" style="background:#238636;display:none">Deactivate Lockdown</button>
+    <button id="lockdown-btn" class="reject-btn">ACTIVATE LOCKDOWN</button>
+    <button id="unlock-btn" class="auth-btn" style="display:none">Deactivate Lockdown</button>
     <div id="lockdown-status" class="status"></div>
   </section>
 
-  <section id="token-section" class="section" style="display:none">
-    <h2>Credential Inspector</h2>
+  <section id="token-section" class="section panel" style="display:none">
+    <h2>Token Inspector</h2>
     <div id="token-info"></div>
-    <div style="margin-top:1rem;font-size:0.85rem;"><a href="/inventory.html" style="color:#58a6ff;">View Full Token Inventory &rarr;</a></div>
+    <div class="token-footer"><a href="/inventory.html">View Full Token Inventory &rarr;</a></div>
   </section>
 
-  <section id="auth-mode-section" class="section" style="display:none">
-    <h2>Authentication Mode</h2>
+  <section id="auth-mode-section" class="section panel" style="display:none">
+    <h2>Auth Mode</h2>
     <div id="auth-mode-display"></div>
   </section>
 
-  <section id="branch-protection-section" class="section" style="display:none">
-    <h2>Branch Protection Status</h2>
+  <section id="branch-protection-section" class="section panel" style="display:none">
+    <h2>Branch Protection</h2>
     <div id="branch-protection-info"></div>
   </section>
 
-  <section id="metrics-section" class="section" style="display:none">
+  <section id="metrics-section" class="section panel" style="display:none">
     <h2>Metrics</h2>
     <div id="metrics-info"></div>
   </section>
 
-  <section id="admin-section" class="section" style="display:none">
+  <section id="admin-section" class="section panel" style="display:none">
     <h2>Admin</h2>
-    <button id="backfill-btn" class="btn" style="margin-bottom:0.5rem;">Backfill File History (all merged PRs)</button>
-    <div id="backfill-status" style="font-size:0.85rem;color:#8b949e;"></div>
+    <button id="backfill-btn">Backfill File History (all merged PRs)</button>
+    <div id="backfill-status" class="status"></div>
   </section>
 
-  <section id="webhook-section" class="section" style="display:none">
+  <section id="webhook-section" class="section panel" style="display:none">
     <h2>Webhook</h2>
     <div id="webhook-info"></div>
   </section>
 
-  <section id="audit-section" class="section">
+  <section id="audit-section" class="section panel" style="display:none">
     <h2>Audit Log</h2>
     <div id="audit-log">
       <p class="empty">Loading...</p>
     </div>
   </section>
-  <div id="reassert-modal" class="modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
-    <div style="background:#161b22;border:1px solid #30363d;border-radius:8px;padding:1.5rem;max-width:400px;text-align:center;">
-      <h3 style="margin:0 0 0.5rem;color:#f0f6fc;">Confirm Identity</h3>
-      <p style="color:#8b949e;font-size:0.85rem;margin:0 0 1rem;">Tap your security key to authorize this action</p>
-      <div id="reassert-status" style="color:#8b949e;font-size:0.8rem;"></div>
-      <button id="reassert-cancel" style="margin-top:1rem;background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:0.4rem 1rem;border-radius:6px;cursor:pointer;">Cancel</button>
+
+  <div id="reassert-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <h3>Confirm Identity</h3>
+      <p>Tap your security key to authorize this action</p>
+      <div id="reassert-status" class="status"></div>
+      <button id="reassert-cancel">Cancel</button>
     </div>
   </div>
 </main>
