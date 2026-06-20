@@ -1275,12 +1275,6 @@ node --stack-trace-limit=100 dist/index.js
 node -e "console.log(JSON.parse(require('fs').readFileSync(require('os').homedir() + '/.sentinel-oracle/config.json', 'utf8')))"
 ```
 
-### "Access token not provided" in supabase link (sentinel-cloud)
-
-The `backup.yml` workflow requires `SUPABASE_ACCESS_TOKEN` as a GitHub
-Actions secret. Add the secret in the repository settings (Settings > Secrets
-and variables > Actions > New repository secret).
-
 ---
 
 ## License

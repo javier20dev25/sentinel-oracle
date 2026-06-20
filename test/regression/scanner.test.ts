@@ -63,7 +63,7 @@ on:
     const result = await scanPRFiles([
       makeFile({
         filename: 'src/config.ts',
-        patch: '+const token = "ghp_abcdef1234567890_placeholder_abcdefgh"',
+        patch: '+const token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"',
       }),
     ])
     const finding = result.findings.find(f => f.category === 'secret')
@@ -195,7 +195,7 @@ permissions: write-all`,
     const result = await scanPRFiles([
       makeFile({
         filename: 'src/config.ts',
-        patch: '+const token = "ghp_abcdef1234567890_placeholder_abcdefgh"',
+        patch: '+const token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"',
       }),
     ])
     const finding = result.findings.find(f => f.category === 'secret')
@@ -210,7 +210,7 @@ permissions: write-all`,
       [
         makeFile({
           filename: 'src/config.ts',
-          patch: '+const token = "ghp_abcdef1234567890_placeholder_abcdefgh"',
+          patch: '+const token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"',
         }),
       ],
       42,
@@ -229,7 +229,7 @@ permissions: write-all`,
     const result = await scanPRFiles([
       makeFile({
         filename: 'src/config.ts',
-        patch: '+const token = "ghp_abcdef1234567890_placeholder_abcdefgh" + " and some extra padding to push this line well beyond eighty characters for the code field"',
+        patch: '+const token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" + " and some extra padding to push this line well beyond eighty characters for the code field"',
       }),
     ])
     const finding = result.findings.find(f => f.category === 'secret')

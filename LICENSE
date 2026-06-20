@@ -1,0 +1,77 @@
+Business Source License 1.1
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+
+-----------------------------------------------------------------------------
+
+Parameters
+
+Licensor:             Javier Astaroth
+Licensed Work:        Sentinel Oracle
+                      The Licensed Work is (c) 2026 Javier Astaroth
+
+Additional Use Grant: You may use, modify, and distribute the Licensed Work
+                      for any lawful purpose, provided that you do not:
+                      (a) sell, sublicense, or charge a fee for the Licensed
+                      Work or any derivative of it, whether in source or
+                      binary form;
+                      (b) make the Licensed Work available to third parties
+                      as a hosted or managed service for which a fee is
+                      charged (including but not limited to SaaS, PaaS, or
+                      cloud hosting);
+                      (c) incorporate the Licensed Work into a product or
+                      service that is sold or monetized, directly or
+                      indirectly.
+
+                      Non-profit, educational, personal, and internal
+                      business use are always permitted. Redistribution
+                      must preserve this license and all its terms.
+
+Change Date:          2066-01-01 (forty years from the public release date)
+
+Change License:       Apache License, Version 2.0
+
+-----------------------------------------------------------------------------
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, publicly display, publicly perform, and distribute the Licensed Work
+under this license, subject to the following terms:
+
+1. You must give any other recipients of the Licensed Work a copy of this
+   License; they are automatically granted the rights in this License, and
+   must comply with its terms.
+2. You must cause any modified files to carry prominent notices stating
+   that You changed the files.
+3. You must retain, in the Source form of any Derivative Works that You
+   distribute, all copyright, patent, trademark, and attribution notices
+   from the Source form of the Licensed Work, excluding those notices that
+   do not pertain to any part of the Derivative Works.
+4. If the Licensor has made a patent claim (a "Patent Claim") against a
+   third party (the "Counterparty") alleging that the Counterparty's
+   practice of the Licensed Work (alone or under a combination of the
+   Licensed Work and other software or hardware) infringes a patent that is
+   essential to practice the Licensed Work (the "Essential Patent"), then
+   the rights granted under this License to you shall terminate automatically
+   as of the date such Patent Claim is brought, unless the Counterparty has
+   granted to the Licensor, in a written agreement that was in effect before
+   the date the Patent Claim was brought, a license to the Essential Patent
+   that is fair, reasonable, and non-discriminatory.
+5. If you violate any of the terms of this License, your rights under this
+   License shall terminate automatically. However, if you cure the violation
+   within 30 days after becoming aware of it, your rights shall be reinstated.
+6. This License shall be governed by and construed in accordance with the
+   laws of the United States and the State of California, excluding its
+   conflict of law provisions.
+7. The Licensor reserves all rights not expressly granted in this License.
+
+Disclaimer
+
+THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
