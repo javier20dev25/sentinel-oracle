@@ -3,24 +3,24 @@
     "version": "1.0.0",
     "description": "Sentinel Oracle — Secure Merge Authorization Server. Physically separated merge authority that prevents workstation-compromise attacks from reaching the main branch.",
     "main": "dist/index.js",
-"bin": {
-    "sentinel-oracle": "./bin/sentinel-oracle.js"
-},
-"scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "setup": "node scripts/setup.cjs",
-"test": "npm run build && npm run test:core && npm run test:intel1 && npm run test:intel2 && npm run test:intel3 && npm run test:intel4 && npm run test:intel5",
-"test:core": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.core.config.ts",
-"test:intel1": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel1.config.ts",
-"test:intel2": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel2.config.ts",
-"test:intel3": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel3.config.ts",
-"test:intel4": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel4.config.ts",
-"test:intel5": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel5.config.ts",
-"test:watch": "node --max-old-space-size=4096 node_modules/.bin/vitest",
-"pretest": ""
-},
+    "bin": {
+        "sentinel-oracle": "./bin/sentinel-oracle.js"
+    },
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/index.js",
+        "dev": "tsx src/index.ts",
+        "setup": "node scripts/setup.cjs",
+        "test": "npm run build && npm run test:core && npm run test:intel1 && npm run test:intel2 && npm run test:intel3 && npm run test:intel4 && npm run test:intel5",
+        "test:core": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.core.config.ts",
+        "test:intel1": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel1.config.ts",
+        "test:intel2": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel2.config.ts",
+        "test:intel3": "node --max-old-space-size=4096 node_modules/.bin/vitest run --config vitest.intel3.config.ts",
+        "test:intel4": "node --max-old-space-size=6144 node_modules/.bin/vitest run --config vitest.intel4.config.ts",
+        "test:intel5": "node --max-old-space-size=6144 node_modules/.bin/vitest run --config vitest.intel5.config.ts",
+        "test:watch": "node --max-old-space-size=4096 node_modules/.bin/vitest",
+        "pretest": ""
+    },
     "keywords": [
         "security",
         "merge-authorization",
@@ -44,14 +44,14 @@
     "engines": {
         "node": ">=20.0.0"
     },
-"files": [
-    "dist/",
-    "bin/",
-    "src/",
-    "public/",
-    "docs/",
-    "README.md"
-],
+    "files": [
+        "dist/",
+        "bin/",
+        "src/",
+        "public/",
+        "docs/",
+        "README.md"
+    ],
     "dependencies": {
         "@octokit/rest": "^21.1.1",
         "@simplewebauthn/server": "^11.0.0",
@@ -74,6 +74,6 @@
         "@types/uuid": "^10.0.0",
         "tsx": "^4.22.4",
         "typescript": "^5",
-        "vitest": "^4.1.7"
+        "vitest": "^4.1.9"
     }
 }
