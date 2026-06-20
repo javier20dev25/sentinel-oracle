@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { encrypt, decrypt } from '../src/storage/encryption'
+import { encrypt, decrypt } from '../../src/storage/encryption'
 import { randomBytes } from 'crypto'
 
 describe('encrypt/decrypt', () => {

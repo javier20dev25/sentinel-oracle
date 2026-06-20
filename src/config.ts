@@ -31,6 +31,9 @@ export interface Config {
   enrollmentTokenTtlMs: number
   githubWebhookSecret: string
   scanEnabled: boolean
+  autoScan: boolean
+  securityInbox: boolean
+  analystQueue: boolean
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -195,6 +198,9 @@ export function loadConfig(): Config {
     enrollmentTokenTtlMs: 120000,
     githubWebhookSecret: '',
     scanEnabled: false,
+    autoScan: false,
+    securityInbox: true,
+    analystQueue: true,
   }
 
   try {

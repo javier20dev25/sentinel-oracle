@@ -15,10 +15,9 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore, defaultBr
 
     let prs;
     try {
-        await dns.resolve('api.github.com').catch(() => {})
+        await dns.resolve('api.github.com')
         prs = await client.listOpenPRs();
-    } catch (err) {
-        console.error('[monitor] Failed to list PRs:', err instanceof Error ? err.message : String(err))
+    } catch {
         return result;
     }
 

@@ -14,35 +14,48 @@
   </div>
   <div class="sidebar-nav">
     <div class="nav-group">
-      <div class="nav-group-label">01 // OPERATION DECK</div>
+      <div class="nav-group-label">01 // SECURITY OPERATIONS</div>
+      <a class="nav-item" data-target="soc-section">Security Posture</a>
+      <a class="nav-item" data-target="dna-section">Security DNA</a>
+      <a class="nav-item" data-target="inbox-section">Security Inbox</a>
+      <a class="nav-item" data-target="queue-section">Analyst Queue</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">02 // OPERATION DECK</div>
       <a class="nav-item active" data-target="pr-section">Pull Requests</a>
       <a class="nav-item" data-target="history-section">History</a>
     </div>
     <div class="nav-group">
-      <div class="nav-group-label">02 // ACCESS PROVENANCE</div>
+      <div class="nav-group-label">03 // ACCESS PROVENANCE</div>
       <a class="nav-item" data-target="devices-section">Registered Devices</a>
     </div>
     <div class="nav-group">
-      <div class="nav-group-label">03 // SECURITY POLICY</div>
+      <div class="nav-group-label">04 // SECURITY POLICY</div>
       <a class="nav-item" data-target="lockdown-section">Lockdown</a>
       <a class="nav-item" data-target="auth-mode-section">Auth Mode</a>
       <a class="nav-item" data-target="branch-protection-section">Branch Protection</a>
     </div>
     <div class="nav-group">
-      <div class="nav-group-label">04 // STATE TELEMETRY</div>
+      <div class="nav-group-label">05 // STATE TELEMETRY</div>
       <a class="nav-item" data-target="metrics-section">Metrics</a>
       <a class="nav-item" data-target="audit-section">Audit Log</a>
+      <a class="nav-item" data-target="analytics-section">Analytics</a>
     </div>
     <div class="nav-group">
-      <div class="nav-group-label">05 // SYSTEM PARAMS</div>
+      <div class="nav-group-label">06 // SYSTEM PARAMS</div>
+      <a class="nav-item" data-target="settings-section">Settings</a>
       <a class="nav-item" data-target="password-section">Password</a>
       <a class="nav-item" data-target="github-config-section">GitHub Config</a>
       <a class="nav-item" data-target="webhook-section">Webhook</a>
     </div>
     <div class="nav-group">
-      <div class="nav-group-label">06 // ENCLAVE DECK</div>
+      <div class="nav-group-label">07 // ENCLAVE DECK</div>
       <a class="nav-item" data-target="token-section">Token Inspector</a>
       <a class="nav-item" data-target="admin-section">Backfill</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">00 // REFERENCE</div>
+      <a class="nav-item" data-target="help-section">Help & Guide</a>
     </div>
   </div>
   <div class="sidebar-footer">
@@ -50,6 +63,8 @@
     <button id="sidebar-toggle" class="sidebar-collapse-btn" title="Toggle sidebar">&laquo;</button>
   </div>
 </nav>
+
+<button id="sidebar-toggle-float" class="sidebar-toggle-float" title="Show sidebar">&raquo;</button>
 
 <main id="main-content" class="main-content">
   <div id="lockdown-banner" class="lockdown-banner" style="display:none">SYSTEM LOCKED DOWN — No authorizations will be processed</div>
@@ -85,8 +100,30 @@
     <div id="auth-status" class="status"></div>
   </section>
 
+  <div id="onboarding-checklist" style="display:none"></div>
+
+  <section id="soc-section" class="section panel" style="display:none">
+    <h2>Security Posture</h2>
+    <div id="soc-display"></div>
+  </section>
+
+  <section id="dna-section" class="section panel" style="display:none">
+    <h2>Security DNA</h2>
+    <div id="dna-display"></div>
+  </section>
+
+  <section id="inbox-section" class="section panel" style="display:none">
+    <h2>Security Inbox <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">Findings requiring attention</span></h2>
+    <div id="inbox-display"></div>
+  </section>
+
+  <section id="queue-section" class="section panel" style="display:none">
+    <h2>Analyst Queue <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">PRs prioritized by risk</span></h2>
+    <div id="queue-display"></div>
+  </section>
+
   <section id="pr-section" class="section panel" style="display:none">
-    <h2>Pull Requests</h2>
+    <h2>Pull Requests <span id="refresh-countdown" class="refresh-countdown">REFRESH IN 15S</span></h2>
     <div id="pr-list">
       <p class="empty">No pending PRs awaiting authorization.</p>
     </div>
@@ -107,13 +144,26 @@
   </section>
 
   <section id="password-section" class="section panel" style="display:none">
-    <h2>Authorization Password</h2>
-    <p>Set a shared password as a second factor — required alongside the passkey to authorize merges.</p>
+    <h2 id="password-title">Authorization Password</h2>
+    <p>A shared password as a second factor — required alongside the passkey to authorize merges.</p>
+    <div class="password-toggle-row">
+      <button id="password-visibility-toggle" class="btn-small" type="button">show</button>
+      <span class="hint">Show / hide password text</span>
+    </div>
     <form id="password-form">
-      <label for="current-password">Current Password <em>(leave blank if not set)</em></label>
-      <input type="password" id="current-password" placeholder="Current password" autocomplete="off">
+      <div id="password-current-group">
+        <label for="current-password">Current Password</label>
+        <input type="password" id="current-password" placeholder="Current password" autocomplete="off" spellcheck="false">
+      </div>
       <label for="new-password">New Password</label>
-      <input type="password" id="new-password" placeholder="New password (min 4 chars)" required autocomplete="off">
+      <input type="password" id="new-password" placeholder="New password (min 8 chars, upper, lower, digit, symbol)" required autocomplete="off" spellcheck="false">
+      <label for="confirm-password">Confirm Password</label>
+      <input type="password" id="confirm-password" placeholder="Repeat new password" required autocomplete="off" spellcheck="false">
+      <div id="password-strength-bar" class="strength-bar"><div class="strength-fill" id="password-strength-fill"></div></div>
+      <div id="password-strength-text" class="strength-text">Enter a password</div>
+      <div id="password-forgot-area">
+        <button type="button" id="forgot-password-btn" class="btn-small">Forgot Password?</button>
+      </div>
       <button type="submit" id="password-btn">Set Password</button>
     </form>
     <div id="password-status" class="status"></div>
@@ -122,6 +172,11 @@
   <section id="github-config-section" class="section panel" style="display:none">
     <h2>GitHub Configuration</h2>
     <div id="github-config-display"></div>
+  </section>
+
+  <section id="settings-section" class="section panel" style="display:none">
+    <h2>System Settings</h2>
+    <div id="settings-display"></div>
   </section>
 
   <section id="lockdown-section" class="section panel" style="display:none">
@@ -171,12 +226,61 @@
     </div>
   </section>
 
+  <section id="analytics-section" class="section panel" style="display:none">
+    <h2>Analytics</h2>
+    <p>Aggregated data for analysis. Download in JSON or CSV format.</p>
+    <div class="analytics-actions">
+      <button id="analytics-refresh" class="btn-small">Refresh Data</button>
+      <button id="analytics-download-json" class="btn-small">Download JSON</button>
+      <button id="analytics-download-csv" class="btn-small">Download CSV</button>
+    </div>
+    <div id="analytics-summary" class="analytics-summary"></div>
+    <div id="analytics-table-container" style="margin-top: 1rem; overflow-x: auto;">
+      <table id="analytics-table" class="help-table">
+        <thead><tr><th>PR</th><th>Author</th><th>Created</th><th>CI</th><th>Sentinel</th><th>Auth</th><th>Authorized At</th><th>Device</th></tr></thead>
+        <tbody id="analytics-table-body"><tr><td colspan="8" style="color:var(--text-dark);text-align:center">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="help-section" class="section panel" style="display:none">
+    <h2>Help & Guide</h2>
+    <div id="help-content"></div>
+  </section>
+
   <div id="reassert-modal" class="modal" style="display:none;">
     <div class="modal-content">
       <h3>Confirm Identity</h3>
       <p>Tap your security key to authorize this action</p>
       <div id="reassert-status" class="status"></div>
       <button id="reassert-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Scan Report Modal -->
+  <div id="scan-report-modal" class="modal scan-report-modal" style="display:none;">
+    <div class="scan-report-overlay" id="scan-report-overlay"></div>
+    <div class="scan-report-container">
+      <div class="scan-report-header">
+        <div class="scan-report-header-left">
+          <div class="snt-badge">SNT</div>
+          <div>
+            <h2 class="scan-report-title">Security Scan Report</h2>
+            <span class="scan-report-pr" id="scan-report-pr"></span>
+          </div>
+        </div>
+        <button class="scan-report-close" id="scan-report-close">&times;</button>
+      </div>
+
+      <div class="scan-report-body" id="scan-report-body">
+        <!-- filled by showScanReport() -->
+      </div>
+
+      <div class="scan-report-footer">
+        <button class="scan-report-btn" id="scan-report-export-json">Export JSON</button>
+        <button class="scan-report-btn" id="scan-report-export-sarif">Export SARIF</button>
+        <button class="scan-report-btn scan-report-btn-primary" id="scan-report-print">Print / PDF</button>
+      </div>
     </div>
   </div>
 </main>

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import * as path from 'path';
 import { encrypt, decrypt } from './encryption';
+import type { CIPolicy, CapabilitySnapshot } from '../scanner/intel/types';
 
 export interface PendingPR {
     id: number;
@@ -70,6 +71,19 @@ export interface TokenStats {
   highRisk: number
   expiringSoon: number
   expired: number
+}
+
+export interface ScanResultRow {
+  prNumber: number
+  scanHash: string
+  riskScore: number
+  critical: number
+  high: number
+  medium: number
+  low: number
+  findingsJson: string
+  scannedAt: number
+  intelJson?: string
 }
 
 export class DatabaseStore {
@@ -196,9 +210,70 @@ export class DatabaseStore {
             );
         `)
         this.db.exec(`
+            CREATE TABLE IF NOT EXISTS workflow_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                sha TEXT NOT NULL,
+                pr_number INTEGER,
+                job_name TEXT NOT NULL,
+                step_name TEXT NOT NULL,
+                step_number INTEGER DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                status TEXT DEFAULT '',
+                scanned_at INTEGER NOT NULL
+            );
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS workflow_fingerprints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pr_number INTEGER NOT NULL,
+                sha TEXT NOT NULL,
+                fingerprint_hash TEXT NOT NULL,
+                job_structure_json TEXT NOT NULL,
+                scanned_at INTEGER NOT NULL,
+                UNIQUE(pr_number, sha)
+            );
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS ci_policy (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                repo TEXT NOT NULL DEFAULT 'default',
+                policy_json TEXT NOT NULL DEFAULT '{}',
+                updated_at INTEGER NOT NULL,
+                UNIQUE(repo)
+            );
+        `)
+        this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_pr_files_pr ON pr_files(pr_number);
             CREATE INDEX IF NOT EXISTS idx_pr_files_filename ON pr_files(filename);
             CREATE INDEX IF NOT EXISTS idx_pr_files_auth ON pr_files(auth_status);
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS scan_results (
+                pr_number INTEGER NOT NULL,
+                scan_hash TEXT NOT NULL,
+                risk_score INTEGER NOT NULL,
+                critical INTEGER DEFAULT 0,
+                high INTEGER DEFAULT 0,
+                medium INTEGER DEFAULT 0,
+                low INTEGER DEFAULT 0,
+                findings_json TEXT NOT NULL,
+                scanned_at INTEGER NOT NULL,
+                UNIQUE(pr_number, scan_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_scan_results_pr ON scan_results(pr_number);
+        `)
+        this.runMigration("ALTER TABLE scan_results ADD COLUMN intel_json TEXT DEFAULT ''")
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS capability_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                owner TEXT NOT NULL,
+                repo TEXT NOT NULL,
+                pr_number INTEGER NOT NULL,
+                snapshot_json TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_snapshots_repo ON capability_snapshots(owner, repo, created_at);
         `)
     }
 
@@ -318,6 +393,97 @@ export class DatabaseStore {
             WHERE filename = ?
             ORDER BY scanned_at ASC
         `).all(filename) as any
+    }
+
+    getAllWorkflowRecords(): { checkName: string; durationMs: number; prNumber: number; scannedAt: number; filename: string }[] {
+        return this.db.prepare(`
+            SELECT check_name as checkName, duration_ms as durationMs, pr_number as prNumber, scanned_at as scannedAt, filename
+            FROM workflow_times
+            ORDER BY scanned_at ASC
+        `).all() as any
+    }
+
+    storeWorkflowTelemetry(entries: { checkName: string; durationMs: number; prNumber: number; filename: string }[]): void {
+        const stmt = this.db.prepare(`
+            INSERT OR REPLACE INTO workflow_times (filename, sha, pr_number, check_name, duration_ms, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `)
+        const now = Date.now()
+        for (const e of entries) {
+            stmt.run(e.filename, `${now}`, e.prNumber, e.checkName, e.durationMs, now)
+        }
+    }
+
+    // === Step-level telemetry ===
+    storeWorkflowSteps(entries: { filename: string; sha: string; prNumber: number; jobName: string; stepName: string; stepNumber: number; durationMs: number; status: string }[]): void {
+        const stmt = this.db.prepare(`
+            INSERT INTO workflow_steps (filename, sha, pr_number, job_name, step_name, step_number, duration_ms, status, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        const now = Date.now()
+        const tx = this.db.transaction(() => {
+            for (const e of entries) {
+                stmt.run(e.filename, e.sha, e.prNumber, e.jobName, e.stepName, e.stepNumber, e.durationMs, e.status, now)
+            }
+        })
+        tx()
+    }
+
+    getWorkflowSteps(filenames?: string[], sinceMs?: number): { filename: string; sha: string; prNumber: number; jobName: string; stepName: string; stepNumber: number; durationMs: number; status: string; scannedAt: number }[] {
+        let sql = 'SELECT filename, sha, pr_number as prNumber, job_name as jobName, step_name as stepName, step_number as stepNumber, duration_ms as durationMs, status, scanned_at as scannedAt FROM workflow_steps'
+        const params: any[] = []
+        const wheres: string[] = []
+        if (filenames && filenames.length > 0) {
+            wheres.push(`filename IN (${filenames.map(() => '?').join(',')})`)
+            params.push(...filenames)
+        }
+        if (sinceMs) {
+            wheres.push('scanned_at >= ?')
+            params.push(sinceMs)
+        }
+        if (wheres.length > 0) sql += ' WHERE ' + wheres.join(' AND ')
+        sql += ' ORDER BY scanned_at ASC'
+        return this.db.prepare(sql).all(...params) as any
+    }
+
+    // === Execution fingerprints ===
+    storeFingerprint(prNumber: number, sha: string, hash: string, jobStructure: any): void {
+        this.db.prepare(`
+            INSERT OR REPLACE INTO workflow_fingerprints (pr_number, sha, fingerprint_hash, job_structure_json, scanned_at)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(prNumber, sha, hash, JSON.stringify(jobStructure), Date.now())
+    }
+
+    getFingerprint(prNumber: number): { sha: string; hash: string; jobStructure: any; scannedAt: number } | undefined {
+        return this.db.prepare(`
+            SELECT sha, fingerprint_hash as hash, job_structure_json as jobStructure, scanned_at as scannedAt
+            FROM workflow_fingerprints
+            WHERE pr_number = ?
+            ORDER BY scanned_at DESC
+            LIMIT 1
+        `).get(prNumber) as any
+    }
+
+    getAllFingerprints(): { prNumber: number; sha: string; hash: string; scannedAt: number }[] {
+        return this.db.prepare(`
+            SELECT pr_number as prNumber, sha, fingerprint_hash as hash, scanned_at as scannedAt
+            FROM workflow_fingerprints
+            ORDER BY scanned_at DESC
+        `).all() as any
+    }
+
+    // === CI Policy ===
+    getPolicy(repo = 'default'): CIPolicy | null {
+        const row = this.db.prepare('SELECT policy_json FROM ci_policy WHERE repo = ?').get(repo) as any
+        if (!row) return null
+        try { return JSON.parse(row.policy_json) } catch { return null }
+    }
+
+    setPolicy(repo: string, policy: CIPolicy): void {
+        this.db.prepare(`
+            INSERT OR REPLACE INTO ci_policy (repo, policy_json, updated_at)
+            VALUES (?, ?, ?)
+        `).run(repo, JSON.stringify(policy), Date.now())
     }
 
     getRepoFileAverages(): { filename: string; avgAdditions: number; avgDeletions: number; avgSizeBytes: number; count: number }[] {
@@ -544,6 +710,43 @@ export class DatabaseStore {
         return rows.map(r => this.mapAudit(r))
     }
 
+    storeCapabilitySnapshot(owner: string, repo: string, prNumber: number, snapshot: CapabilitySnapshot): void {
+        this.db.prepare(`
+            INSERT INTO capability_snapshots (owner, repo, pr_number, snapshot_json, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        `).run(owner, repo, prNumber, JSON.stringify(snapshot), Date.now())
+    }
+
+    getCapabilitySnapshots(owner: string, repo: string, limit = 90): { snapshot: CapabilitySnapshot; createdAt: number; prNumber: number }[] {
+        const rows = this.db.prepare(`
+            SELECT snapshot_json as snapshotJson, created_at as createdAt, pr_number as prNumber
+            FROM capability_snapshots
+            WHERE owner = ? AND repo = ?
+            ORDER BY created_at ASC
+            LIMIT ?
+        `).all(owner, repo, limit) as any[]
+        return rows.map(r => ({
+            snapshot: JSON.parse(r.snapshotJson) as CapabilitySnapshot,
+            createdAt: r.createdAt,
+            prNumber: r.prNumber,
+        }))
+    }
+
+    getLatestSnapshot(owner: string, repo: string): { snapshot: CapabilitySnapshot; createdAt: number; prNumber: number } | undefined {
+        const row = this.db.prepare(`
+            SELECT snapshot_json as snapshotJson, created_at as createdAt, pr_number as prNumber
+            FROM capability_snapshots
+            WHERE owner = ? AND repo = ?
+            ORDER BY created_at DESC LIMIT 1
+        `).get(owner, repo) as any
+        if (!row) return undefined
+        return {
+            snapshot: JSON.parse(row.snapshotJson),
+            createdAt: row.createdAt,
+            prNumber: row.prNumber,
+        }
+    }
+
     getConfig(key: string): string | undefined {
         const row = this.db.prepare('SELECT value FROM config WHERE key = ?').get(key) as { value: string } | undefined;
         return row?.value;
@@ -624,6 +827,37 @@ export class DatabaseStore {
         const expiringSoon = (this.db.prepare('SELECT COUNT(*) as c FROM token_inventory WHERE expires_at IS NOT NULL AND expires_at > ? AND expires_at < ?').get(now, now + 604800000) as any).c
         const expired = (this.db.prepare('SELECT COUNT(*) as c FROM token_inventory WHERE expires_at IS NOT NULL AND expires_at < ?').get(now) as any).c
         return { total, highRisk, expiringSoon, expired }
+    }
+
+    saveScanResult(prNumber: number, scanHash: string, result: { riskScore: number; critical: number; high: number; medium: number; low: number; findings: unknown[]; intel?: unknown }): void {
+        this.db.prepare(`
+            INSERT OR REPLACE INTO scan_results (pr_number, scan_hash, risk_score, critical, high, medium, low, findings_json, intel_json, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(prNumber, scanHash, result.riskScore, result.critical, result.high, result.medium, result.low, JSON.stringify(result.findings), result.intel ? JSON.stringify(result.intel) : '', Date.now())
+    }
+
+    getLatestScanResult(prNumber: number): ScanResultRow | undefined {
+        const rows = this.db.prepare(`
+            SELECT pr_number as prNumber, scan_hash as scanHash, risk_score as riskScore,
+                   critical, high, medium, low, findings_json as findingsJson, scanned_at as scannedAt,
+                   intel_json as intelJson
+            FROM scan_results WHERE pr_number = ? ORDER BY scanned_at DESC LIMIT 1
+        `).all(prNumber) as ScanResultRow[]
+        return rows.length > 0 ? rows[0] : undefined
+    }
+
+    hasScanHash(prNumber: number, scanHash: string): boolean {
+        const row = this.db.prepare('SELECT 1 FROM scan_results WHERE pr_number = ? AND scan_hash = ?').get(prNumber, scanHash) as any
+        return !!row
+    }
+
+    getAllScanResults(): ScanResultRow[] {
+        return this.db.prepare(`
+            SELECT pr_number as prNumber, scan_hash as scanHash, risk_score as riskScore,
+                   critical, high, medium, low, findings_json as findingsJson, scanned_at as scannedAt,
+                   intel_json as intelJson
+            FROM scan_results ORDER BY scanned_at DESC
+        `).all() as ScanResultRow[]
     }
 
     close(): void {

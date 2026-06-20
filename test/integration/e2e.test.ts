@@ -3,11 +3,11 @@ import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
 import * as http from 'http'
-import { DatabaseStore } from '../src/storage/database'
-import { createApp } from '../src/server'
-import type { GitHubClient } from '../src/github/client'
-import type { Config } from '../src/config'
-import { initHmacKey } from '../src/crypto/signing'
+import { DatabaseStore } from '../../src/storage/database'
+import { createApp } from '../../src/server'
+import type { GitHubClient } from '../../src/github/client'
+import type { Config } from '../../src/config'
+import { initHmacKey } from '../../src/crypto/signing'
 
 function tmpDir(): string {
   const dir = path.join(os.tmpdir(), `oracle-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)

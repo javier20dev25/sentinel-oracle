@@ -3,7 +3,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import { generateKeyPairSync } from 'crypto'
-import { GitHubAppAuth, type GitHubAppConfig } from '../src/github/auth'
+import { GitHubAppAuth, type GitHubAppConfig } from '../../src/github/auth'
 
 function tmpDir(): string {
   const dir = path.join(os.tmpdir(), `oracle-github-app-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
@@ -207,13 +207,13 @@ describe('GitHubAppAuth', () => {
 
 describe('GitHubClient mode detection', () => {
   it('passes PAT string mode correctly', async () => {
-    const { GitHubClient } = await import('../src/github/client')
-    const client = new GitHubClient('ghp_test_token', 'owner', 'repo', 'Sentinel Authorization')
+    const { GitHubClient } = await import('../../src/github/client')
+    const client = new GitHubClient('ghp_test_token_placeholder', 'owner', 'repo', 'Sentinel Authorization')
     expect(client.authMode).toBe('pat')
   })
 
   it('passes GitHub App config mode correctly', async () => {
-    const { GitHubClient } = await import('../src/github/client')
+    const { GitHubClient } = await import('../../src/github/client')
 
     const testDir = tmpDir()
     const keyPair = generateTestKeyPair()

@@ -2,6 +2,33 @@ import { setDefaultResultOrder, setServers, promises as dns } from 'dns'
 setServers(['8.8.8.8', '1.1.1.1'])
 setDefaultResultOrder('ipv4first')
 
+const packageJson = JSON.parse(fs.readFileSync(__dirname + '/../package.json', 'utf8'))
+
+const args = process.argv.slice(2)
+if (args.includes('--help') || args.includes('-h')) {
+  console.log(`sentinel-oracle v${packageJson.version}
+
+Usage:
+  sentinel-oracle                    Start the HTTPS server (default)
+  sentinel-oracle start              Start the server
+  sentinel-oracle scan               Run a one-time security scan on the configured repository
+  sentinel-oracle --version, -v      Print version
+  sentinel-oracle --help, -h         Print this help
+
+Environment:
+  SENTINEL_CONFIG_DIR    Configuration directory (default: ~/.config/sentinel-oracle)
+  SENTINEL_PORT          HTTPS server port (default: 8443)
+  SENTINEL_HOST          Bind address (default: localhost)
+  NODE_OPTIONS           Passed to Node.js (e.g. --max-old-space-size=4096)
+
+Documentation: https://github.com/javier20dev25/sentinel-oracle`)
+  process.exit(0)
+}
+if (args.includes('--version') || args.includes('-v')) {
+  console.log(packageJson.version)
+  process.exit(0)
+}
+
 import { loadConfig } from './config'
 import { DatabaseStore } from './storage/database'
 import { GitHubClient } from './github/client'

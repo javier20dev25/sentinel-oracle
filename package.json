@@ -3,18 +3,18 @@
     "version": "1.0.0",
     "description": "Sentinel Oracle — Secure Merge Authorization Server. Physically separated merge authority that prevents workstation-compromise attacks from reaching the main branch.",
     "main": "dist/index.js",
-    "bin": {
-        "sentinel-oracle": "./dist/index.js"
-    },
-    "scripts": {
-        "build": "tsc",
-        "start": "node dist/index.js",
-        "dev": "ts-node src/index.ts",
-        "setup": "node scripts/setup.cjs",
-        "test": "vitest run",
-        "test:watch": "vitest",
-        "pretest": "npm run build"
-    },
+"bin": {
+    "sentinel-oracle": "./bin/sentinel-oracle.js"
+},
+"scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "setup": "node scripts/setup.cjs",
+"test": "node --max-old-space-size=4096 node_modules/.bin/vitest run",
+"test:watch": "node --max-old-space-size=4096 node_modules/.bin/vitest",
+    "pretest": "npm run build"
+},
     "keywords": [
         "security",
         "merge-authorization",
@@ -38,12 +38,14 @@
     "engines": {
         "node": ">=20.0.0"
     },
-    "files": [
-        "dist/",
-        "src/",
-        "public/",
-        "README.md"
-    ],
+"files": [
+    "dist/",
+    "bin/",
+    "src/",
+    "public/",
+    "docs/",
+    "README.md"
+],
     "dependencies": {
         "@octokit/rest": "^21.1.1",
         "@simplewebauthn/server": "^11.0.0",

@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import * as path from 'path'
 import * as os from 'os'
 import * as fs from 'fs'
-import { DatabaseStore } from '../src/storage/database'
-import { AuthorizationQueue } from '../src/queue/authorization'
-import { createAuthChallenge } from '../src/auth/challenge'
-import type { GitHubClient } from '../src/github/client'
+import { DatabaseStore } from '../../src/storage/database'
+import { AuthorizationQueue } from '../../src/queue/authorization'
+import { createAuthChallenge } from '../../src/auth/challenge'
+import type { GitHubClient } from '../../src/github/client'
 
-vi.mock('../src/auth/webauthn', () => ({
+vi.mock('../../src/auth/webauthn', () => ({
   verifyAssertion: vi.fn(),
   generateAssertion: vi.fn(),
   generateRegistration: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock('../src/auth/webauthn', () => ({
   getRpId: vi.fn(() => 'localhost'),
 }))
 
-import { verifyAssertion } from '../src/auth/webauthn'
+import { verifyAssertion } from '../../src/auth/webauthn'
 
 function createMockClient(): GitHubClient {
   return {
@@ -170,7 +170,7 @@ describe('AuthorizationQueue', () => {
   })
 
   it('confirms authorization with valid challengeId', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
@@ -187,7 +187,7 @@ describe('AuthorizationQueue', () => {
   })
 
   it('rejects confirm with wrong PR number', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(999, challenge!.challengeId, mockCredential, mockChallenge)
@@ -196,14 +196,14 @@ describe('AuthorizationQueue', () => {
   })
 
   it('rejects confirm with invalid challengeId', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const result = await queue.confirmAuthorization(142, 'fake-challenge-id', mockCredential, mockChallenge)
     expect(result.success).toBe(false)
   })
 
   it('rejects duplicate confirmation', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const challenge = await queue.initiateAuthorization(142)
     await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
@@ -259,7 +259,7 @@ describe('AuthorizationQueue', () => {
   })
 
   it('logs authorization grant', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const challenge = await queue.initiateAuthorization(142)
     await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
@@ -274,7 +274,7 @@ describe('AuthorizationQueue', () => {
   })
 
   it('rejects confirm when WebAuthn fails', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: false })
+    verifyAssertion.mockResolvedValue({ verified: false })
 
     const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)
@@ -305,7 +305,7 @@ describe('AuthorizationQueue', () => {
   })
 
   it('rejects confirm with wrong PR in challenge', async () => {
-    vi.mocked(verifyAssertion).mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
+    verifyAssertion.mockResolvedValue({ verified: true, credentialId: 'test-cred-id' })
 
     const challenge = await queue.initiateAuthorization(142)
     const result = await queue.confirmAuthorization(142, challenge!.challengeId, mockCredential, mockChallenge)

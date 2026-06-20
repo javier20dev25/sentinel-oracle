@@ -1,3 +1,60 @@
+const CWE_MAP: Record<string, { cwe: string; impact: string; remediation: string }> = {
+  secret: {
+    cwe: 'CWE-798',
+    impact: 'An attacker with repository access can use exposed credentials to impersonate services, access restricted data, or escalate privileges within the CI/CD pipeline.',
+    remediation: 'Remove the secret from source code. Use environment variables or a secrets manager (GitHub Secrets, HashiCorp Vault). Rotate the compromised credential immediately.',
+  },
+  workflow: {
+    cwe: 'CWE-284',
+    impact: 'Vulnerable CI/CD workflows allow attackers to execute arbitrary code in the build environment, access cloud credentials, or poison the software supply chain.',
+    remediation: 'Pin actions to commit SHAs instead of mutable tags. Use read-only permissions where possible. Avoid pull_request_target unless absolutely necessary.',
+  },
+  dependency: {
+    cwe: 'CWE-1104',
+    impact: 'Unpinned or unverified dependencies can be silently replaced with malicious versions, leading to supply chain compromise.',
+    remediation: 'Pin dependencies to specific versions or commit hashes. Use lockfiles and verify checksums. Enable Dependabot or Renovate.',
+  },
+  config: {
+    cwe: 'CWE-200',
+    impact: 'Sensitive configuration exposed in version control can leak infrastructure details, API endpoints, or internal architecture.',
+    remediation: 'Move configuration to environment-specific files not tracked in git. Use .gitignore and secret scanning pre-commit hooks.',
+  },
+  code: {
+    cwe: 'CWE-94',
+    impact: 'Code patterns that enable arbitrary code execution can lead to remote compromise, data exfiltration, or full system takeover.',
+    remediation: 'Avoid eval(), dynamic require(), and string-based setTimeout. Use static analysis and code review to catch dangerous patterns before merge.',
+  },
+  supply_chain: {
+    cwe: 'CWE-1357',
+    impact: 'Supply chain weaknesses enable attackers to inject malicious code through compromised dependencies or build processes.',
+    remediation: 'Use Software Bill of Materials (SBOM). Pin dependencies. Enable signature verification. Restrict build environment permissions.',
+  },
+}
+
+function impactFor(category: Finding['category'], severity: Finding['severity']): string {
+  const base = CWE_MAP[category]?.impact || 'This finding indicates a potential security vulnerability that requires review.'
+  if (severity === 'critical') return base
+  return base
+}
+
+function recommendationFor(category: Finding['category'], severity: Finding['severity'], title: string): string {
+  const base = CWE_MAP[category]?.remediation || 'Review the affected code and apply security best practices.'
+  if (severity === 'low') return 'Review and address during normal development cycle.'
+  return base
+}
+
+function cweFor(category: Finding['category']): string {
+  return CWE_MAP[category]?.cwe || 'CWE-000'
+}
+
+let findingCounter = 0
+export function resetFindingCounter(): void { findingCounter = 0 }
+export function nextFindingId(severity: Finding['severity']): string {
+  findingCounter++
+  const sev = severity.toUpperCase().slice(0, 4)
+  return `SNT-${sev}-${String(findingCounter).padStart(3, '0')}`
+}
+
 export interface Finding {
   severity: 'critical' | 'high' | 'medium' | 'low'
   category: 'secret' | 'workflow' | 'dependency' | 'config' | 'code' | 'supply_chain'
@@ -7,6 +64,22 @@ export interface Finding {
   code?: string
   line?: number
   prUrl?: string
+  confidence?: number
+  businessImpact?: string
+  recommendation?: string
+  cwe?: string
+  findingId?: string
+}
+
+function enrichFinding(f: Finding): Finding {
+  return {
+    ...f,
+    confidence: f.confidence ?? (f.severity === 'critical' ? 95 : f.severity === 'high' ? 85 : f.severity === 'medium' ? 70 : 50),
+    businessImpact: f.businessImpact ?? impactFor(f.category, f.severity),
+    recommendation: f.recommendation ?? recommendationFor(f.category, f.severity, f.title),
+    cwe: f.cwe ?? cweFor(f.category),
+    findingId: f.findingId ?? nextFindingId(f.severity),
+  }
 }
 
 export interface PRFile {
@@ -435,6 +508,7 @@ function checkLargeFile(file: string, additions: number, patch: string): Finding
 }
 
 export function runRules(files: PRFile[], prNumber?: number, owner?: string, repo?: string, sha?: string): Finding[] {
+  resetFindingCounter()
   const findings: Finding[] = []
   for (const file of files) {
     const patch = file.patch || ''
@@ -488,7 +562,7 @@ export function runRules(files: PRFile[], prNumber?: number, owner?: string, rep
       }
     }
   }
-  return findings
+  return findings.map(enrichFinding)
 }
 
 export function calculateScore(findings: Finding[]): { score: number; critical: number; high: number; medium: number; low: number } {

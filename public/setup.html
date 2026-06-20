@@ -100,7 +100,7 @@ body { background: var(--bg-primary); font-family: var(--font-mono); color: var(
   <!-- Step 2: GitHub App -->
   <div id="step-2" class="step-content">
     <h2>GitHub App</h2>
-    <p>Enter your GitHub App credentials. If you don't have an App, <a href="https://github.com/settings/apps" target="_blank" style="color:var(--accent-blue)">create one</a> with<br><span style="color:var(--text-dark);font-size:0.65rem">Repository permissions: Pull requests (write), Checks (write), Contents (write)</span></p>
+    <p>Enter your GitHub App credentials. If you don't have an App, <a href="https://github.com/settings/apps" target="_blank" style="color:var(--accent-blue)">create one</a> with<br><span style="color:var(--text-dark);font-size:0.65rem">Repository permissions: Pull requests (Read &amp; Write), Checks (Read &amp; Write), Contents (Read). Install the App on the target repository only — Sentinel Oracle monitors a single repository.</span></p>
     <div class="form-group">
       <label for="gh-app-id">App ID</label>
       <input type="text" id="gh-app-id" placeholder="e.g. 4039818">

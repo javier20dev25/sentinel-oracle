@@ -21,6 +21,8 @@ import {
 import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
+import { analyzeWorkflowIntelligence } from './scanner/intel/index'
+import { buildCapabilitySnapshot, buildDNAReport } from './scanner/intel/security-dna'
 import { TokenInventoryScanner } from './inventory/tokens'
 
 function generateEnrollmentToken(): string {
@@ -184,43 +186,28 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   // ----- Session -----
   app.get('/api/session/check', (req, res) => {
-    console.log(`[session/check] Incoming request to /api/session/check`)
-    console.log(`[session/check] Headers cookie: ${req.headers.cookie}`)
-    console.log(`[session/check] req.cookies: ${JSON.stringify(req.cookies)}`)
-    console.log(`[session/check] req.signedCookies: ${JSON.stringify(req.signedCookies)}`)
-    
     const raw = req.signedCookies?.sentinel_session
     if (!raw || typeof raw !== 'string') {
-      console.log(`[session/check] No valid sentinel_session signed cookie present`)
-      db.log('session_check', null, 'No session cookie present')
       return res.json({ authenticated: false })
     }
     try {
-      console.log(`[session/check] Raw session cookie value: ${raw}`)
       const cookieData = JSON.parse(raw)
       if (!cookieData.id) {
-        console.warn(`[session/check] Cookie missing session ID`)
         const cookie = clearSessionCookie()
         res.cookie(cookie.name, cookie.value, cookie.options)
-        db.log('session_check', null, 'Cookie missing session ID')
         return res.json({ authenticated: false })
       }
       const dbSession = db.getSession(cookieData.id)
       if (!dbSession) {
-        console.warn(`[session/check] Session ${cookieData.id} not found in database or expired`)
         const cookie = clearSessionCookie()
         res.cookie(cookie.name, cookie.value, cookie.options)
-        db.log('session_check', null, `Session ${cookieData.id} not found in DB`)
         return res.json({ authenticated: false, reason: 'session_not_found' })
       }
-      console.log(`[session/check] Valid session found: id=${dbSession.id} deviceName=${dbSession.deviceName}`)
       db.touchSession(cookieData.id)
       res.json({ authenticated: true, deviceName: dbSession.deviceName })
-    } catch (e) {
-      console.error(`[session/check] Error parsing/verifying session cookie:`, e)
+    } catch {
       const cookie = clearSessionCookie()
       res.cookie(cookie.name, cookie.value, cookie.options)
-      db.log('session_check', null, `Session check error: ${e instanceof Error ? e.message : e}`)
       res.json({ authenticated: false })
     }
   })
@@ -280,12 +267,20 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Enrollment -----
+  function validatePasswordStrength(password: string): string | null {
+    if (!password || password.length < 8) return 'Password must be at least 8 characters'
+    if (!/[A-Z]/.test(password)) return 'Password must contain an uppercase letter'
+    if (!/[a-z]/.test(password)) return 'Password must contain a lowercase letter'
+    if (!/[0-9]/.test(password)) return 'Password must contain a digit'
+    if (!/[^A-Za-z0-9]/.test(password)) return 'Password must contain a symbol'
+    return null
+  }
+
   app.post('/api/config/password', requireAuth(), authRateLimiter(5, 60000), (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body
-      if (!newPassword || newPassword.length < 4) {
-        return res.status(400).json({ error: 'Password must be at least 4 characters' })
-      }
+      const strengthErr = validatePasswordStrength(newPassword)
+      if (strengthErr) return res.status(400).json({ error: strengthErr })
       if (config.passwordHash && !verifyPassword(currentPassword, config.passwordHash)) {
         return res.status(403).json({ error: 'Current password is incorrect' })
       }
@@ -296,6 +291,30 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     } catch (err) {
       db.log('error', null, `Password change: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to set password' })
+    }
+  })
+
+  app.post('/api/config/password/reset', requireAuth(), authRateLimiter(5, 60000), (req, res) => {
+    try {
+      const { newPassword, reAssertToken } = req.body
+      if (!reAssertToken) return res.status(403).json({ error: 'Re-assertion token required' })
+      const tokenRaw = db.getConfig(`reassert_token_${reAssertToken}`)
+      if (!tokenRaw) return res.status(403).json({ error: 'Invalid or expired re-assertion token' })
+      const tokenData = JSON.parse(tokenRaw)
+      if (Date.now() - tokenData.createdAt > tokenData.ttl) {
+        db.setConfig(`reassert_token_${reAssertToken}`, '')
+        return res.status(403).json({ error: 'Re-assertion token expired' })
+      }
+      const strengthErr = validatePasswordStrength(newPassword)
+      if (strengthErr) return res.status(400).json({ error: strengthErr })
+      db.setConfig(`reassert_token_${reAssertToken}`, '')
+      config.passwordHash = hashPassword(newPassword)
+      saveConfig({ passwordHash: config.passwordHash })
+      db.log('password_reset', null, 'Password reset via WebAuthn re-assertion')
+      res.json({ success: true })
+    } catch (err) {
+      db.log('error', null, `Password reset: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to reset password' })
     }
   })
 
@@ -457,6 +476,56 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- PR Scan (independent verification — optional) -----
+  function computeScanHash(files: { filename: string; status: string; additions: number; deletions: number; patch?: string }[], sha: string): string {
+    const h = crypto.createHash('sha256')
+    h.update(sha)
+    for (const f of files) {
+      h.update(f.filename)
+      h.update(f.status)
+      h.update(String(f.additions))
+      h.update(String(f.deletions))
+      if (f.patch) h.update(crypto.createHash('sha256').update(f.patch).digest('hex'))
+    }
+    return h.digest('hex')
+  }
+
+  app.get('/api/prs/:number/scan-result', requireAuth(), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      let row = db.getLatestScanResult(prNumber)
+      if (!row) {
+        return res.status(404).json({ error: 'No scan result found for this PR. Run a scan first.' })
+      }
+      const pr = db.getPRByNumber(prNumber)
+      const prFiles = db.getPRFiles(prNumber)
+      let findings: unknown[]
+      try { findings = JSON.parse(row.findingsJson) } catch { findings = [] }
+      let intel: unknown
+      try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
+      res.json({
+        riskScore: row.riskScore,
+        critical: row.critical,
+        high: row.high,
+        medium: row.medium,
+        low: row.low,
+        findings,
+        intel: intel || undefined,
+        scannedAt: row.scannedAt,
+        files: prFiles,
+        prNumber,
+        prTitle: pr?.title || '',
+        prAuthor: pr?.author || '',
+        prCreatedAt: pr?.createdAt || row.scannedAt,
+        prAuthorizedAt: pr?.authorizedAt || null,
+        prAuthStatus: pr?.authStatus || 'pending',
+        scanDuration: 0,
+        cached: true,
+      })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get scan result' })
+    }
+  })
+
   app.post('/api/prs/:number/scan', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     if (!config.scanEnabled) {
       return res.status(404).json({ error: 'PR scanning is not enabled. Set scanEnabled: true in config.json' })
@@ -470,10 +539,62 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.storePRFiles(prNumber, files)
       const pr = db.getPRByNumber(prNumber)
       const sha = pr ? pr.sha : ''
-      const result = scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha)
-      db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L)`)
+      const scanHash = computeScanHash(files, sha)
+      // Return cached result if nothing changed
+      if (db.hasScanHash(prNumber, scanHash)) {
+        const row = db.getLatestScanResult(prNumber)
+        if (row) {
+          const prFiles = db.getPRFiles(prNumber)
+          let findings: unknown[]
+          try { findings = JSON.parse(row.findingsJson) } catch { findings = [] }
+          let intel: unknown
+          try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
+          db.log('pr_scanned', prNumber, `Scan cache HIT — returning cached result (risk ${row.riskScore})`)
+          return res.json({
+            riskScore: row.riskScore,
+            critical: row.critical,
+            high: row.high,
+            medium: row.medium,
+            low: row.low,
+            findings,
+            intel: intel || undefined,
+            scannedAt: row.scannedAt,
+            files: prFiles,
+            prNumber,
+            prTitle: pr?.title || '',
+            prAuthor: pr?.author || '',
+            prCreatedAt: pr?.createdAt || row.scannedAt,
+            prAuthorizedAt: pr?.authorizedAt || null,
+            prAuthStatus: pr?.authStatus || 'pending',
+            scanDuration: 0,
+            cached: true,
+          })
+        }
+      }
+      const t0 = Date.now()
+      const result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha)
+      const scanDuration = Date.now() - t0
+      // Persist scan result
+      db.saveScanResult(prNumber, scanHash, result)
+      db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) in ${scanDuration}ms`)
+      // Persist capability snapshot for Security DNA
+      if (result.intel && config.githubOwner && config.githubRepo) {
+        const snapshot = buildCapabilitySnapshot(result.intel)
+        db.storeCapabilitySnapshot(config.githubOwner, config.githubRepo, prNumber, snapshot)
+      }
       const prFiles = db.getPRFiles(prNumber)
-      res.json({ ...result, files: prFiles })
+      res.json({
+        ...result,
+        files: prFiles,
+        prNumber,
+        prTitle: pr?.title || '',
+        prAuthor: pr?.author || '',
+        prCreatedAt: pr?.createdAt || result.scannedAt,
+        prAuthorizedAt: pr?.authorizedAt || null,
+        prAuthStatus: pr?.authStatus || 'pending',
+        scanDuration,
+        cached: false,
+      })
     } catch (err) {
       db.log('error', null, `PR scan: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to scan PR' })
@@ -741,6 +862,125 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- Workflow telemetry (from GitHub Actions workflow) -----
+  app.post('/api/workflow/telemetry', apiRateLimiter(30, 60000), (req, res) => {
+    const { entries, token } = req.body
+    if (!token || token !== config.githubToken) {
+      return res.status(401).json({ error: 'Invalid token' })
+    }
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return res.status(400).json({ error: 'entries array required' })
+    }
+    db.storeWorkflowTelemetry(entries)
+    res.json({ status: 'ok', stored: entries.length })
+  })
+
+  // ----- Workflow baselines -----
+  app.get('/api/workflow/baselines', requireAuth(), apiRateLimiter(20, 60000), (_req, res) => {
+    const records = db.getAllWorkflowRecords()
+    const steps = db.getWorkflowSteps()
+    const intel = analyzeWorkflowIntelligence(records, steps)
+    res.json(intel)
+  })
+
+  // ----- Workflow intelligence for a specific PR -----
+  app.get('/api/prs/:number/workflow-intel', requireAuth(), apiRateLimiter(20, 60000), (req, res) => {
+    const prNumber = parseInt(String(req.params.number), 10)
+    const records = db.getAllWorkflowRecords()
+    const steps = db.getWorkflowSteps()
+    const checkDurations: Record<string, number> = {}
+    for (const r of records) {
+      if (r.prNumber === prNumber) {
+        checkDurations[r.checkName] = r.durationMs
+      }
+    }
+    const intel = analyzeWorkflowIntelligence(records, steps, {
+      currentPR: { number: prNumber, checkDurations },
+    })
+    res.json(intel)
+  })
+
+  // ----- CI Integrity (full report for a PR) -----
+  app.get('/api/prs/:number/ci-integrity', requireAuth(), apiRateLimiter(10, 60000), async (req, res) => {
+    const prNumber = parseInt(String(req.params.number), 10)
+    try {
+      const records = db.getAllWorkflowRecords()
+      const steps = db.getWorkflowSteps()
+      const prFiles = db.getPRFiles(prNumber) || []
+      // Try to get PR files with patches (from scan context)
+      const intel = analyzeWorkflowIntelligence(records, steps, {
+        currentPR: { number: prNumber, checkDurations: {} },
+        prFiles: prFiles.map((f: any) => ({ filename: f.filename, patch: f.status })),
+      })
+      res.json(intel)
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to compute CI integrity' })
+    }
+  })
+
+  // ----- Step telemetry ingestion -----
+  app.post('/api/workflow/telemetry/steps', apiRateLimiter(60, 60000), (req, res) => {
+    const { steps, token } = req.body
+    if (!token || token !== config.githubToken) {
+      return res.status(401).json({ error: 'Invalid token' })
+    }
+    if (!Array.isArray(steps) || steps.length === 0) {
+      return res.status(400).json({ error: 'steps array required' })
+    }
+    db.storeWorkflowSteps(steps.map((s: any) => ({
+      ...s,
+      stepNumber: s.stepNumber || s.step_number || 0,
+      durationMs: s.durationMs || s.duration_ms || 0,
+      prNumber: s.prNumber || s.pr_number || 0,
+    })))
+    res.json({ status: 'ok', stored: steps.length })
+  })
+
+  // ----- CI Policy CRUD -----
+  app.get('/api/policy', requireAuth(), (_req, res) => {
+    const policy = db.getPolicy()
+    res.json(policy || {})
+  })
+
+  app.post('/api/policy', requireAuth(), (req, res) => {
+    const policy = req.body
+    if (!policy || typeof policy !== 'object') {
+      return res.status(400).json({ error: 'Policy object required' })
+    }
+    db.setPolicy('default', policy)
+    res.json({ status: 'ok' })
+  })
+
+  // ----- Sentinel installer (generates GitHub Actions workflow YAML) -----
+  app.get('/api/installer/sentinel-telemetry', requireAuth(), async (_req, res) => {
+    const baseUrl = `${_req.protocol}://${_req.headers.host}`
+    const ds = String.fromCharCode(36) // dollar sign to avoid template literal issues
+    const yaml = [
+      'name: Sentinel Telemetry',
+      '',
+      'on:',
+      '  workflow_run:',
+      '    workflows: ["*"]',
+      '    types:',
+      '      - completed',
+      '',
+      'jobs:',
+      '  send-telemetry:',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - name: Send timing data to Sentinel Oracle',
+      '        env:',
+      '          SENTINEL_URL: ' + JSON.stringify(baseUrl),
+      '          SENTINEL_TOKEN: ' + JSON.stringify(config.githubToken),
+      '        run: |',
+      '          curl -s -X POST "' + ds + 'SENTINEL_URL/api/workflow/telemetry" \\',
+      '            -H "Content-Type: application/json" \\',
+      '            -d \'{"token": "' + ds + 'SENTINEL_TOKEN","entries": [{"checkName": "' + ds + '{{ github.workflow }} / ' + ds + '{{ github.job }}","durationMs": ' + ds + '{{ github.run_duration }},"prNumber": ' + ds + '{{ github.event.workflow_run.pull_requests[0].number || 0 }},"filename": "' + ds + '{{ github.workflow }}"}]}\'',
+    ].join('\n')
+    res.setHeader('Content-Type', 'text/plain')
+    res.send(yaml)
+  })
+
   // ----- Backfill history (full repo PR archive) -----
   let backfillRunning = false
   let backfillProgress = { total: 0, current: 0, errors: 0, lastError: '', done: false }
@@ -873,6 +1113,77 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     } catch (err) {
       db.log('error', null, `Token scan: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to scan tokens' })
+    }
+  })
+
+  app.get('/api/analytics/export', requireAuth(), apiRateLimiter(5, 60000), (_req, res) => {
+    try {
+      const pendingPRs = db.getPendingPRs()
+      const completedPRs = db.getCompletedPRs()
+      const auditLog = db.getAuditLog(10000)
+      const devices = db.listDevices()
+      const tokens = db.getAllTokens()
+      const fileAverages = db.getRepoFileAverages()
+      const allPRs = [...pendingPRs, ...completedPRs]
+      res.json({
+        exportedAt: new Date().toISOString(),
+        summary: {
+          totalPRs: allPRs.length,
+          pendingPRs: pendingPRs.length,
+          completedPRs: completedPRs.length,
+          authorizedPRs: allPRs.filter(p => p.authStatus === 'authorized').length,
+          rejectedPRs: allPRs.filter(p => p.authStatus === 'rejected').length,
+          expiredPRs: allPRs.filter(p => p.authStatus === 'expired').length,
+          registeredDevices: devices.length,
+          totalAuditEntries: auditLog.length,
+          totalTokens: tokens.length,
+          trackedFiles: fileAverages.length,
+        },
+        pullRequests: allPRs.map(p => ({
+          prNumber: p.prNumber,
+          title: p.title,
+          author: p.author,
+          sha: p.sha,
+          ciStatus: p.ciStatus,
+          sentinelStatus: p.sentinelStatus,
+          authStatus: p.authStatus,
+          createdAt: p.createdAt,
+          authorizedAt: p.authorizedAt,
+          deviceName: p.deviceName,
+        })),
+        auditLog: auditLog.map(e => ({
+          timestamp: e.timestamp,
+          action: e.action,
+          prNumber: e.prNumber,
+          detail: e.detail,
+        })),
+        devices: devices.map(d => ({
+          name: d.name,
+          credentialId: d.credentialId,
+          counter: d.counter,
+          createdAt: d.createdAt,
+          lastUsedAt: d.lastUsedAt,
+        })),
+        tokens: tokens.map(t => ({
+          tokenType: t.tokenType,
+          name: t.name,
+          source: t.source,
+          scopes: t.scopes,
+          firstSeenAt: t.firstSeenAt,
+          lastSeenAt: t.lastSeenAt,
+          expiresAt: t.expiresAt,
+          riskScore: t.riskScore,
+        })),
+        fileAverages: fileAverages.map(f => ({
+          filename: f.filename,
+          avgAdditions: f.avgAdditions,
+          avgDeletions: f.avgDeletions,
+          avgSizeBytes: f.avgSizeBytes,
+          prCount: f.count,
+        })),
+      })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to export analytics data' })
     }
   })
 
@@ -1035,11 +1346,23 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   app.post('/api/config/settings', configAuth, (req, res) => {
     try {
-      const { scanEnabled, challengeTtlMs, approveReasonRequired } = req.body
+      const { scanEnabled, autoScan, securityInbox, analystQueue, challengeTtlMs, approveReasonRequired } = req.body
       const toSave: Record<string, unknown> = {}
       if (typeof scanEnabled === 'boolean') {
         toSave.scanEnabled = scanEnabled
         config.scanEnabled = scanEnabled
+      }
+      if (typeof autoScan === 'boolean') {
+        toSave.autoScan = autoScan
+        config.autoScan = autoScan
+      }
+      if (typeof securityInbox === 'boolean') {
+        toSave.securityInbox = securityInbox
+        config.securityInbox = securityInbox
+      }
+      if (typeof analystQueue === 'boolean') {
+        toSave.analystQueue = analystQueue
+        config.analystQueue = analystQueue
       }
       if (typeof challengeTtlMs === 'number' && challengeTtlMs >= 30000) {
         toSave.challengeTtlMs = challengeTtlMs
@@ -1061,6 +1384,28 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  // ----- Security DNA -----
+  app.get('/api/dna', requireAuth(), async (_req, res) => {
+    try {
+      const owner = config.githubOwner || ''
+      const repo = config.githubRepo || ''
+      if (!owner || !repo) {
+        return res.json({ current: null, history: [], changes: [], summary: 'No repository configured', snapshotCount: 0 })
+      }
+      const snapshots = db.getCapabilitySnapshots(owner, repo, 90)
+      if (snapshots.length === 0) {
+        return res.json({ current: null, history: [], changes: [], summary: 'No snapshots yet. Scan a PR to generate DNA.', snapshotCount: 0 })
+      }
+      const current = snapshots[snapshots.length - 1].snapshot
+      const history = snapshots.map(s => s.snapshot)
+      const report = buildDNAReport(current, history.slice(0, -1))
+      res.json(report)
+    } catch (err) {
+      db.log('error', null, `DNA fetch: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to fetch DNA' })
+    }
+  })
+
   // ----- Status -----
   app.get('/api/status', (_req, res) => {
     const pendingCount = db.getPendingPRs().length
@@ -1073,6 +1418,9 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       setupRequired: !db.getConfig('enrollment_completed'),
       authMode: client.authMode,
       scanEnabled: config.scanEnabled,
+      autoScan: config.autoScan,
+      securityInbox: config.securityInbox,
+      analystQueue: config.analystQueue,
       passwordRequired: !!config.passwordHash,
       githubConfigured: !!config.githubAppId && !!config.githubOwner && !!config.githubRepo,
       version: '1.0.0',
@@ -1080,16 +1428,21 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   })
 
   // ----- Polling -----
-  let pollInterval: ReturnType<typeof setInterval> | null = null
+  let pollInterval: ReturnType<typeof setTimeout> | null = null
+  let pollFailCount = 0
+  const POLL_BASE_MS = 30000
+  const POLL_MAX_MS = 1800000
 
-  function startPolling(intervalMs = 30000) {
-    if (pollInterval) clearInterval(pollInterval)
-    let tokenScanInterval: ReturnType<typeof setInterval> | null = null
-    pollInterval = setInterval(async () => {
+  function schedulePoll(delayMs: number) {
+    pollInterval = setTimeout(async function pollCycle() {
       try {
-        if (queue.isLocked()) return
+        if (queue.isLocked()) {
+          schedulePoll(delayMs)
+          return
+        }
         const defaultBranch = await client.getDefaultBranch()
         const result = await pollPRs(client, db, defaultBranch)
+        pollFailCount = 0
         queue.expireStaleChallenges()
         const expiredChallengeCount = db.pruneExpiredWebAuthnChallenges(config.challengeTtlMs)
         if (expiredChallengeCount > 0) {
@@ -1098,7 +1451,23 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         if (result.newPRs > 0 || result.updatedPRs > 0) {
           db.log('poll_complete', null, `Polled: ${result.newPRs} new, ${result.updatedPRs} updated`)
         }
-
+        // Auto-scan new/updated PRs if autoScan is enabled
+        if (config.autoScan && config.scanEnabled) {
+          const pending = db.getPendingPRs()
+          for (const pr of pending) {
+            try {
+              const files = await client.getPRFiles(pr.prNumber)
+              if (files.length === 0) continue
+              db.storePRFiles(pr.prNumber, files)
+              const scanHash = computeScanHash(files, pr.sha)
+              if (!db.hasScanHash(pr.prNumber, scanHash)) {
+                const sResult = await scanPRFiles(files, pr.prNumber, config.githubOwner, config.githubRepo, pr.sha)
+                db.saveScanResult(pr.prNumber, scanHash, sResult)
+                db.log('pr_scanned', pr.prNumber, `Auto-scan: risk ${sResult.riskScore} (${sResult.critical}C ${sResult.high}H ${sResult.medium}M ${sResult.low}L)`)
+              }
+            } catch {}
+          }
+        }
         const lastTokenScan = parseInt(db.getConfig('last_token_scan') || '0', 10)
         if (Date.now() - lastTokenScan > 3600000) {
           try {
@@ -1109,15 +1478,26 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
             db.setConfig('last_token_scan', String(Date.now()))
           } catch {}
         }
+        schedulePoll(POLL_BASE_MS)
       } catch (err) {
-        db.log('error', null, `Poll failed: ${err instanceof Error ? err.message : err}`)
+        pollFailCount++
+        const backoff = Math.min(POLL_BASE_MS * Math.pow(2, pollFailCount - 1), POLL_MAX_MS)
+        if (pollFailCount <= 3 || pollFailCount % 10 === 0) {
+          db.log('error', null, `Poll failed (x${pollFailCount}): ${err instanceof Error ? err.message : err} — next retry in ${Math.round(backoff / 1000)}s`)
+        }
+        schedulePoll(backoff)
       }
-    }, intervalMs)
+    }, delayMs)
+  }
+
+  function startPolling() {
+    stopPolling()
+    schedulePoll(POLL_BASE_MS)
   }
 
   function stopPolling() {
     if (pollInterval) {
-      clearInterval(pollInterval)
+      clearTimeout(pollInterval)
       pollInterval = null
     }
   }

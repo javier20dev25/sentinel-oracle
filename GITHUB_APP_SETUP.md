@@ -31,11 +31,11 @@ This guide covers GitHub App setup. Each Sentinel Oracle instance requires its o
 
    | Permission | Level |
    |------------|-------|
-   | Checks | **Read & write** |
-   | Contents | **Read & write** (needed to merge PRs) |
-   | Metadata | **Read** (always required) |
-   | Pull requests | **Read & write** |
-   | Commit statuses | **Read & write** |
+ | Checks | **Read & write** |
+ | Contents | **Read** |
+ | Metadata | **Read** (always required) |
+ | Pull requests | **Read & write** |
+ | Commit statuses | **Read** |
 
 4. Under **Organization Permissions** (if applicable):
 
@@ -190,13 +190,13 @@ Branch protection must require the `Sentinel Authorization` status check:
 
 ## Required Permissions Summary
 
-| Permission | Purpose |
-|-----------|---------|
-| Pull requests: **Read & write** | List PRs, read PR metadata |
-| Checks: **Read & write** | Read check run results, determine CI status |
-| Commit statuses: **Read & write** | Set Sentinel Authorization status |
-| Contents: **Read & write** | Merge pull requests via API |
-| Metadata: **Read** | Access repo info (always required) |
+| Permission | Level | Endpoints Used | Purpose |
+|-----------|-------|---------------|---------|
+| Pull requests | **Read & write** | `GET /pulls`, `GET /pulls/{n}/files`, `PUT /pulls/{n}/merge` | List PRs, read diff files, merge PRs |
+| Checks | **Read & write** | `GET /commits/{sha}/check-runs`, `POST /check-runs`, `PATCH /check-runs/{id}` | Read CI status, create/update "Sentinel Authorization" check |
+| Contents | **Read** | `GET /compare/{base}...{head}`, `GET /commits` | Compare diffs for scanning, file history |
+| Commit statuses | **Read** | `GET /commits/{sha}/status` | Read combined commit status (CI pass/fail) |
+| Metadata | **Read** (auto) | `GET /repos/{owner}/{repo}` | Repository info (always auto-granted by GitHub) |
 
 ---
 
@@ -243,7 +243,7 @@ And check `/api/status/branch-protection`:
 |---------|-------------|----------|
 | `Failed to obtain installation token` | Private key mismatch or wrong app ID | Verify app ID in GitHub settings, regenerate key |
 | `401 Bad credentials` | Installation token expired or invalid | Check system clock sync (NTP). Token refresh requires <5min clock skew |
-| `403 Forbidden` during merge | Missing Contents permission | Check GitHub App permissions — Contents must be Read & write |
+| `403 Forbidden` during merge | Missing Pull requests write permission | Check GitHub App permissions — Pull requests must be Read & write |
 | `Branch not protected` | No branch protection rule | Create branch protection rule requiring Sentinel Authorization |
 | Webhook returns 401 | Wrong webhook secret | Verify secret matches what's in config.json |
 

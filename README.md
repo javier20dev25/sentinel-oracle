@@ -14,6 +14,177 @@ Two authentication modes are supported: Personal Access Token (PAT) and GitHub A
 
 ---
 
+## Documentation
+
+Full architecture, API reference, and operational guide are in the `docs/` directory:
+
+| Document | Description |
+|----------|-------------|
+| [docs/architecture.md](docs/architecture.md) | System architecture, module dependency graph, data flow, database schema |
+| [docs/api.md](docs/api.md) | Complete API reference with request/response examples |
+| [docs/guide.md](docs/guide.md) | Operational guide: installation, configuration, CLI reference, troubleshooting |
+| [docs/security-dna.md](docs/security-dna.md) | Security DNA aggregator: design, data flow, validation results |
+
+---
+
+## CLI Reference
+
+```bash
+sentinel-oracle                    Start the server (default)
+sentinel-oracle start              Start the server
+sentinel-oracle scan               Run a one-time security scan on the configured repository
+sentinel-oracle --version, -v      Print version
+sentinel-oracle --help, -h         Print help
+```
+
+---
+
+## Security Scanner
+
+Sentinel Oracle includes a multi-layered security scanner that analyzes PR diffs across 14 intel modules. Scans are deduplicated by SHA-256 of PR sha + file metadata.
+
+### Intel Modules
+
+| Module | Analyzes |
+|--------|----------|
+| Capabilities | Filesystem, network, shell, dynamic code, database, crypto operations |
+| Endpoints | URLs, IP addresses, external domains |
+| Services | SDK integrations (Stripe, AWS, OpenAI, etc.) |
+| Permissions | Workflow permission changes |
+| Dependencies | npm, Python, Go, Rust dependency changes (EXPERIMENTAL: tarball diff) |
+| Secrets | Environment variable exposure, hardcoded credentials |
+| Trust | Data flow across trust boundaries |
+| Crypto | Algorithm changes, key length changes |
+| Auth | New routes, authentication middleware removal |
+| Infrastructure | Docker, Kubernetes, Terraform changes |
+| CI Integrity | Step redistribution, cache camouflage, fingerprint churn, synthetic telemetry, evasion signals, campaign detection |
+| Trust Drift | New collaborators, GitHub Apps, secrets, runners, environments, branch protection removals, permission escalations |
+| Security DNA | Capability fingerprint aggregator (14 dimensions) |
+
+### Auto Scan
+
+When enabled in Settings (toggle switch), all PRs are scanned automatically on queue refresh. Manual SCAN button appears when auto-scan is OFF. Scans are cached per PR SHA and never re-executed for identical code.
+
+### Security Categories
+
+| Severity | Score Range | Examples |
+|----------|-------------|---------|
+| Critical | >=10 | Secrets, credential leaks, auth bypass |
+| High | >=7 | Permission escalation, crypto weakness, CI anomalies |
+| Medium | >=4 | New capabilities, external endpoints, campaign signals |
+| Low | >=1 | Info-level findings, new dependencies |
+| None | 0 | No issues |
+
+---
+
+## CI Integrity Engine
+
+The CI Integrity engine monitors GitHub Actions workflows for anomalous behavior using three comparison windows (7-day, 30-day, full history) with MAD-based z-score computation.
+
+### Detection Modules
+
+- **Step Redistribution**: Detects workflow steps moving between jobs between commits
+- **Cache Camouflage**: Detects cache key manipulation across commits
+- **Fingerprint Churn**: Detects CI job structure changes between commits
+- **Synthetic Telemetry**: Detects fake workflow events injected into the API
+- **Evasion Signals**: Detects YAML anchors, merge tags, template variables used to obfuscate workflow changes
+- **Campaign Detection**: Cross-PR weighted scoring (exec=10, escalation=8, runner=8, secret=6, capability=2 capped at 20, domain=1 capped at 10, endpoint=1 capped at 10)
+
+### Multi-window Baselines
+
+Each check's baselines are computed independently for three windows:
+- **All history**: No minimum sample requirement
+- **30-day**: Requires >=3 samples
+- **7-day**: Requires >=3 samples
+
+An anomaly triggers when any window exceeds its z-score threshold (z>10=critical, z>5=high, else 10pts deduction). The worst z-score across all windows is used.
+
+### Integrity Score
+
+Starting from 100, deductions are applied per anomaly:
+- Critical anomaly: -25 points
+- High anomaly: -15 points
+- Medium anomaly: -5 points
+- Low anomaly: -1 point
+- Z-score > 10: -40 points
+- Z-score > 5: -20 points
+- Z-score else: -10 points
+- Missing sensor data: -10 points
+
+### Trusted Baselines
+
+Only PRs explicitly marked with `trusted: true` train the baseline model. Records without explicit trust are excluded when `trustedOnly` is enabled.
+
+---
+
+## Trust Drift Detection
+
+Trust Drift monitors the GitHub organization for changes that weaken the repository's security posture. Seven signals are tracked:
+
+| Signal | Weight | What it detects |
+|--------|--------|-----------------|
+| Collaborator | 2 | New users added with write/admin access |
+| GitHub App | 3 | New GitHub Apps installed on the repo |
+| Secret | 3 | New secrets added to environments |
+| Runner | 3 | New self-hosted runners registered |
+| Environment | 2 | New environments created |
+| Branch Protection | 4 | Removal of branch protection rules |
+| Permission Escalation | 4 | Escalated permissions in YAML workflow files |
+
+**Thresholds**: >=10 = critical, >=6 = high, >=3 = medium
+
+---
+
+## Security DNA
+
+Security DNA is a capability aggregator that reads from existing IntelReport modules to produce a repository capability fingerprint. It is NOT a new detector.
+
+### 14 Capability Dimensions
+
+| Capability | Description |
+|------------|-------------|
+| filesystem | File read/write operations |
+| network | Network requests, HTTP calls |
+| shell | Command execution, subprocesses |
+| dynamicCode | Eval, code generation |
+| database | Database queries, migrations |
+| crypto | Cryptography operations |
+| secrets | Secret/hardcoded credential usage |
+| runners | CI runner configuration changes |
+| environments | Environment variable manipulation |
+| collaborators | New collaborator additions |
+| permissionEscalations | Workflow permission changes |
+| newDomains | New external domains |
+| newIntegrations | New service integrations |
+| workflowCount | Number of workflow files |
+
+### API
+
+`GET /api/dna` -- returns `{ current, history, changes, summary, snapshotCount }`
+
+### Storage
+
+Snapshots are stored in the `capability_snapshots` SQLite table, auto-generated after every scan.
+
+### Validation
+
+Validated against 5 real open-source repositories (Kubernetes, Next.js, Home Assistant, OpenTelemetry Collector, Open WebUI). Produces differentiated fingerprints correlating with each project's technical domain.
+
+---
+
+## Test Classification
+
+Tests are organized by intention:
+
+| Directory | Intent | CI Behavior |
+|-----------|--------|-------------|
+| `test/regression/` | Must-pass tests verifying core functionality | FAIL on failure |
+| `test/evasion/` | Documented bypasses (attacker perspective) | PASS = no detection expected |
+| `test/red-team/` | Adversarial attack scenarios | PASS = detection confirmed |
+| `test/integration/` | Multi-layer integration (HTTP, DB, WebAuthn) | FAIL on failure |
+
+---
+
 ## Table of Contents
 
 - [Problem Statement](#problem-statement)

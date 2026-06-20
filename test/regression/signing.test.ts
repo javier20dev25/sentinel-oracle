@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { createChallengeToken, verifyChallengeToken, generateNonce } from '../src/crypto/signing'
+import { createChallengeToken, verifyChallengeToken, generateNonce } from '../../src/crypto/signing'
 
 describe('createChallengeToken', () => {
   it('creates a signed challenge with correct fields', () => {
