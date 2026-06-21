@@ -90,37 +90,44 @@ async function collectGithubApp(): Promise<{ appId: string; installationId: stri
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
   try {
     console.log()
-    console.log(` ${BLD}${YLW}GitHub App Setup${R}`)
-    console.log(` ${DIM}Create a GitHub App at:${R}`)
-    console.log(` ${CYAN}https://github.com/settings/apps/new${R}`)
-    console.log(` ${DIM}• Webhook: Active → URL: https://example.com (change later)${R}`)
-    console.log(` ${DIM}• Permissions → Pull requests: Read & Write${R}`)
-    console.log(` ${DIM}• Generate a private key after creating the app${R}`)
-    console.log(` ${DIM}• Install the app on your repository${R}`)
-    console.log(` ${DIM}  → Copy the Installation ID from the URL${R}`)
+    console.log(` ${BLD}${YLW}GitHub App Setup (optional)${R}`)
     console.log()
-    console.log(` ${DIM}(Or press Ctrl+C to skip)${R}`)
+    console.log(` ${DIM}If you already have a GitHub App installed, paste:`)
+    console.log(`   ${GREEN}•${R} App ID           ${DIM}→ Settings → GitHub Apps → Edit → About → App ID${R}`)
+    console.log(`   ${GREEN}•${R} Installation ID  ${DIM}→ Settings → Installed GitHub Apps → Configure → URL number${R}`)
+    console.log(`   ${GREEN}•${R} Private key path ${DIM}→ the .pem file you downloaded${R}`)
+    console.log()
+    console.log(` ${DIM}If not, create one at ${CYAN}https://github.com/settings/apps/new${R}`)
+    console.log(` ${DIM}  • Webhook: Active → URL: https://example.com (change later)`)
+    console.log(` ${DIM}  • Repository permissions → Pull requests: Read & Write`)
+    console.log(` ${DIM}  • After creating → Generate a private key → Download .pem`)
+    console.log(` ${DIM}  • Then install the app on your repository`)
+    console.log()
+    console.log(` ${DIM}(Press Ctrl+C to skip GitHub App setup)${R}`)
     console.log()
 
-    const appId = (await ask(rl, ` ${BLD}App ID${R}: `)).trim()
-    if (!appId) { return null }
+    const appId = (await ask(rl, ` ${BLD}App ID${R} ${DIM}(e.g. 4039818)${R}: `)).trim()
+    if (!appId || !/^\d+$/.test(appId)) { return null }
 
-    const installationId = (await ask(rl, ` ${BLD}Installation ID${R}: `)).trim()
-    if (!installationId) { return null }
+    const installationId = (await ask(rl, ` ${BLD}Installation ID${R} ${DIM}(e.g. 139924356)${R}: `)).trim()
+    if (!installationId || !/^\d+$/.test(installationId)) { return null }
 
-    console.log(` ${DIM}Paste the full private key (PEM), then press Enter twice:${R}`)
-    console.log()
-    const lines: string[] = []
-    while (true) {
-      const line = (await ask(rl, ` ${DIM}>${R} `))
-      if (line.trim() === '' && lines.length > 0 && lines[lines.length - 1].trim() === '') break
-      lines.push(line)
-    }
-    const privateKey = lines.join('\n').trim()
-    if (!privateKey || !privateKey.includes('BEGIN PRIVATE KEY')) {
-      console.log(` ${RED}Invalid private key — skipping GitHub App setup.${R}`)
+    const keyPath = (await ask(rl, ` ${BLD}Private key path${R} ${DIM}(e.g. C:\\keys\\app.pem)${R}: `)).trim()
+    if (!keyPath) { return null }
+
+    let privateKey: string
+    try {
+      privateKey = fs.readFileSync(keyPath, 'utf8')
+    } catch {
+      console.log(` ${RED}Could not read file: ${keyPath}${R}`)
       return null
     }
+    if (!privateKey.includes('BEGIN PRIVATE KEY')) {
+      console.log(` ${RED}File is not a valid PEM private key${R}`)
+      return null
+    }
+
+    console.log(` ${GREEN}✓ Private key loaded (${privateKey.length} bytes)${R}`)
 
     return { appId, installationId, privateKey }
   } finally {
