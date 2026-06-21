@@ -160,7 +160,7 @@ async function main() {
   const config = loadConfig()
   console.warn = origWarn
 
-  const hasCredentials = ensureCredentials(config)
+  ensureCredentials(config)
   validatePermissions(config.dataDir)
 
   const { tokenOrConfig, warnings } = resolveCredentials(config)
@@ -170,46 +170,64 @@ async function main() {
   initHmacKey(config.hmacSeed)
   initEnrollment(config, db)
 
-  const setupMode = !hasCredentials
-  if (setupMode) {
-    configWarnings.push('[setup] Server running in setup mode — configure GitHub App at /setup')
-  }
-
   let client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
 
-  const skipVerify = process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1' || setupMode
-  if (skipVerify) {
-    if (process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1') {
-      configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+  let valid = false
+  const isTty = process.stdout.isTTY
+
+  if (process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1') {
+    configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+  } else if (!tokenOrConfig && isTty) {
+    const result = await runSetupWizard(config.githubOwner, config.githubRepo)
+    if (result) {
+      const reloaded = loadConfig()
+      const r = resolveCredentials(reloaded)
+      configWarnings.push(...r.warnings)
+      client = new GitHubClient(r.tokenOrConfig, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
+      Object.assign(config, reloaded)
+      valid = await client.verifyToken()
     }
-  } else {
-    let valid = await client.verifyToken()
-    if (!valid && process.stdout.isTTY) {
+    if (!valid) {
       console.log()
-      console.log(' ────────────────────────────────────────────')
-      console.log(' GitHub token not found or invalid.')
-      console.log(' You can paste a fine-grained PAT now,')
-      console.log(' or press Ctrl+C to start in setup mode.')
-      console.log(' ────────────────────────────────────────────')
+      console.log(' Starting in setup mode — configure via the Web UI.')
+      console.log(' Run sentinel-oracle again after configuring.')
       console.log()
+    }
+  } else if (tokenOrConfig) {
+    valid = await client.verifyToken()
+    if (!valid && isTty) {
       const result = await runSetupWizard(config.githubOwner, config.githubRepo)
       if (result) {
         const reloaded = loadConfig()
-        const { tokenOrConfig: newToken } = resolveCredentials(reloaded)
-        client = new GitHubClient(newToken, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
+        const r = resolveCredentials(reloaded)
+        configWarnings.push(...r.warnings)
+        client = new GitHubClient(r.tokenOrConfig, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
         Object.assign(config, reloaded)
         valid = await client.verifyToken()
       }
     }
     if (!valid) {
-      if (process.stdout.isTTY) {
-        console.error('Token still invalid — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
+      if (isTty) {
+        console.log()
+        console.log(' Token invalid — starting in setup mode.')
+        console.log(' Run sentinel-oracle again after fixing the token,')
+        console.log(' or set SENTINEL_SKIP_TOKEN_VERIFY=1 to skip.')
+        console.log()
       } else {
         console.error('GitHub credential verification failed — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
+        gracefulExit(1)
       }
-      gracefulExit(1)
+    } else {
+      configWarnings.push(`[auth] Using ${client.authMode} authentication`)
     }
-    configWarnings.push(`[auth] Using ${client.authMode} authentication`)
+  } else if (!isTty) {
+    console.error('No GitHub token configured — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
+    gracefulExit(1)
+  }
+
+  const setupMode = !valid
+  if (setupMode) {
+    configWarnings.push('[setup] Server running in setup mode — configure via the Web UI')
   }
 
   const { app, startPolling, stopPolling } = createApp(config, db, client)
