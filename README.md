@@ -27,6 +27,18 @@ Full architecture, API reference, and operational guide are in the `docs/` direc
 
 ---
 
+## Quick Start (Global CLI)
+
+```bash
+git clone https://github.com/javier20dev25/sentinel-oracle.git
+cd sentinel-oracle
+npm install -g .
+sentinel-oracle
+```
+
+After cloning and installing globally, the `sentinel-oracle` command is available
+from anywhere. The server starts and prints the dashboard URL in the terminal.
+
 ## CLI Reference
 
 ```bash
@@ -1294,6 +1306,27 @@ security research.
 
 We have no paid security team — we rely on the community to help keep this
 project secure. Vulnerability reports are sincerely appreciated.
+
+### License and Commercial Use
+
+Sentinel Oracle is released under the **Business Source License 1.1** (see
+[LICENSE](./LICENSE)). In plain language:
+
+- ✅ **You can** use, modify, and improve Sentinel Oracle for your own
+  development, internal operations, or maintenance — whether you're an
+  individual developer, a startup, a bank, or a large enterprise.
+- ❌ **You cannot** sell, sublicense, or charge for the software itself, nor
+  incorporate it into a paid commercial product or a hosted/managed service
+  (SaaS, PaaS, cloud hosting).
+- ✅ **Internal business use is always permitted.** You can build internal
+  tools, dashboards, or custom integrations on top of Sentinel Oracle without
+  restriction, as long as they are not sold or monetized externally.
+- ✅ **Contributions back to the project** (bug fixes, features,
+  documentation) are welcome and encouraged under the same license terms.
+
+> *If your company relies on Sentinel Oracle to protect your merge pipeline
+> and you want to give back — contributions, security research, and
+> documentation improvements are the best way. No payment required.*
 
 ---
 

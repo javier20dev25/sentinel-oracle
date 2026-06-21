@@ -19,6 +19,7 @@
         "test:intel4": "node --max-old-space-size=6144 node_modules/.bin/vitest run --config vitest.intel4.config.ts",
         "test:intel5": "node --max-old-space-size=6144 node_modules/.bin/vitest run --config vitest.intel5.config.ts",
         "test:watch": "node --max-old-space-size=4096 node_modules/.bin/vitest",
+        "prepare": "npm run build",
         "pretest": ""
     },
     "keywords": [
