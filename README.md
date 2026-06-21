@@ -1277,6 +1277,26 @@ node -e "console.log(JSON.parse(require('fs').readFileSync(require('os').homedir
 
 ---
 
+---
+
+## Community
+
+Sentinel Oracle is a community-driven project. Contributions of all kinds are
+welcome — code, bug reports, feature ideas, documentation improvements, and
+security research.
+
+| Resource | Purpose |
+|----------|---------|
+| [CONTRIBUTING.md](./CONTRIBUTING.md) | How to contribute, coding guidelines, PR process |
+| [SECURITY.md](./SECURITY.md) | How to report a vulnerability |
+| [Issues](https://github.com/javier20dev25/sentinel-oracle/issues) | Bug reports and feature requests |
+| [Pull Requests](https://github.com/javier20dev25/sentinel-oracle/pulls) | Open PRs awaiting review |
+
+We have no paid security team — we rely on the community to help keep this
+project secure. Vulnerability reports are sincerely appreciated.
+
+---
+
 ## License
 
 BUSSL-1.1 -- see LICENSE for terms.

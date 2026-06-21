@@ -1,6 +1,5 @@
 import type { GitHubClient, CheckStatus, BranchProtection } from './client';
 import type { DatabaseStore } from '../storage/database';
-import { promises as dns } from 'dns'
 
 const REQUIRED_CHECKS = ['build-and-test', 'Sentinel Authorization'];
 
@@ -15,7 +14,6 @@ export async function pollPRs(client: GitHubClient, db: DatabaseStore, defaultBr
 
     let prs;
     try {
-        await dns.resolve('api.github.com')
         prs = await client.listOpenPRs();
     } catch {
         return result;

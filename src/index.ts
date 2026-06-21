@@ -1,5 +1,4 @@
-import { setDefaultResultOrder, setServers, promises as dns } from 'dns'
-setServers(['8.8.8.8', '1.1.1.1'])
+import { setDefaultResultOrder } from 'dns'
 setDefaultResultOrder('ipv4first')
 
 const packageJson = JSON.parse(fs.readFileSync(__dirname + '/../package.json', 'utf8'))
@@ -35,7 +34,7 @@ import { GitHubClient } from './github/client'
 import type { GitHubAppConfig } from './github/auth'
 import { createApp, initEnrollment } from './server'
 import { initHmacKey } from './crypto/signing'
-import { printStartupBanner } from './startup'
+import { printBanner, printHealthSummary } from './startup'
 import * as fs from 'fs'
 import * as https from 'https'
 
@@ -172,10 +171,6 @@ async function main() {
 
   const client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
 
-  try {
-    await dns.resolve('api.github.com')
-  } catch {}
-
   const setupMode = !hasCredentials
   if (setupMode) {
     configWarnings.push('[setup] Server running in setup mode — configure GitHub App at /setup')
@@ -201,10 +196,11 @@ async function main() {
 
   const server = https.createServer(httpsOptions, app)
   server.listen(config.port, config.host, () => {
-    printStartupBanner(config, db)
+    printBanner(config, db)
     for (const w of configWarnings) {
       console.error(w)
     }
+    printHealthSummary(config)
     const wasLocked = db.getConfig('system_lockdown') === 'true'
     if (wasLocked) {
       console.error('[lockdown] System was in lockdown mode at shutdown — restoring')

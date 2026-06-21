@@ -98,6 +98,20 @@ function tailscaleBin(): string {
   return 'tailscale'
 }
 
+function detectTailscaleDnsName(): string | null {
+  try {
+    const ts = tailscaleBin()
+    const statusOut = execSync(`"${ts}" status --json`, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] })
+    const status = JSON.parse(statusOut)
+    let dnsName: string = (status.Self?.DNSName || '').replace(/\.$/, '')
+    if (!dnsName) return null
+    if (dnsName.startsWith('*.')) dnsName = dnsName.slice(2)
+    return dnsName
+  } catch {
+    return null
+  }
+}
+
 function detectTailscaleFunnelUrl(config: { port: number }): { url: string; origin: string; rpId: string } | null {
   try {
     const ts = tailscaleBin()
@@ -226,11 +240,15 @@ export function loadConfig(): Config {
         merged.bindAddress = funnel.rpId
         merged.serverOrigin = funnel.origin
         merged.rpId = funnel.rpId
-      } else if (tailscaleIp && merged.bindAddress !== tailscaleIp) {
-        console.warn(`[config] Tailscale detected at ${tailscaleIp} — prefering over ${merged.bindAddress}`)
-        merged.bindAddress = tailscaleIp
-        merged.serverOrigin = `https://${tailscaleIp}:${merged.port}`
-        merged.rpId = tailscaleIp
+      } else if (tailscaleIp) {
+        const dnsName = detectTailscaleDnsName()
+        const addr = dnsName || tailscaleIp
+        if (merged.bindAddress !== addr) {
+          console.warn(`[config] Tailscale detected at ${addr}${dnsName ? ` (${tailscaleIp})` : ''} — prefering over ${merged.bindAddress}`)
+        }
+        merged.bindAddress = addr
+        merged.serverOrigin = `https://${addr}:${merged.port}`
+        merged.rpId = addr
       }
 
       const warnings = validateConfig(merged)
@@ -252,7 +270,18 @@ export function loadConfig(): Config {
     defaults.serverOrigin = funnel.origin
     defaults.rpId = funnel.rpId
   } else if (tailscaleIp) {
-    console.log(`[config] Tailscale detected at ${tailscaleIp} — using Tailscale IP`)
+    const dnsName = detectTailscaleDnsName()
+    if (dnsName) {
+      defaults.bindAddress = dnsName
+      defaults.serverOrigin = `https://${dnsName}:${defaults.port}`
+      defaults.rpId = dnsName
+      console.log(`[config] Tailscale MagicDNS at ${dnsName} (${tailscaleIp})`)
+    } else {
+      defaults.bindAddress = tailscaleIp
+      defaults.serverOrigin = `https://${tailscaleIp}:${defaults.port}`
+      defaults.rpId = tailscaleIp
+      console.log(`[config] Tailscale detected at ${tailscaleIp} — using Tailscale IP`)
+    }
   }
 
   console.log(`[config] No config.json found — using defaults. Run with https://${defaults.bindAddress}:${defaults.port}`)
