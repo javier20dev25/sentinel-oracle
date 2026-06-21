@@ -1,4 +1,5 @@
 import { setDefaultResultOrder } from 'dns'
+import * as fs from 'fs'
 setDefaultResultOrder('ipv4first')
 
 const packageJson = JSON.parse(fs.readFileSync(__dirname + '/../package.json', 'utf8'))
@@ -35,7 +36,6 @@ import type { GitHubAppConfig } from './github/auth'
 import { createApp, initEnrollment } from './server'
 import { initHmacKey } from './crypto/signing'
 import { printBanner, printHealthSummary } from './startup'
-import * as fs from 'fs'
 import * as https from 'https'
 
 function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrConfig: string | GitHubAppConfig; warnings: string[] } {
