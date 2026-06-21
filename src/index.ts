@@ -36,6 +36,7 @@ import type { GitHubAppConfig } from './github/auth'
 import { createApp, initEnrollment } from './server'
 import { initHmacKey } from './crypto/signing'
 import { printBanner, printHealthSummary } from './startup'
+import { runSetupWizard } from './setup-wizard'
 import * as https from 'https'
 
 function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrConfig: string | GitHubAppConfig; warnings: string[] } {
@@ -169,25 +170,46 @@ async function main() {
   initHmacKey(config.hmacSeed)
   initEnrollment(config, db)
 
-  const client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
-
   const setupMode = !hasCredentials
   if (setupMode) {
     configWarnings.push('[setup] Server running in setup mode — configure GitHub App at /setup')
   }
 
+  let client = new GitHubClient(tokenOrConfig, config.githubOwner, config.githubRepo, config.githubStatusContext)
+
   const skipVerify = process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1' || setupMode
   if (skipVerify) {
-    configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+    if (process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1') {
+      configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+    }
   } else {
-    const valid = await client.verifyToken()
+    let valid = await client.verifyToken()
+    if (!valid && process.stdout.isTTY) {
+      console.log()
+      console.log(' ────────────────────────────────────────────')
+      console.log(' GitHub token not found or invalid.')
+      console.log(' You can paste a fine-grained PAT now,')
+      console.log(' or press Ctrl+C to start in setup mode.')
+      console.log(' ────────────────────────────────────────────')
+      console.log()
+      const result = await runSetupWizard(config.githubOwner, config.githubRepo)
+      if (result) {
+        const reloaded = loadConfig()
+        const { tokenOrConfig: newToken } = resolveCredentials(reloaded)
+        client = new GitHubClient(newToken, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
+        Object.assign(config, reloaded)
+        valid = await client.verifyToken()
+      }
+    }
     if (!valid) {
-      console.error('GitHub credential verification failed — check token/permissions')
-      console.error('Set SENTINEL_SKIP_TOKEN_VERIFY=1 to skip (development only)')
+      if (process.stdout.isTTY) {
+        console.error('Token still invalid — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
+      } else {
+        console.error('GitHub credential verification failed — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
+      }
       gracefulExit(1)
     }
-    const mode = client.authMode === 'github_app' ? 'GitHub App' : 'PAT'
-    configWarnings.push(`[auth] Using ${mode} authentication`)
+    configWarnings.push(`[auth] Using ${client.authMode} authentication`)
   }
 
   const { app, startPolling, stopPolling } = createApp(config, db, client)
