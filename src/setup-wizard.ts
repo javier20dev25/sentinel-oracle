@@ -107,13 +107,28 @@ async function collectGithubApp(): Promise<{ appId: string; installationId: stri
     console.log()
 
     const appId = (await ask(rl, ` ${BLD}App ID${R} ${DIM}(e.g. 4039818)${R}: `)).trim()
-    if (!appId || !/^\d+$/.test(appId)) { return null }
+    if (!appId) { return null }
+    if (!/^\d+$/.test(appId)) {
+      console.log(` ${RED}Invalid App ID — must be a number (e.g. 4039818). Skipping GitHub App setup.${R}`)
+      console.log()
+      return null
+    }
 
     const installationId = (await ask(rl, ` ${BLD}Installation ID${R} ${DIM}(e.g. 139924356)${R}: `)).trim()
-    if (!installationId || !/^\d+$/.test(installationId)) { return null }
+    if (!installationId) { return null }
+    if (!/^\d+$/.test(installationId)) {
+      console.log(` ${RED}Invalid Installation ID — must be a number. Skipping GitHub App setup.${R}`)
+      console.log()
+      return null
+    }
 
     const keyPath = (await ask(rl, ` ${BLD}Private key path${R} ${DIM}(e.g. C:\\keys\\app.pem)${R}: `)).trim()
     if (!keyPath) { return null }
+    if (!fs.existsSync(keyPath)) {
+      console.log(` ${RED}File not found: ${keyPath}. Skipping GitHub App setup.${R}`)
+      console.log()
+      return null
+    }
 
     let privateKey: string
     try {
