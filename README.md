@@ -39,6 +39,69 @@ sentinel-oracle
 After cloning and installing globally, the `sentinel-oracle` command is available
 from anywhere. The server starts and prints the dashboard URL in the terminal.
 
+### First-Time Setup (step by step)
+
+After installing globally, this is the full setup flow:
+
+```powershell
+# 1. Create config directory
+mkdir "$env:USERPROFILE\.sentinel-oracle"
+
+# 2. Generate self-signed TLS certificate
+openssl req -x509 -newkey rsa:2048 -keyout "$env:USERPROFILE\.sentinel-oracle\server.key" -out "$env:USERPROFILE\.sentinel-oracle\server.cert" -days 365 -nodes -subj "/CN=sentinel-oracle"
+
+# 3. Create a fine-grained GitHub PAT
+#    Go to: GitHub.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens
+#    - Repository access: "Only select repositories" → pick your repo
+#    - Permissions → Pull requests: "Write"
+#    - Click "Generate token"
+#    Copy the token (starts with github_pat_...)
+
+# 4. Write the config file
+@"
+{
+  "githubToken": "github_pat_...",
+  "githubOwner": "your-org",
+  "githubRepo": "your-repo",
+  "port": 3443
+}
+"@ | Set-Content "$env:USERPROFILE\.sentinel-oracle\config.json"
+
+# 5. Set env vars (or put them in config.json above)
+$env:GITHUB_TOKEN="github_pat_..."
+$env:ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
+
+# 6. Test the token
+curl.exe -H "Authorization: Bearer $env:GITHUB_TOKEN" https://api.github.com/repos/your-org/your-repo
+
+# 7. Start the server (skip token verify the first time if you set env vars above)
+$env:SENTINEL_SKIP_TOKEN_VERIFY=1
+sentinel-oracle
+```
+
+> **Fine-grained PAT permissions required:** `Pull requests: Write` (to write commit status and merge).
+
+On Linux / macOS:
+
+```bash
+mkdir -p ~/.sentinel-oracle
+openssl req -x509 -newkey rsa:2048 -keyout ~/.sentinel-oracle/server.key -out ~/.sentinel-oracle/server.cert -days 365 -nodes -subj "/CN=sentinel-oracle"
+cat > ~/.sentinel-oracle/config.json <<EOF
+{
+  "githubToken": "github_pat_...",
+  "githubOwner": "your-org",
+  "githubRepo": "your-repo",
+  "port": 3443
+}
+EOF
+export GITHUB_TOKEN="github_pat_..."
+export ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
+export SENTINEL_SKIP_TOKEN_VERIFY=1
+sentinel-oracle
+```
+
+---
+
 ## CLI Reference
 
 ```bash
