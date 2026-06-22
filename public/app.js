@@ -136,6 +136,9 @@
     } else if (!devicesRegistered) {
       showPanel('setup-section');
     } else if (!authenticated) {
+      // Pre-load GitHub config section so it can be navigated to
+      panelsLoaded['github-config-section'] = true
+      loadGithubConfig()
       showPanel('auth-section');
     } else {
         panelsLoaded['pr-section'] = true
@@ -2273,7 +2276,6 @@
 
   // GitHub Config
   async function loadGithubConfig() {
-    if (!authenticated) return;
     const el = document.getElementById('github-config-display');
     try {
       const cfg = await api('/api/config/github-status');
@@ -2290,6 +2292,9 @@
       html += '<div class="token-detail"><span class="token-label">Scanner</span><span class="badge ' + (cfg.scanEnabled ? 'success' : '') + '">' + (cfg.scanEnabled ? 'Enabled' : 'Disabled') + '</span></div>';
       html += '<div class="token-detail"><span class="token-label">Webhook Secret</span><span class="badge ' + (cfg.webhookSecretConfigured ? 'success' : '') + '">' + (cfg.webhookSecretConfigured ? 'Configured' : 'Not set') + '</span></div>';
       html += '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border-color);display:flex;gap:0.5rem;flex-wrap:wrap">';
+      if (!authenticated) {
+        html += '<span style="width:100%;font-size:0.6rem;color:var(--text-dark);margin-bottom:0.5rem">Use the setup wizard to configure GitHub without authentication:</span>';
+      }
       html += '<a href="/setup.html" style="display:inline-flex;align-items:center;padding:0.5rem 1rem;background:transparent;border:1px solid var(--border-color);border-radius:0;color:var(--text-main);font-size:0.7rem;font-weight:500;letter-spacing:0.08em;cursor:pointer;font-family:var(--font-mono);text-transform:uppercase;transition:all 0.15s ease;text-decoration:none">Open Setup Wizard</a>';
       html += '</div>';
       el.innerHTML = html;
@@ -2843,7 +2848,8 @@ sentinel-oracle/
       target.style.display = 'block'
       currentPanel = id
       // Lazy-load panel data if not loaded yet
-      if (!panelsLoaded[id] && authenticated) {
+      const allowUnauthenticated = ['github-config-section', 'setup-section', 'password-section']
+      if (!panelsLoaded[id] && (authenticated || allowUnauthenticated.includes(id))) {
         panelsLoaded[id] = true
         switch (id) {
           case 'soc-section': loadSOC(); break

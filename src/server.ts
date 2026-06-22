@@ -1297,23 +1297,39 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       authMode: client.authMode || 'none',
       scanEnabled: config.scanEnabled,
       webhookSecretConfigured: !!config.githubWebhookSecret,
+      serverOrigin: config.serverOrigin,
+      webhookUrl: config.serverOrigin + '/api/webhook/github',
     })
   })
 
   app.post('/api/config/github', configAuth, (req, res) => {
     try {
-      const { appId, installationId, privateKey, owner, repo } = req.body
+      const { appId, installationId, privateKey, privateKeyPath, owner, repo } = req.body
       if (!owner || !repo) {
         return res.status(400).json({ error: 'Owner and repository are required' })
       }
       const toSave: Record<string, unknown> = { githubOwner: owner, githubRepo: repo }
       if (appId) toSave.githubAppId = String(appId)
       if (installationId) toSave.githubInstallationId = String(installationId)
+      let resolvedKeyPath: string | undefined
       if (privateKey && typeof privateKey === 'string' && privateKey.includes('BEGIN')) {
-        const keyPath = path.join(config.dataDir, 'private-key.pem')
-        fs.writeFileSync(keyPath, privateKey, { mode: 0o600 })
-        toSave.githubPrivateKeyPath = keyPath
-        config.githubPrivateKeyPath = keyPath
+        resolvedKeyPath = path.join(config.dataDir, 'private-key.pem')
+        fs.writeFileSync(resolvedKeyPath, privateKey, { mode: 0o600 })
+      } else if (privateKeyPath && typeof privateKeyPath === 'string') {
+        const normalizedPath = path.resolve(privateKeyPath)
+        if (!fs.existsSync(normalizedPath)) {
+          return res.status(400).json({ error: `Private key file not found: ${normalizedPath}` })
+        }
+        const pemContent = fs.readFileSync(normalizedPath, 'utf-8')
+        if (!pemContent.includes('BEGIN') || !pemContent.includes('PRIVATE KEY')) {
+          return res.status(400).json({ error: 'File does not appear to be a valid PEM private key' })
+        }
+        resolvedKeyPath = path.join(config.dataDir, 'private-key.pem')
+        fs.writeFileSync(resolvedKeyPath, pemContent, { mode: 0o600 })
+      }
+      if (resolvedKeyPath) {
+        toSave.githubPrivateKeyPath = resolvedKeyPath
+        config.githubPrivateKeyPath = resolvedKeyPath
       }
       if (appId) config.githubAppId = String(appId)
       if (installationId) config.githubInstallationId = String(installationId)
