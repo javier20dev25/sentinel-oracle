@@ -10,6 +10,32 @@ operates as an additional enforcement layer. Repository administrators with
 direct push or bypass permissions remain a valid threat path independent of
 Oracle's controls.
 
+---
+
+## Misión / Visión
+
+**Misión**: Separar físicamente la autoridad de merge del entorno de
+desarrollo. Sentinel Oracle garantiza que ninguna estación de trabajo
+comprometida —por malware, extensiones maliciosas, npm supply chain attacks
+o phishing— pueda fusionar código a producción sin autorización biométrica
+desde un dispositivo independiente.
+
+El merge no es una operación de CI. Es un acto de autoridad que debe
+requerir presencia física y consentimiento explícito.
+
+**Visión**: Un ecosistema donde el ciclo de vida del código tenga tres
+roles irreducibles: el desarrollador escribe y prueba, la CI verifica
+calidad, y un dispositivo físico aislado —el Oracle— concede el merge.
+Ningún ataque que comprometa solo un eslabón puede completar un merge
+malicioso.
+
+**Qué NO es**: No es un linter, ni un reemplazo de branch protection, ni
+un code review tool, ni un CI/CD pipeline. Sentinel Oracle es una
+**capa de autorización** que cierra el último vector de ataque antes de
+producción: la workstation comprometida con credenciales de merge.
+
+---
+
 Two authentication modes are supported: Personal Access Token (PAT) and GitHub App (recommended). See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for detailed GitHub App setup instructions.
 
 ---
@@ -22,7 +48,7 @@ Full architecture, API reference, and operational guide are in the `docs/` direc
 |----------|-------------|
 | [docs/architecture.md](docs/architecture.md) | System architecture, module dependency graph, data flow, database schema |
 | [docs/api.md](docs/api.md) | Complete API reference with request/response examples |
-| [docs/guide.md](docs/guide.md) | Operational guide: installation, configuration, CLI reference, troubleshooting |
+| [docs/guide.md](docs/guide.md) | Operational guide: installation, configuration, CLI reference, troubleshooting, AI setup |
 | [docs/security-dna.md](docs/security-dna.md) | Security DNA aggregator: design, data flow, validation results |
 
 ---
@@ -39,66 +65,59 @@ sentinel-oracle
 After cloning and installing globally, the `sentinel-oracle` command is available
 from anywhere. The server starts and prints the dashboard URL in the terminal.
 
-### First-Time Setup (step by step)
+### Setup Checklist (antes de empezar)
 
-After installing globally, this is the full setup flow:
+- [ ] Tailscale instalado en los 3 dispositivos (servidor, workstation, telefono)
+- [ ] Los 3 dispositivos conectados al mismo tailnet (`tailscale status`)
+- [ ] Node.js >= 20 en el servidor Oracle
+- [ ] GitHub App creada y instalada en tu repositorio
 
-```powershell
-# 1. Create config directory
-mkdir "$env:USERPROFILE\.sentinel-oracle"
+### First-Time Setup (paso a paso)
 
-# 2. Generate self-signed TLS certificate
-openssl req -x509 -newkey rsa:2048 -keyout "$env:USERPROFILE\.sentinel-oracle\server.key" -out "$env:USERPROFILE\.sentinel-oracle\server.cert" -days 365 -nodes -subj "/CN=sentinel-oracle"
-
-# 3. Create a fine-grained GitHub PAT
-#    Go to: GitHub.com → Settings → Developer settings → Personal access tokens → Fine-grained tokens
-#    - Repository access: "Only select repositories" → pick your repo
-#    - Permissions → Pull requests: "Write"
-#    - Click "Generate token"
-#    Copy the token (starts with github_pat_...)
-
-# 4. Write the config file
-@"
-{
-  "githubToken": "github_pat_...",
-  "githubOwner": "your-org",
-  "githubRepo": "your-repo",
-  "port": 3443
-}
-"@ | Set-Content "$env:USERPROFILE\.sentinel-oracle\config.json"
-
-# 5. Set env vars (or put them in config.json above)
-$env:GITHUB_TOKEN="github_pat_..."
-$env:ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
-
-# 6. Test the token
-curl.exe -H "Authorization: Bearer $env:GITHUB_TOKEN" https://api.github.com/repos/your-org/your-repo
-
-# 7. Start the server (skip token verify the first time if you set env vars above)
-$env:SENTINEL_SKIP_TOKEN_VERIFY=1
-sentinel-oracle
-```
-
-> **Fine-grained PAT permissions required:** `Pull requests: Write` (to write commit status and merge).
-
-On Linux / macOS:
+**1. Instalar Tailscale** (si no lo tiene):
 
 ```bash
-mkdir -p ~/.sentinel-oracle
-openssl req -x509 -newkey rsa:2048 -keyout ~/.sentinel-oracle/server.key -out ~/.sentinel-oracle/server.cert -days 365 -nodes -subj "/CN=sentinel-oracle"
-cat > ~/.sentinel-oracle/config.json <<EOF
-{
-  "githubToken": "github_pat_...",
-  "githubOwner": "your-org",
-  "githubRepo": "your-repo",
-  "port": 3443
-}
-EOF
-export GITHUB_TOKEN="github_pat_..."
-export ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
-export SENTINEL_SKIP_TOKEN_VERIFY=1
+# En el servidor Oracle, workstation, y telefono:
+# Descargar desde https://tailscale.com/download
+tailscale up
+tailscale status   # Verificar que los 3 dispositivos aparecen
+```
+
+**2. Crear GitHub App** (ver [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md) para detalles):
+
+- Vaya a `github.com/settings/apps/new`
+- Nombre: `sentinel-oracle-tu-org`
+- Permisos: Pull requests (Read & write), Checks (Read & write), Contents (Read)
+- Genere private key → descarga archivo `.pem`
+
+**3. Instalar la app en tu repositorio:**
+
+- En la pagina de la app → sidebar **Install App** → **Install**
+- Seleccione su repositorio → **Install**
+- Click engranaje ⚙️ al lado del repo instalado
+- **Anote el Installation ID** de la URL: `settings/installations/<NUMERO>`
+
+**4. Iniciar el servidor:**
+
+```bash
 sentinel-oracle
 ```
+
+**5. Configurar via web:**
+
+Abra `https://{IP_TAILSCALE}:3443/setup` y siga los pasos:
+1. Owner + Repository
+2. App ID + Installation ID + Private Key (pegue el contenido del .pem o la ruta)
+3. Opciones de scan
+4. Test connection → Save
+
+**6. Registrar el telefono:**
+
+En el telefono (con Tailscale conectado), abra la misma URL del dashboard.
+Click **Register Device** → biometria.
+
+Listo. Los PRs abiertos apareceran en la cola. Para autorizar un merge:
+click Authorize → escanear QR con el telefono → biometria → merge.
 
 ---
 
@@ -149,6 +168,53 @@ When enabled in Settings (toggle switch), all PRs are scanned automatically on q
 | Medium | >=4 | New capabilities, external endpoints, campaign signals |
 | Low | >=1 | Info-level findings, new dependencies |
 | None | 0 | No issues |
+
+---
+
+## AI PR Intelligence
+
+Sentinel Oracle includes an AI-powered PR analysis engine that generates structured summaries, identifies architectural changes, flags security-relevant diffs, detects instruction manipulation attempts, and assigns review priorities.
+
+### Backends
+
+Two AI backends are supported:
+
+| Backend | Setup | Performance |
+|---------|-------|-------------|
+| **Ollama** (recommended) | Install [Ollama](https://ollama.com), pull a model (`ollama pull qwen2.5:1.5b`) | ~2-10s per analysis |
+| **GGUF** (local) | Download a `.gguf` file to `~/.sentinel/models/` | ~5-30s per analysis (via node-llama-cpp) |
+
+The server auto-detects available models at `/api/ai/models`. When both backends are present, Ollama is preferred.
+
+### Model Selector
+
+A dropdown in Settings > AI Intelligence lists all detected models. Select one explicitly, or leave it on `auto` for automatic detection.
+
+### Features
+
+- **PR Summarization**: Structured executive summary with architectural changes, dependencies, and reviewer notes
+- **Security-Relevant Change Detection**: Flags files touching auth, secrets, permissions, and encryption
+- **Instruction Manipulation Detection**: Scans diffs for prompt injection, hidden instructions, role redefinition, suppression attempts, and config manipulation
+- **Review Priority Assignment**: Computes `reviewPriority` (low/critical), `impactLevel`, and `estimatedComplexity` from file metadata and LLM output
+- **Output Sanitization**: All LLM output is sanitized server-side — markdown (bold, code blocks, links, HTML tags) is stripped before storage
+
+### Health Check
+
+`GET /api/ai/status` returns model availability, health status, and backend type. The health check verifies:
+- For Ollama: runs `ollama show <model>`
+- For GGUF: checks file existence on disk
+
+### Auto-Analyze
+
+When enabled in Settings, all PRs are automatically analyzed after scanning. Analyses are cached per PR SHA — identical PRs never re-trigger the LLM.
+
+### API Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/ai/status` | None | AI backend status, health, available models |
+| GET | `/api/ai/models` | None | List detected models (Ollama + GGUF) |
+| POST | `/api/prs/:number/ai-analyze` | Cookie | Run AI analysis on a specific PR |
 
 ---
 
@@ -730,6 +796,10 @@ See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for complete setup instructions
 | POST | `/api/webhook/github` | HMAC | GitHub webhook receiver |
 | GET | `/api/inventory/tokens` | Cookie | Token inventory listing |
 | POST | `/api/inventory/tokens/scan` | Cookie | Scan repo for leaked tokens |
+| GET | `/api/ai/status` | None | AI backend status, health, model info |
+| GET | `/api/ai/models` | None | List detected AI models (Ollama + GGUF) |
+| POST | `/api/prs/:number/ai-analyze` | Cookie | Run AI PR intelligence analysis |
+| GET | `/api/prs/:number/scan-result` | Cookie | Cached SAST scan result for a PR |
 
 **Auth key:** Cookie = `sentinel_session` cookie. CSRF = `X-CSRF-Token` header. RA = `reAssertToken` in request body.
 

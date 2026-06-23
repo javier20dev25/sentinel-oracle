@@ -7,9 +7,9 @@ import type { Config } from './config'
 import type { DatabaseStore } from './storage/database'
 import type { GitHubClient } from './github/client'
 import { AuthorizationQueue } from './queue/authorization'
-import { pollPRs } from './github/monitor'
+import { PollPRsError, pollPRs } from './github/monitor'
 import { securityHeaders, corsBlock, auditLogger, csrfProtection } from './middleware/security'
-import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF, initSessionDb } from './middleware/session'
+import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF, initSessionDb, setNoAuthMode } from './middleware/session'
 import { authRateLimiter, apiRateLimiter } from './middleware/rateLimit'
 import {
   generateRegistration,
@@ -22,6 +22,8 @@ import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
+import { analyzePR as aiAnalyzePR } from './ai/analyzer'
+import { detectAIBackend, detectAllModels, checkModelHealth } from './ai/detector'
 import { buildCapabilitySnapshot, buildDNAReport } from './scanner/intel/security-dna'
 import { TokenInventoryScanner } from './inventory/tokens'
 
@@ -76,7 +78,8 @@ export function initEnrollment(config: Config, db: DatabaseStore): void {
   } catch {}
 }
 
-export function createApp(config: Config, db: DatabaseStore, client: GitHubClient) {
+export function createApp(config: Config, db: DatabaseStore, client: GitHubClient, noAuth?: boolean) {
+  setNoAuthMode(!!noAuth)
   const app = express()
   const rpId = getRpId(config)
   const queue = new AuthorizationQueue(db, client, config.challengeTtlMs, config.serverOrigin, rpId)
@@ -385,13 +388,19 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
   // ----- Authorization (authenticated) -----
   app.get('/api/prs', requireAuth(), apiRateLimiter(30, 60000), async (_req, res) => {
     try {
-      try {
-        await pollPRs(client, db)
-      } catch {}
+      await pollPRs(client, db)
       const prs = queue.getPendingPRs()
       res.json(prs)
     } catch (err) {
       db.log('error', null, `List PRs: ${err instanceof Error ? err.message : err}`)
+      if (err instanceof PollPRsError) {
+        return res.status(err.httpStatus).json({
+          error: err.message,
+          code: err.code,
+          repo: `${err.owner}/${err.repo}`,
+          githubStatus: err.githubStatus || null,
+        })
+      }
       res.status(500).json({ error: 'Failed to list PRs' })
     }
   })
@@ -577,6 +586,20 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       // Persist scan result
       db.saveScanResult(prNumber, scanHash, result)
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) in ${scanDuration}ms`)
+      // Auto-analyze with AI if enabled
+      if (config.autoAnalyze && config.aiEnabled) {
+        aiAnalyzePR(prNumber, pr?.title || '', pr?.author || '', pr?.title || '', '', sha, files, sha, db, config.aiModel || 'auto').then(analysis => {
+          db.saveAnalysisResult(prNumber, scanHash, {
+            analysisJson: JSON.stringify(analysis),
+            reviewPriority: analysis.priority.reviewPriority,
+            impactLevel: analysis.priority.impactLevel,
+            complexity: analysis.priority.estimatedComplexity,
+            injectionDetected: analysis.instructionManipulation.length > 0,
+            injectionAttemptsJson: JSON.stringify(analysis.instructionManipulation),
+          })
+          db.log('ai_analyzed', prNumber, `Auto-analyze: priority=${analysis.priority.reviewPriority}, injection=${analysis.instructionManipulation.length > 0}`)
+        }).catch(() => {})
+      }
       // Persist capability snapshot for Security DNA
       if (result.intel && config.githubOwner && config.githubRepo) {
         const snapshot = buildCapabilitySnapshot(result.intel)
@@ -599,6 +622,67 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.log('error', null, `PR scan: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to scan PR' })
     }
+  })
+
+  // ----- AI Analysis -----
+  app.post('/api/prs/:number/ai-analyze', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    if (!config.aiEnabled) {
+      return res.status(404).json({ error: 'AI analysis is not enabled. Enable it in settings.' })
+    }
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const files = await client.getPRFiles(prNumber)
+      if (files.length === 0) return res.status(404).json({ error: 'No files found for this PR' })
+      const scanHash = computeScanHash(files, pr.sha)
+      if (db.hasAnalysisHash(prNumber, scanHash)) {
+        const row = db.getLatestAnalysisResult(prNumber)
+        if (row) {
+          db.log('ai_analyzed', prNumber, 'AI analysis cache HIT')
+          return res.json({ cached: true, ...JSON.parse(row.analysisJson) })
+        }
+      }
+      const prBody = pr.title
+      const analysis = await aiAnalyzePR(prNumber, pr.title, pr.author, prBody, '', pr.sha, files, pr.sha, db, config.aiModel || 'auto')
+      db.saveAnalysisResult(prNumber, scanHash, {
+        analysisJson: JSON.stringify(analysis),
+        reviewPriority: analysis.priority.reviewPriority,
+        impactLevel: analysis.priority.impactLevel,
+        complexity: analysis.priority.estimatedComplexity,
+        injectionDetected: analysis.instructionManipulation.length > 0,
+        injectionAttemptsJson: JSON.stringify(analysis.instructionManipulation),
+      })
+      db.log('ai_analyzed', prNumber, `AI analysis: priority=${analysis.priority.reviewPriority}, injection=${analysis.instructionManipulation.length > 0}`)
+      res.json({ cached: false, ...analysis })
+    } catch (err) {
+      db.log('error', null, `AI analysis: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to analyze PR' })
+    }
+  })
+
+  // ----- AI Models -----
+  app.get('/api/ai/models', (_req, res) => {
+    const models = detectAllModels()
+    res.json({ models, selected: config.aiModel || '' })
+  })
+
+  // ----- AI Status -----
+  app.get('/api/ai/status', async (_req, res) => {
+    const backend = detectAIBackend(config.aiModel)
+    const models = detectAllModels()
+    let health: any = null
+    if (config.aiModel && config.aiModel !== 'auto') {
+      health = await checkModelHealth(config.aiModel)
+    }
+    res.json({
+      enabled: config.aiEnabled,
+      autoAnalyze: config.autoAnalyze,
+      aiModel: config.aiModel,
+      backend,
+      models,
+      health,
+    })
   })
 
   // ----- Check Run (create or update) -----
@@ -1251,6 +1335,26 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
         if (['opened', 'synchronize', 'reopened'].includes(action)) {
           db.log('webhook_pr_event', pr.number, `PR #${pr.number} ${action} by ${pr.user?.login}`)
+          if (config.autoAnalyze && config.aiEnabled) {
+            setImmediate(async () => {
+              try {
+                const files = await client.getPRFiles(pr.number)
+                const scanHash = computeScanHash(files, pr.head?.sha || '')
+                if (!db.hasAnalysisHash(pr.number, scanHash)) {
+                  const analysis = await aiAnalyzePR(pr.number, pr.title || '', pr.user?.login || '', pr.body || '', '', pr.head?.sha || '', files, pr.head?.sha || '', db, config.aiModel || 'auto')
+                  db.saveAnalysisResult(pr.number, scanHash, {
+                    analysisJson: JSON.stringify(analysis),
+                    reviewPriority: analysis.priority.reviewPriority,
+                    impactLevel: analysis.priority.impactLevel,
+                    complexity: analysis.priority.estimatedComplexity,
+                    injectionDetected: analysis.instructionManipulation.length > 0,
+                    injectionAttemptsJson: JSON.stringify(analysis.instructionManipulation),
+                  })
+                  db.log('ai_analyzed', pr.number, `Webhook auto-analyze: priority=${analysis.priority.reviewPriority}`)
+                }
+              } catch {}
+            })
+          }
         }
 
         if (action === 'closed' && pr.merged) {
@@ -1362,7 +1466,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   app.post('/api/config/settings', configAuth, (req, res) => {
     try {
-      const { scanEnabled, autoScan, securityInbox, analystQueue, challengeTtlMs, approveReasonRequired } = req.body
+      const { scanEnabled, autoScan, aiEnabled, autoAnalyze, securityInbox, analystQueue, challengeTtlMs, approveReasonRequired, aiModel } = req.body
       const toSave: Record<string, unknown> = {}
       if (typeof scanEnabled === 'boolean') {
         toSave.scanEnabled = scanEnabled
@@ -1371,6 +1475,14 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (typeof autoScan === 'boolean') {
         toSave.autoScan = autoScan
         config.autoScan = autoScan
+      }
+      if (typeof aiEnabled === 'boolean') {
+        toSave.aiEnabled = aiEnabled
+        config.aiEnabled = aiEnabled
+      }
+      if (typeof autoAnalyze === 'boolean') {
+        toSave.autoAnalyze = autoAnalyze
+        config.autoAnalyze = autoAnalyze
       }
       if (typeof securityInbox === 'boolean') {
         toSave.securityInbox = securityInbox
@@ -1387,6 +1499,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (typeof approveReasonRequired === 'boolean') {
         toSave.approveReasonRequired = approveReasonRequired
         config.approveReasonRequired = approveReasonRequired
+      }
+      if (typeof aiModel === 'string') {
+        toSave.aiModel = aiModel
+        config.aiModel = aiModel
       }
       if (Object.keys(toSave).length === 0) {
         return res.status(400).json({ error: 'No valid settings provided' })
@@ -1435,6 +1551,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       authMode: client.authMode,
       scanEnabled: config.scanEnabled,
       autoScan: config.autoScan,
+      aiEnabled: config.aiEnabled,
+      autoAnalyze: config.autoAnalyze,
       securityInbox: config.securityInbox,
       analystQueue: config.analystQueue,
       passwordRequired: !!config.passwordHash,
@@ -1480,6 +1598,28 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
                 const sResult = await scanPRFiles(files, pr.prNumber, config.githubOwner, config.githubRepo, pr.sha)
                 db.saveScanResult(pr.prNumber, scanHash, sResult)
                 db.log('pr_scanned', pr.prNumber, `Auto-scan: risk ${sResult.riskScore} (${sResult.critical}C ${sResult.high}H ${sResult.medium}M ${sResult.low}L)`)
+              }
+            } catch {}
+          }
+        }
+        if (config.autoAnalyze && config.aiEnabled) {
+          const pending = db.getPendingPRs()
+          for (const pr of pending) {
+            try {
+              const files = await client.getPRFiles(pr.prNumber)
+              if (files.length === 0) continue
+              const scanHash = computeScanHash(files, pr.sha)
+              if (!db.hasAnalysisHash(pr.prNumber, scanHash)) {
+                const analysis = await aiAnalyzePR(pr.prNumber, pr.title, pr.author, pr.title, '', pr.sha, files, pr.sha, db, config.aiModel || 'auto')
+                db.saveAnalysisResult(pr.prNumber, scanHash, {
+                  analysisJson: JSON.stringify(analysis),
+                  reviewPriority: analysis.priority.reviewPriority,
+                  impactLevel: analysis.priority.impactLevel,
+                  complexity: analysis.priority.estimatedComplexity,
+                  injectionDetected: analysis.instructionManipulation.length > 0,
+                  injectionAttemptsJson: JSON.stringify(analysis.instructionManipulation),
+                })
+                db.log('ai_analyzed', pr.prNumber, `Auto-analyze: priority=${analysis.priority.reviewPriority}`)
               }
             } catch {}
           }

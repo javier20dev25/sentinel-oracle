@@ -52,6 +52,31 @@ export interface BranchProtection {
 
 type AuthMode = 'pat' | 'github_app'
 
+export class GitHubApiError extends Error {
+  status: number
+  responseBody: string
+  method: string
+  pathOrUrl: string
+
+  constructor(status: number, responseBody: string, method: string, pathOrUrl: string) {
+    const message = extractGitHubMessage(responseBody) || responseBody.slice(0, 200) || 'GitHub API request failed'
+    super(`GitHub API ${status}: ${message}`)
+    this.name = 'GitHubApiError'
+    this.status = status
+    this.responseBody = responseBody
+    this.method = method
+    this.pathOrUrl = pathOrUrl
+  }
+}
+
+function extractGitHubMessage(body: string): string {
+  try {
+    const data = JSON.parse(body)
+    if (typeof data.message === 'string') return data.message
+  } catch {}
+  return ''
+}
+
 export class GitHubClient {
   private _owner: string
   private _repo: string
@@ -110,7 +135,7 @@ export class GitHubClient {
         await new Promise(r => setTimeout(r, delay))
       }
       try {
-        return await this._request(url, method, reqHeaders, body)
+        return await this._request(url, method, reqHeaders, body, pathOrUrl)
       } catch (err: any) {
         lastErr = err
         if (err.message && (err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET'))) {
@@ -122,7 +147,7 @@ export class GitHubClient {
     throw lastErr || new Error('Request failed after retries')
   }
 
-  private _request(url: string, method: string, headers: Record<string, string>, body?: object): Promise<{ body: string; headers: Record<string, string> }> {
+  private _request(url: string, method: string, headers: Record<string, string>, body?: object, pathOrUrl = url): Promise<{ body: string; headers: Record<string, string> }> {
     return new Promise((resolve, reject) => {
       const u = new URL(url)
       const opts: https.RequestOptions = {
@@ -144,7 +169,7 @@ export class GitHubClient {
           if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
             resolve({ body: data, headers: respHeaders })
           } else {
-            reject(new Error(`GitHub API ${res.statusCode}: ${data}`))
+            reject(new GitHubApiError(res.statusCode || 0, data, method, pathOrUrl))
           }
         })
       })
@@ -234,11 +259,15 @@ export class GitHubClient {
   async verifyToken(): Promise<boolean> {
     try {
       if (this.mode === 'github_app') {
-        return this.appAuth!.verifyInstallation()
+        const appOk = await this.appAuth!.verifyInstallation()
+        if (!appOk) return false
+        await this.listOpenPRs()
+        return true
       }
       await this.api('GET', '/user')
       return true
-    } catch {
+    } catch (err) {
+      console.error(`[github] verifyToken failed: ${err instanceof Error ? err.message : err}`)
       return false
     }
   }

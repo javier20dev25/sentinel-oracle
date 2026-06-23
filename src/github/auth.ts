@@ -99,9 +99,12 @@ export class GitHubAppAuth {
   }
 
   generateJWT(): string {
+    const clockSkew = 60
     const now = Math.floor(Date.now() / 1000)
+    const iat = now - clockSkew
+    const exp = iat + JWT_EXPIRATION_S  // keep total lifetime ≤ 600s
     const header = { alg: 'RS256', typ: 'JWT' }
-    const payload = { iss: this.appId, iat: now, exp: now + JWT_EXPIRATION_S }
+    const payload = { iss: this.appId, iat, exp }
 
     const headerB64 = base64urlNoPad(JSON.stringify(header))
     const payloadB64 = base64urlNoPad(JSON.stringify(payload))
@@ -123,9 +126,6 @@ export class GitHubAppAuth {
     if (decodedPayload.iss !== this.appId) {
       throw new Error('JWT payload iss does not match appId')
     }
-    if (decodedPayload.exp - decodedPayload.iat !== JWT_EXPIRATION_S) {
-      throw new Error('JWT expiration time mismatch')
-    }
 
     return jwt
   }
@@ -142,7 +142,9 @@ export class GitHubAppAuth {
         'User-Agent': 'sentinel-oracle',
       })
     } catch (err) {
-      throw new Error(`Failed to obtain installation token: ${err}`)
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[github] requestInstallationToken failed: ${msg}`)
+      throw new Error(`Failed to obtain installation token: ${msg}`)
     }
 
     const data = JSON.parse(raw)
@@ -188,7 +190,8 @@ export class GitHubAppAuth {
         'User-Agent': 'sentinel-oracle',
       })
       return true
-    } catch {
+    } catch (err: any) {
+      console.error(`[github] verifyInstallation failed: ${err?.message || err}`)
       return false
     }
   }

@@ -8,19 +8,50 @@ This guide covers installation, configuration, operation, and troubleshooting.
 
 ## Prerequisites
 
-### Hardware
+Complete estos pasos **antes** de iniciar el servidor por primera vez.
 
-- **Oracle server**: Raspberry Pi 4/5 (4GB+ RAM), NUC, mini PC, or dedicated Android phone with Termux
-- **Phone**: Modern smartphone with platform biometric authentication (fingerprint, Face ID)
-- **Workstation**: Any machine with a web browser (daily development machine)
-- **Network**: Tailscale or Wireguard mesh VPN between all three devices
+### 1. Hardware
 
-### Software
+| Dispositivo | Requisito | Rol |
+|-------------|-----------|-----|
+| **Oracle server** | Raspberry Pi 4/5 (4GB+), NUC, mini PC, PC viejo, o Android con Termux | Ejecuta el servidor, tiene las credenciales de merge |
+| **Phone** | Smartphone con biometricos (Face ID, huella) | Aprueba merges con WebAuthn |
+| **Workstation** | Cualquier maquina con navegador web | Maquina de desarrollo diario, solo lectura |
 
-- **Node.js**: v20+ LTS
-- **npm**: v10+
-- **SQLite**: Built-in (bundled via better-sqlite3)
-- **GitHub App**: Created in your GitHub organization or personal account
+### 2. Tailscale (obligatorio)
+
+Instale Tailscale en los 3 dispositivos. Sentinel Oracle necesita una red mesh
+privada — no funciona con IP publica.
+
+```bash
+# En cada dispositivo:
+# 1. Descargar e instalar desde https://tailscale.com/download
+# 2. Autenticar:
+tailscale up
+
+# 3. Verificar que los 3 dispositivos se ven:
+tailscale status
+
+# 4. (Opcional) HTTPS valido sin certificado autofirmado:
+#    En el oracle server:
+sudo tailscale serve --bg 3443
+```
+
+La IP de Tailscale (100.x.x.x) se autodetecta al iniciar el servidor.
+
+### 3. Node.js
+
+```bash
+node --version   # Requiere >= 20
+```
+
+### 4. GitHub App
+
+Cree una GitHub App antes de iniciar el servidor (ver [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)).
+Necesitara:
+- **App ID** (pagina principal de la app)
+- **Installation ID** (de la URL al instalar la app en tu repo)
+- **Private Key** (archivo .pem, descargado al crear la app)
 
 ## Installation
 
@@ -42,50 +73,75 @@ npm link
 sentinel-oracle --help
 ```
 
-## Configuration
-
-Configuration is loaded from environment variables with file-based overrides.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SENTINEL_CONFIG_DIR` | `~/.config/sentinel-oracle` | Configuration directory |
-| `SENTINEL_PORT` | `8443` | HTTPS server port |
-| `SENTINEL_HOST` | `localhost` | Bind address (use Tailscale IP) |
-| `NODE_OPTIONS` | — | Passed to Node.js (use `--max-old-space-size=4096`) |
-
-### GitHub App Setup
-
-1. Create a GitHub App at https://github.com/settings/apps
-2. Set repository permissions:
-   - Contents: Read & write (for merge)
-   - Pull requests: Read & write
-   - Checks: Read
-   - Metadata: Read
-3. Generate a private key (download `.pem` file)
-4. Generate a webhook secret
-5. Note the App ID
-
-Place the private key at `~/.config/sentinel-oracle/github-private-key.pem`.
-
 ## First Run
 
-Start the server:
+### 1. Iniciar el servidor
 
 ```bash
 sentinel-oracle
 ```
 
-The server starts in setup mode if no GitHub credentials are configured. Open https://{ORACLE_TAILSCALE_IP}:8443/setup in a browser on the workstation.
+Si es la primera vez, el servidor arranca en **modo setup** (sin GitHub configurado).
+Abra `https://{IP_DE_TAILSCALE}:3443/setup` en un navegador desde su workstation.
 
-### Setup Steps
+> **Nota**: Si el puerto 3443 ya esta en uso: `taskkill /F /IM node.exe`
 
-1. Configure GitHub App credentials (App ID, private key, webhook secret)
-2. Register a WebAuthn passkey using the phone
-3. Verify the webhook is configured
+### 2. Configurar GitHub App (paso a paso en la web)
 
-After setup, the oracle begins polling GitHub for open PRs.
+Necesita estos 3 datos antes de empezar:
+
+#### App ID
+- En `github.com/settings/apps` → click en su app
+- El **App ID** aparece en la parte superior de la pagina
+- Copielo (ej. `4119820`)
+
+#### Private Key
+- En la pagina de su app, scroll abajo → **Generate a private key**
+- Se descarga un archivo `.pem`
+- En el setup web tiene **dos opciones**:
+  - **Opcion A** (recomendada): Abra el .pem con Notepad, copie todo el contenido, y peguelo en el textarea "O pega el contenido del PEM directamente"
+  - **Opcion B**: Copie el archivo .pem al servidor Oracle y ponga la ruta absoluta (ej. `C:\Users\sleyt\.sentinel-oracle\app.private-key.pem`)
+
+#### Installation ID (el que falta)
+Este NO esta en la pagina de la app. Se obtiene al **instalar** la app en su repositorio:
+
+1. En la pagina de su app → sidebar izquierdo → **Install App**
+2. Al lado de su organizacion/usuario → click **Install**
+3. Seleccione el repositorio → **Install**
+4. **Despues de instalar**, haga click en el engranaje ⚙️ al lado del repositorio instalado
+5. La URL del navegador sera: `https://github.com/settings/installations/<AQUI_EL_ID>`
+6. Copie ese numero (ej. `139924356`)
+
+**Alternativa**: Vaya a su repositorio en GitHub → Settings → GitHub Apps (sidebar)
+→ "Configure" al lado de Sentinel Oracle → misma URL con el ID.
+
+### 3. Llenar el formulario web
+
+En `https://{IP_TAILSCALE}:3443/setup` paso 2:
+
+| Campo | Que poner |
+|-------|-----------|
+| **Owner** | Su usuario u organizacion de GitHub |
+| **Repository** | Nombre del repo (sin el owner) |
+| **App ID** | `4119820` (el numero de arriba) |
+| **Installation ID** | El numero de la URL: `settings/installations/<AQUI>` |
+| **Private Key** | Pegue el contenido del .pem O ponga la ruta del archivo |
+
+### 4. Registrar el telefono (WebAuthn)
+
+1. Despues de configurar GitHub, abra el dashboard en `https://{IP_TAILSCALE}:3443`
+2. En el telefono (misma red Tailscale) abra la misma URL
+3. Click **Register Device** → biometria (Face ID / huella)
+4. El telefono queda registrado como dispositivo de autorizacion
+
+### 5. Verificar
+
+- El dashboard muestra los PRs abiertos de su repositorio
+- Los PRs aparecen en la cola con estado "awaiting authorization"
+- Proceso completo: click Authorize → escanear QR con el telefono → biometria → merge
+
+> **Importante**: Si el servidor ya tenia configuracion previa, reinicielo despues de cambiar la config:
+> `Ctrl+C` → `sentinel-oracle`
 
 ## Operation
 
@@ -176,6 +232,81 @@ Trust Drift detects changes in the GitHub organization that affect security post
 - New self-hosted runners
 - Branch protection rule removals
 - Permission escalations in workflow YAML files
+
+## AI PR Intelligence
+
+Sentinel Oracle includes an AI engine that analyzes pull requests and produces structured summaries, architectural insights, security-relevant observations, and review priorities.
+
+### Setup
+
+#### Option 1: Ollama (recommended)
+
+```bash
+# Install Ollama from https://ollama.com
+# Pull a model
+ollama pull qwen2.5:1.5b
+# Verify
+ollama list
+```
+
+The server auto-detects Ollama and lists available models in Settings > AI Intelligence.
+
+#### Option 2: Local GGUF
+
+Place a `.gguf` model file (e.g., Qwen 2.5 1.5B Instruct Q4_K_M) in:
+
+```bash
+mkdir -p ~/.sentinel/models
+# Download a .gguf file and place it there
+```
+
+### Configuration
+
+1. Open Settings > AI Intelligence in the dashboard
+2. Toggle "Enable AI Analysis" on
+3. (Optional) Enable "Auto-Analyze" to run AI on every new PR
+4. Select a model from the dropdown — all detected models (Ollama + GGUF) are listed
+5. Click Save
+
+### How It Works
+
+1. **Detection**: At startup and on status check, the server scans for Ollama CLI and `.gguf` files in `~/.sentinel/models/`
+2. **Analysis**: When triggered, the AI reviews each file's diff, detects instruction manipulation, then aggregates findings into a structured report
+3. **Sanitization**: All LLM output is cleaned server-side — bold, italic, code blocks, HTML tags, and links are stripped before storage
+4. **Fallback**: If the LLM is unavailable (model not found, timeout, error), a deterministic analysis based on file metadata is used
+
+### What the AI Detects
+
+| Feature | Description |
+|---------|-------------|
+| Executive Summary | 2-4 bullet points summarizing the PR's purpose and scope |
+| Architectural Changes | Cross-cutting changes with impact assessment |
+| Security-Relevant Changes | Auth, secrets, permissions, crypto modifications |
+| Dependency Changes | Package.json, requirements.txt, go.mod, etc. |
+| Instruction Manipulation | Prompt injection, hidden instructions, role redefinition, config manipulation |
+| Review Hotspots | Files flagged for manual review with specific reasons |
+| Review Priority | Priority (low to critical), impact level, complexity |
+
+### API
+
+- `GET /api/ai/status` — Backend status, health, selected model
+- `GET /api/ai/models` — List available models
+- `POST /api/prs/:number/ai-analyze` — Run analysis on a PR (requires auth)
+
+### Troubleshooting
+
+**"No AI backend detected"**
+- Verify Ollama is installed: `ollama --version`
+- Verify at least one model is pulled: `ollama list`
+- For GGUF: verify files exist in `~/.sentinel/models/`
+
+**"Model not found" health check failure**
+- For Ollama: run `ollama show <model>` to verify the model is downloaded
+- For GGUF: check the file path in the model list
+
+**Slow analysis**
+- Ollama models run locally — Qwen 2.5 1.5B typically takes 2-10s
+- Larger models (7B+) will be significantly slower
 
 ### Dependency Deep Scan (EXPERIMENTAL)
 

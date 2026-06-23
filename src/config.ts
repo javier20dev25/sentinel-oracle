@@ -32,8 +32,11 @@ export interface Config {
   githubWebhookSecret: string
   scanEnabled: boolean
   autoScan: boolean
+  aiEnabled: boolean
+  autoAnalyze: boolean
   securityInbox: boolean
   analystQueue: boolean
+  aiModel: string
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -213,8 +216,11 @@ export function loadConfig(): Config {
     githubWebhookSecret: '',
     scanEnabled: false,
     autoScan: false,
+    aiEnabled: false,
+    autoAnalyze: false,
     securityInbox: true,
     analystQueue: true,
+    aiModel: '',
   }
 
   try {
@@ -231,24 +237,34 @@ export function loadConfig(): Config {
         console.warn(`[config] bindAddress was set to loopback — auto-overridden to ${lanIp}`)
       }
 
-      // Priority: 1) Funnel URL (public HTTPS), 2) Tailscale IP (tailnet-only), 3) LAN IP
-      const funnel = detectTailscaleFunnelUrl(merged)
-      if (funnel) {
-        if (merged.bindAddress !== funnel.rpId) {
-          console.warn(`[config] Tailscale Funnel active at ${funnel.url}`)
+      // Preserve user-set serverOrigin; only auto-detect if not explicitly set
+      const userSetServerOrigin = user.serverOrigin !== undefined
+      if (userSetServerOrigin) {
+        merged.rpId = new URL(merged.serverOrigin).hostname
+        if (merged.bindAddress !== merged.rpId) {
+          console.log(`[config] Using funnel origin: ${merged.serverOrigin} (rpId: ${merged.rpId})`)
         }
-        merged.bindAddress = funnel.rpId
-        merged.serverOrigin = funnel.origin
-        merged.rpId = funnel.rpId
-      } else if (tailscaleIp) {
-        const dnsName = detectTailscaleDnsName()
-        const addr = dnsName || tailscaleIp
-        if (merged.bindAddress !== addr) {
-          console.warn(`[config] Tailscale detected at ${addr}${dnsName ? ` (${tailscaleIp})` : ''} — prefering over ${merged.bindAddress}`)
+        merged.bindAddress = merged.rpId
+      } else {
+        // Priority: 1) Funnel URL (public HTTPS), 2) Tailscale IP (tailnet-only), 3) LAN IP
+        const funnel = detectTailscaleFunnelUrl(merged)
+        if (funnel) {
+          if (merged.bindAddress !== funnel.rpId) {
+            console.warn(`[config] Tailscale Funnel active at ${funnel.url}`)
+          }
+          merged.bindAddress = funnel.rpId
+          merged.serverOrigin = funnel.origin
+          merged.rpId = funnel.rpId
+        } else if (tailscaleIp) {
+          const dnsName = detectTailscaleDnsName()
+          const addr = dnsName || tailscaleIp
+          if (merged.bindAddress !== addr) {
+            console.warn(`[config] Tailscale detected at ${addr}${dnsName ? ` (${tailscaleIp})` : ''} — prefering over ${merged.bindAddress}`)
+          }
+          merged.bindAddress = addr
+          merged.serverOrigin = `https://${addr}:${merged.port}`
+          merged.rpId = addr
         }
-        merged.bindAddress = addr
-        merged.serverOrigin = `https://${addr}:${merged.port}`
-        merged.rpId = addr
       }
 
       const warnings = validateConfig(merged)

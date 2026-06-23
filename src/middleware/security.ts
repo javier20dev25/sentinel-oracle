@@ -67,6 +67,15 @@ export function csrfProtection(allowedOrigin: string, db: DatabaseStore) {
       console.log(`[csrf] check: Passed (localhost/127.0.0.1 exception)`)
       return next()
     }
+    // Reverse-proxy / funnel compatibility: compare by hostname, ignoring port
+    try {
+      const a = new URL(allowed)
+      const s = new URL(source)
+      if (a.protocol === s.protocol && a.hostname === s.hostname) {
+        console.log(`[csrf] check: Passed (hostname match, port ${a.port || '443'} vs ${s.port || '443'})`)
+        return next()
+      }
+    } catch {}
 
     const msg = `Blocked ${req.method} ${req.path} from ${source} (allowedOrigin is ${allowed})`
     console.warn(`[csrf] check: FAILED! ${msg}`)

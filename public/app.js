@@ -83,16 +83,23 @@
   function handleUnauthenticated() {
     authenticated = false
     window.__csrfToken = null
-    const prevPanel = currentPanel
-    showPanel('auth-section')
-    const p = document.querySelector('#auth-section p')
-    if (p) p.textContent = 'Session expired — please re-authenticate with your passkey'
+    // Show auth modal instead of switching panel
+    const modal = document.getElementById('auth-modal')
+    const msgEl = document.getElementById('auth-modal-message')
+    const statusEl = document.getElementById('auth-modal-status')
+    if (modal) {
+      msgEl.textContent = 'Session expired — please re-authenticate with your passkey'
+      statusEl.textContent = ''
+      modal.style.display = 'flex'
+    }
     // Schedule a session re-check to recover from transient failures
     setTimeout(function () {
       if (!authenticated) {
         api('/api/session/check').then(function (s) {
           if (s.authenticated) {
             authenticated = true
+            if (modal) modal.style.display = 'none'
+            const prevPanel = currentPanel
             showPanel(prevPanel || 'pr-section')
             loadPRs()
           }
@@ -139,7 +146,13 @@
       // Pre-load GitHub config section so it can be navigated to
       panelsLoaded['github-config-section'] = true
       loadGithubConfig()
-      showPanel('auth-section');
+      // Show auth modal instead of switching panels
+      const modal = document.getElementById('auth-modal')
+      if (modal) {
+        document.getElementById('auth-modal-message').textContent = 'Authenticate with your passkey to view pending authorizations.'
+        document.getElementById('auth-modal-status').textContent = ''
+        modal.style.display = 'flex'
+      }
     } else {
         panelsLoaded['pr-section'] = true
         await loadPRs();
@@ -303,6 +316,67 @@
     }
   });
 
+  // Auth modal button
+  document.getElementById('auth-modal-btn')?.addEventListener('click', async () => {
+    const modal = document.getElementById('auth-modal')
+    const statusEl = document.getElementById('auth-modal-status')
+    const btn = document.getElementById('auth-modal-btn')
+    btn.disabled = true
+    statusEl.textContent = 'Authenticating...'
+    statusEl.className = 'status info'
+    try {
+      const { options, challenge } = await api('/api/webauthn/assert/begin', { method: 'POST' })
+      const credential = await navigator.credentials.get({ publicKey: prepareWebAuthnOptions(options) })
+      const result = await api('/api/webauthn/assert/complete', {
+        method: 'POST',
+        body: JSON.stringify({ credential: credential.toJSON(), challenge }),
+      })
+      if (result.verified) {
+        currentCredentialId = result.credentialId
+        const session = await api('/api/session/check')
+        authenticated = session.authenticated
+        if (!authenticated) throw new Error('Session was not created')
+        window.__csrfToken = null
+        try { const r = await api('/api/session/csrf-token'); window.__csrfToken = r.csrfToken } catch (e) {}
+        modal.style.display = 'none'
+        statusEl.textContent = ''
+        panelsLoaded['pr-section'] = true
+        await loadPRs()
+        panelsLoaded['devices-section'] = true
+        showPanel('soc-section')
+        panelsLoaded['token-section'] = true
+        panelsLoaded['auth-mode-section'] = true
+        panelsLoaded['branch-protection-section'] = true
+        panelsLoaded['metrics-section'] = true
+        panelsLoaded['github-config-section'] = true
+        panelsLoaded['settings-section'] = true
+        panelsLoaded['webhook-section'] = true
+        panelsLoaded['history-section'] = true
+        panelsLoaded['audit-section'] = true
+        await loadDevices(); await loadTokenInfo(); await loadAuthMode()
+        await loadBranchProtection(); await loadMetrics(); await loadGithubConfig()
+        await loadSettingsPanel(); await loadWebhookInfo(); await loadAudit()
+        await loadSetupChecklist()
+      } else {
+        statusEl.textContent = 'Authentication failed'
+        statusEl.className = 'status error'
+      }
+    } catch (err) {
+      if (err.name === 'NotAllowedError' || err.message?.includes('cancelled')) {
+        statusEl.textContent = 'Authentication cancelled'
+      } else {
+        statusEl.textContent = err.message
+      }
+      statusEl.className = 'status error'
+    } finally {
+      btn.disabled = false
+    }
+  })
+  // Click overlay to dismiss modal (but keep unauthenticated state)
+  document.getElementById('auth-modal-overlay')?.addEventListener('click', function () {
+    document.getElementById('auth-modal').style.display = 'none'
+  })
+
   // Authentication (server creates session on success)
   document.getElementById('auth-btn').addEventListener('click', async () => {
     const btn = document.getElementById('auth-btn');
@@ -425,6 +499,7 @@
                   <span class="badge ${pr.ciStatus}">CI // ${pr.ciStatus}</span>
                   <span class="badge ${pr.sentinelStatus}">SENTINEL // ${pr.sentinelStatus}</span>
                   <span class="badge ${pr.authStatus}">GATEWAY // ${pr.authStatus}</span>
+                  <span class="badge risk-low" id="ai-badge-${pr.prNumber}" style="${currentStatus?.aiEnabled ? '' : 'display:none'}">AI: PENDING</span>
                 </div>
                 <div class="pr-detail" id="pr-detail-${pr.prNumber}" style="display:none"></div>
                 <div class="actions-wrapper">
@@ -433,6 +508,7 @@
                     <button class="direct-auth-btn" data-pr="${pr.prNumber}">DIRECT AUTH</button>
                     <button class="reject-btn" data-pr="${pr.prNumber}">REJECT</button>
                     ${currentStatus?.scanEnabled && !currentStatus?.autoScan ? `<button class="scan-btn" data-pr="${pr.prNumber}">SCAN ANALYSIS</button>` : ''}
+                    ${currentStatus?.aiEnabled ? `<button class="ai-btn" data-pr="${pr.prNumber}">AI ANALYZE</button>` : ''}
                   </div>
                 </div>
                 <div class="qr-section" id="qr-section-${pr.prNumber}" style="display:none"></div>
@@ -442,6 +518,7 @@
                 <div class="checks-section" id="checks-section-${pr.prNumber}" style="display:none"></div>
               </div>
               <div class="pr-card-scan-panel" id="scan-panel-${pr.prNumber}"></div>
+              <div class="pr-card-ai-panel" id="ai-panel-${pr.prNumber}" style="display:none"></div>
             </div>
           `;
           card.querySelector('.pr-title-row').addEventListener('click', function () {
@@ -465,6 +542,12 @@
             if (!isNaN(pr)) btn.addEventListener('click', () => scanPR(pr, btn));
           });
         }
+        if (currentStatus?.aiEnabled) {
+          document.querySelectorAll('.ai-btn').forEach(btn => {
+            const pr = parseInt(btn.dataset.pr, 10)
+            if (!isNaN(pr)) btn.addEventListener('click', () => analyzePR(pr, btn));
+          });
+        }
         document.querySelectorAll('.checks-toggle-btn').forEach(btn => {
           btn.addEventListener('click', function () {
             togglePRChecks(this.dataset.pr, this);
@@ -485,6 +568,26 @@
                 await api('/api/prs/' + num + '/scan-result')
                 scanPR(num, { disabled: false, textContent: 'Re-scan' })
               } catch {}
+            }
+          })()
+        }
+        // Auto-load cached AI results when autoAnalyze is enabled
+        if (currentStatus?.autoAnalyze) {
+          (async function loadCachedAI() {
+            var cards = document.querySelectorAll('.pr-card')
+            for (var ci = 0; ci < cards.length; ci++) {
+              var card = cards[ci]
+              var numEl = card.querySelector('.pr-number')
+              if (!numEl) continue
+              var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
+              if (isNaN(num)) continue
+              var btn = card.querySelector('.ai-btn')
+              if (btn) {
+                try {
+                  await api('/api/prs/' + num + '/ai-analyze', { method: 'POST' })
+                  analyzePR(num, { disabled: false, textContent: 'Re-analyze' })
+                } catch {}
+              }
             }
           })()
         }
@@ -738,6 +841,102 @@
       scanPanel.innerHTML = `<div class="scan-header scan-critical">Scan failed: ${escapeHtml(err.message)}</div>`;
       scanPanel.classList.add('active');
       btn.textContent = 'Scan';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ----- AI Analysis -----
+  async function analyzePR(prNumber, btn) {
+    const aiPanel = document.getElementById('ai-panel-' + prNumber);
+    if (!aiPanel) {
+      btn.disabled = false;
+      btn.textContent = 'AI Analyze';
+      return;
+    }
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Analyzing...';
+    try {
+      const result = await api('/api/prs/' + prNumber + '/ai-analyze', { method: 'POST' });
+      const p = result.priority || {};
+      const prioClass = p.reviewPriority === 'critical' ? 'risk-critical' : p.reviewPriority === 'high' ? 'risk-high' : p.reviewPriority === 'medium' ? 'risk-medium' : 'risk-low';
+      const injCount = (result.instructionManipulation || []).length;
+      aiPanel.innerHTML = `
+        <div class="scan-panel-header">
+          <div class="threat-score-block ${prioClass}">
+            <span class="threat-label">REVIEW PRIORITY</span>
+            <span class="threat-value">${(p.reviewPriority || 'low').toUpperCase()}</span>
+          </div>
+          <div class="threat-breakdown">
+            <h3 class="risk-label-title ${prioClass}">AI INTELLIGENCE REPORT</h3>
+            <div class="severity-grid">
+              <span class="sev-cell low">IMPACT: ${(p.impactLevel || 'low').toUpperCase()}</span>
+              <span class="sev-cell low">COMPLEXITY: ${(p.estimatedComplexity || 'low').toUpperCase()}</span>
+              ${injCount > 0 ? '<span class="sev-cell high">INJECTION ATTEMPTS: ' + injCount + '</span>' : ''}
+            </div>
+          </div>
+        </div>
+        <div class="ai-report-section">
+          <div class="ai-report-tabs">
+            <button class="ai-tab-btn active" data-tab="executive-${prNumber}">EXECUTIVE SUMMARY</button>
+            <button class="ai-tab-btn" data-tab="hotspots-${prNumber}">REVIEW HOTSPOTS</button>
+            <button class="ai-tab-btn" data-tab="security-${prNumber}">SECURITY</button>
+            ${injCount > 0 ? '<button class="ai-tab-btn" data-tab="injection-${prNumber}" style="color:var(--error)">INJECTION</button>' : ''}
+          </div>
+          <div class="ai-tab-content" id="tab-executive-${prNumber}">
+            <ul class="ai-summary-list">
+              ${(result.executiveSummary || []).map(function(s) {
+                var isWarn = s.includes('⚠') || s.includes('manipulation');
+                return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
+              }).join('')}
+            </ul>
+          </div>
+          <div class="ai-tab-content" id="tab-hotspots-${prNumber}" style="display:none">
+            ${(result.reviewHotspots || []).length > 0 ? (result.reviewHotspots || []).map(function(h) {
+              return '<div class="scan-finding-card severity-medium"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(h.file) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(h.reason) + '</p></div></div>';
+            }).join('') : '<p class="empty">No hotspots identified.</p>'}
+          </div>
+          <div class="ai-tab-content" id="tab-security-${prNumber}" style="display:none">
+            ${(result.securityRelevantChanges || []).length > 0 ? (result.securityRelevantChanges || []).map(function(c) {
+              return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
+            }).join('') : '<p class="empty">No security-relevant changes detected.</p>'}
+            <div class="scan-clean-card" style="margin-top:0.5rem">
+              <span class="clean-status-label">// Scanner Correlation</span>
+              <p>Risk score: ${result.scannerCorrelation?.riskScore || 0} — ${result.scannerCorrelation?.findings || 0} finding(s)</p>
+            </div>
+          </div>
+          ${injCount > 0 ? '<div class="ai-tab-content" id="tab-injection-${prNumber}" style="display:none">' + (result.instructionManipulation || []).map(function(i) {
+            var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
+            return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
+          }).join('') + '</div>' : ''}
+        </div>
+        <div class="reviewer-notes" style="margin-top:0.75rem;padding:0.5rem;background:var(--bg-dark);border-radius:4px;font-size:0.55rem">
+          ${(result.reviewerNotes || []).map(function(n) { return '<div style="color:var(--text-dark);margin-bottom:0.25rem">// ' + escapeHtml(n) + '</div>'; }).join('')}
+        </div>
+      `;
+      aiPanel.style.display = 'block';
+      btn.textContent = 'Re-analyze';
+      // Wire tabs
+      aiPanel.querySelectorAll('.ai-tab-btn').forEach(function(tab) {
+        tab.addEventListener('click', function() {
+          aiPanel.querySelectorAll('.ai-tab-btn').forEach(function(t) { t.classList.remove('active'); });
+          aiPanel.querySelectorAll('.ai-tab-content').forEach(function(c) { c.style.display = 'none'; });
+          this.classList.add('active');
+          var target = document.getElementById('tab-' + this.dataset.tab);
+          if (target) target.style.display = 'block';
+        });
+      });
+      // Update badge on card
+      var badge = document.getElementById('ai-badge-' + prNumber);
+      if (badge) {
+        badge.className = 'badge ' + prioClass;
+        badge.textContent = 'AI: ' + (p.reviewPriority || 'low').toUpperCase();
+      }
+    } catch (err) {
+      console.error('AI analysis failed for PR #' + prNumber + ':', err);
+      aiPanel.innerHTML = '<div class="scan-header scan-critical">AI Analysis failed: ' + escapeHtml(err.message) + '</div>';
+      aiPanel.style.display = 'block';
+      btn.textContent = 'AI Analyze';
     } finally {
       btn.disabled = false;
     }
@@ -2434,7 +2633,14 @@
       html += '<div style="margin-top:0.5rem;font-size:0.55rem;color:var(--text-dark);padding:0.4rem;border:1px dashed var(--border-color);">Toggle settings above — changes apply immediately.</div>'
       html += '</div>'
 
-      html += '<div class="settings-group"><div class="settings-group-title">04 // Sentinel Installer</div>'
+      html += '<div class="settings-group"><div class="settings-group-title">04 // AI Intelligence</div>'
+      html += buildToggle('aiEnabled', 'AI PR Analysis', 'Enable AI-powered PR intelligence (Map-Reduce analysis with Qwen models)', status)
+      html += buildToggle('autoAnalyze', 'Auto Analyze', 'Automatically analyze PRs when they arrive (requires AI enabled)', status)
+      html += '<div class="token-detail"><span class="token-label">Model</span><select id="ai-model-select" style="background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:4px;padding:0.3rem 0.5rem;font-size:0.65rem;font-family:var(--font-mono);width:100%;margin-top:0.3rem"><option value="">Auto-detect</option></select></div>'
+      html += '<div id="ai-model-status" style="font-size:0.55rem;color:var(--text-dark);margin-top:0.2rem"></div>'
+      html += '</div>'
+
+      html += '<div class="settings-group"><div class="settings-group-title">05 // Sentinel Installer</div>'
       html += '<div class="token-detail"><span class="token-label">GitHub Actions Telemetry</span><span class="badge">OPTIONAL</span></div>'
       html += '<p style="font-size:0.6rem;color:var(--text-dark);line-height:1.5;margin:0.4rem 0">Install a workflow that sends workflow run timing data to Sentinel Oracle. This enables worklow intelligence, anomaly detection, and baseline tracking.</p>'
       html += '<button id="install-telemetry-btn" class="secondary-btn" style="width:100%;margin-top:0.4rem">⬇ INSTALL SENTINEL TELEMETRY WORKFLOW</button>'
@@ -2451,7 +2657,7 @@
           body[key] = val
           try {
             await api('/api/config/settings', { method: 'POST', body: JSON.stringify(body) })
-            if (key === 'scanEnabled' || key === 'autoScan') {
+            if (key === 'scanEnabled' || key === 'autoScan' || key === 'aiEnabled' || key === 'autoAnalyze') {
               currentStatus = null  // force refresh
             }
           } catch (err) {
@@ -2459,6 +2665,8 @@
           }
         })
       })
+      // Populate model selector
+      populateModelSelector()
       // Wire installer button
       var installBtn = document.getElementById('install-telemetry-btn')
       if (installBtn) {
@@ -2493,6 +2701,51 @@
     '</div>'
   }
 
+  async function populateModelSelector() {
+    var select = document.getElementById('ai-model-select')
+    var statusEl = document.getElementById('ai-model-status')
+    if (!select) return
+    try {
+      var data = await api('/api/ai/models')
+      var models = data.models || []
+      var selected = data.selected || ''
+      select.innerHTML = '<option value="">Auto-detect</option>'
+      for (var i = 0; i < models.length; i++) {
+        var opt = document.createElement('option')
+        opt.value = models[i].id
+        opt.textContent = models[i].name + ' (' + models[i].backend + ')'
+        if (models[i].id === selected) opt.selected = true
+        select.appendChild(opt)
+      }
+      if (models.length === 0) {
+        statusEl.textContent = 'No AI models detected'
+      } else {
+        statusEl.textContent = models.length + ' model(s) available'
+      }
+      select.addEventListener('change', async function () {
+        var val = this.value
+        this.style.borderColor = 'var(--accent-orange)'
+        try {
+          await api('/api/config/settings', { method: 'POST', body: JSON.stringify({ aiModel: val }) })
+          statusEl.textContent = '✓ Model saved: ' + (val || 'auto-detect')
+          statusEl.style.color = 'var(--accent-green)'
+          this.style.borderColor = 'var(--accent-green)'
+          setTimeout(function () {
+            select.style.borderColor = '#30363d'
+            statusEl.style.color = 'var(--text-dark)'
+            statusEl.textContent = (select.options.length - 1) + ' model(s) available'
+          }, 3000)
+        } catch (err) {
+          statusEl.textContent = 'Error saving model: ' + err.message
+          statusEl.style.color = 'var(--accent-red)'
+          this.style.borderColor = 'var(--accent-red)'
+        }
+      })
+    } catch (err) {
+      statusEl.textContent = 'Error: ' + err.message
+    }
+  }
+
   // Webhook Info
   async function loadWebhookInfo() {
     if (!authenticated) return;
@@ -2513,6 +2766,163 @@
     }
   }
 
+  // Auth Section
+  function renderAuthConnected(el, credId) {
+    el.innerHTML =
+      '<div class="auth-section-card authenticated">' +
+        '<div class="auth-section-icon authenticated">' +
+          '<span class="lock-icon">&#x2713;</span>' +
+          '<span class="ring-ripple"></span>' +
+          '<span class="ring-ripple"></span>' +
+          '<span class="ring-ripple"></span>' +
+        '</div>' +
+        '<div class="auth-section-connected">' +
+          '<span class="auth-section-badge">Session Active</span>' +
+          '<div class="auth-section-title">Authenticated</div>' +
+          '<div class="auth-section-sub">All operations available — session is live</div>' +
+          '<div class="auth-section-detail">Credential ID: <strong>' + (credId || '—') + '</strong></div>' +
+        '</div>' +
+      '</div>'
+  }
+
+  async function loadAuthSection() {
+    const el = document.getElementById('auth-section-content')
+    if (!el) return
+    if (authenticated) {
+      renderAuthConnected(el, currentCredentialId)
+      return
+    }
+    try {
+      var session = await api('/api/session/check')
+      if (session.authenticated) {
+        authenticated = true
+        currentCredentialId = session.credentialId || currentCredentialId
+        renderAuthConnected(el, currentCredentialId)
+        return
+      }
+    } catch (e) {}
+    // Not authenticated — render disconnected state
+    el.innerHTML =
+        '<div class="auth-section-card">' +
+          '<div class="auth-section-icon">' +
+            '<span class="lock-icon">&#x1F512;</span>' +
+            '<span class="ring-ripple"></span>' +
+            '<span class="ring-ripple"></span>' +
+            '<span class="ring-ripple"></span>' +
+          '</div>' +
+          '<div class="auth-section-cta">' +
+            '<span class="cta-line"></span>' +
+            '<span class="cta-text">Passkey Required</span>' +
+            '<span class="cta-line"></span>' +
+          '</div>' +
+          '<div class="auth-section-title">Authentication Required</div>' +
+          '<div class="auth-section-sub">Authenticate with your security key to access the Sentinel dashboard</div>' +
+          '<button id="auth-section-btn" class="auth-section-btn">' +
+            '<span class="ripple-ring"></span>' +
+            '<span class="ripple-ring"></span>' +
+            '<span class="ripple-ring"></span>' +
+            'Authenticate' +
+          '</button>' +
+          '<div id="auth-section-status" class="auth-section-status"></div>' +
+        '</div>'
+    document.getElementById('auth-section-btn').addEventListener('click', async function () {
+        var btn = this
+        var statusEl = document.getElementById('auth-section-status')
+        btn.disabled = true
+        statusEl.textContent = 'Authenticating...'
+        statusEl.className = 'auth-section-status info'
+        try {
+          var data = await api('/api/webauthn/assert/begin', { method: 'POST' })
+          var credential = await navigator.credentials.get({ publicKey: prepareWebAuthnOptions(data.options) })
+          var result = await api('/api/webauthn/assert/complete', {
+            method: 'POST',
+            body: JSON.stringify({ credential: credential.toJSON(), challenge: data.challenge })
+          })
+          if (result.verified) {
+            authenticated = true
+            currentCredentialId = result.credentialId
+            el.innerHTML =
+              '<div class="auth-section-card authenticated">' +
+                '<div class="auth-section-icon authenticated">' +
+                  '<span class="lock-icon">&#x2713;</span>' +
+                  '<span class="ring-ripple"></span>' +
+                  '<span class="ring-ripple"></span>' +
+                  '<span class="ring-ripple"></span>' +
+                '</div>' +
+                '<div class="auth-section-connected">' +
+                  '<span class="auth-section-badge">Session Active</span>' +
+                  '<div class="auth-section-title">Authenticated</div>' +
+                  '<div class="auth-section-sub">Authentication successful — access granted</div>' +
+                  '<div class="auth-section-detail">Credential ID: <strong>' + (result.credentialId || '—') + '</strong></div>' +
+                '</div>' +
+              '</div>'
+          } else {
+            statusEl.textContent = 'Authentication failed'
+            statusEl.className = 'auth-section-status error'
+          }
+        } catch (err) {
+          statusEl.textContent = err.name === 'NotAllowedError' ? 'Cancelled' : err.message
+          statusEl.className = 'auth-section-status error'
+        } finally {
+          btn.disabled = false
+        }
+      })
+  }
+
+  // About Sentinel
+  function loadAboutSentinel() {
+    const el = document.getElementById('about-content')
+    if (!el) return
+    el.innerHTML =
+      '<div class="about-container">' +
+        '<div class="about-card primary">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">01</span>' +
+            '<span class="about-card-title">Qu&eacute; es</span>' +
+          '</div>' +
+          '<p>Sentinel Oracle es un servidor de autorizaci&oacute;n de merges f&iacute;sicamente aislado para GitHub. Opera como una capa de autorizaci&oacute;n adicional sobre branch protection. Las credenciales de merge residen en un dispositivo dedicado (Raspberry Pi, NUC, mini PC, o un tel&eacute;fono Android viejo) en la red local. La workstation que desarrolla c&oacute;digo nunca tiene las credenciales para mergear.</p>' +
+        '</div>' +
+        '<div class="about-card warning">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">02</span>' +
+            '<span class="about-card-title">Qu&eacute; NO es</span>' +
+          '</div>' +
+          '<p>No es un linter, ni un reemplazo de branch protection, ni un code review tool, ni un CI/CD pipeline. Es una capa de autorizaci&oacute;n que cierra el &uacute;ltimo vector de ataque antes de producci&oacute;n: la workstation comprometida con credenciales de merge.</p>' +
+        '</div>' +
+        '<div class="about-card arch">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">03</span>' +
+            '<span class="about-card-title">Arquitectura</span>' +
+          '</div>' +
+          '<div class="arch-device"><span class="arch-device-tag untrusted">D1</span> Workstation (no confiable) — Dashboard de solo lectura, nunca tiene credenciales de merge</div>' +
+          '<div class="arch-device"><span class="arch-device-tag trusted">D2</span> Oracle Server (confiable) — Ejecuta merges v&iacute;a API de GitHub, expone dashboard HTTPS solo en Tailscale</div>' +
+          '<div class="arch-device"><span class="arch-device-tag identity">D3</span> Tel&eacute;fono (identidad) — Passkey WebAuthn con biometr&iacute;a, firma cada autorizaci&oacute;n individual</div>' +
+        '</div>' +
+        '<div class="about-card">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">04</span>' +
+            '<span class="about-card-title">Misi&oacute;n</span>' +
+          '</div>' +
+          '<p>Separar f&iacute;sicamente la autoridad de merge del entorno de desarrollo. Sentinel Oracle garantiza que ninguna estaci&oacute;n de trabajo comprometida —por malware, extensiones maliciosas, npm supply chain attacks o phishing— pueda fusionar c&oacute;digo a producci&oacute;n sin autorizaci&oacute;n biom&eacute;trica desde un dispositivo independiente.</p>' +
+          '<p>El merge no es una operaci&oacute;n de CI. Es un acto de autoridad que debe requerir presencia f&iacute;sica y consentimiento expl&iacute;cito.</p>' +
+        '</div>' +
+        '<div class="about-card">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">05</span>' +
+            '<span class="about-card-title">Visi&oacute;n</span>' +
+          '</div>' +
+          '<p>Un ecosistema donde el ciclo de vida del c&oacute;digo tenga tres roles irreducibles: el desarrollador escribe y prueba, la CI verifica calidad, y un dispositivo f&iacute;sico aislado —el Oracle— concede el merge. Ning&uacute;n ataque que comprometa solo un eslab&oacute;n puede completar un merge malicioso.</p>' +
+        '</div>' +
+        '<div class="about-card">' +
+          '<div class="about-card-header">' +
+            '<span class="about-card-badge">06</span>' +
+            '<span class="about-card-title">Planteamiento del Problema</span>' +
+          '</div>' +
+          '<p>En la cadena de suministro de software moderna, el eslab&oacute;n m&aacute;s d&eacute;bil no es el c&oacute;digo, sino la workstation del desarrollador. Malware, extensiones maliciosas de IDE, ataques de phishing dirigidos y dependencias comprometidas pueden tomar control de las credenciales de Git y mergear c&oacute;digo malicioso a producci&oacute;n sin que nadie lo note.</p>' +
+          '<p>Las soluciones existentes —branch protection, code review, CI pipelines— asumen que la workstation es confiable. Cuando ese supuesto se rompe, todas las dem&aacute;s defensas fallan en cascada. Sentinel Oracle elimina ese supuesto: las credenciales de merge nunca residen en la workstation, y cada merge requiere autorizaci&oacute;n biom&eacute;trica desde un dispositivo independiente.</p>' +
+        '</div>' +
+      '</div>'
+  }
   // Help Guide
   async function loadHelp() {
     const el = document.getElementById('help-content')
@@ -2848,7 +3258,7 @@ sentinel-oracle/
       target.style.display = 'block'
       currentPanel = id
       // Lazy-load panel data if not loaded yet
-      const allowUnauthenticated = ['github-config-section', 'setup-section', 'password-section']
+      const allowUnauthenticated = ['github-config-section', 'setup-section', 'password-section', 'auth-section']
       if (!panelsLoaded[id] && (authenticated || allowUnauthenticated.includes(id))) {
         panelsLoaded[id] = true
         switch (id) {
@@ -2868,6 +3278,8 @@ sentinel-oracle/
           case 'audit-section': loadAudit(); break
           case 'password-section': loadPasswordSection(); break
           case 'analytics-section': loadAnalytics(); break
+          case 'about-section': loadAboutSentinel(); break
+          case 'auth-section': loadAuthSection(); break
           case 'help-section': loadHelp(); break
         }
       }
@@ -2879,11 +3291,22 @@ sentinel-oracle/
     }
   }
 
-  // Sidebar navigation
+  // Sidebar navigation — check auth first
   document.querySelectorAll('.nav-item').forEach(function (item) {
     item.addEventListener('click', function () {
       const targetId = this.dataset.target
-      if (targetId) showPanel(targetId)
+      if (!targetId) return
+      // Allow about, help, github-config without auth
+      const publicPanels = ['about-section', 'auth-section', 'help-section', 'github-config-section', 'settings-section', 'password-section', 'enrollment-section', 'setup-section']
+      if (!authenticated && !publicPanels.includes(targetId)) {
+        const modal = document.getElementById('auth-modal')
+        if (modal) {
+          document.getElementById('auth-modal-message').textContent = 'Authenticate with your passkey to access this section.'
+          modal.style.display = 'flex'
+        }
+        return
+      }
+      showPanel(targetId)
     })
   })
 

@@ -206,11 +206,17 @@ body { background: var(--bg-primary); font-family: var(--font-mono); color: var(
     <div class="form-group">
       <label for="gh-installation-id">Installation ID</label>
       <input type="text" id="gh-installation-id" placeholder="e.g. 139924356">
+      <span class="hint">En la URL del navegador cuando configuras la app en tu repo: <code>github.com/settings/installations/<b style="color:var(--text-bright)">139924356</b></code></span>
     </div>
     <div class="form-group">
-      <label for="gh-private-key-path">Private Key File Path</label>
+      <label for="gh-private-key-path">Private Key File Path <span style="color:var(--text-dark);font-weight:400;text-transform:none;letter-spacing:0">(opcional si pegas el contenido abajo)</span></label>
       <input type="text" id="gh-private-key-path" placeholder="e.g. C:\Users\you\app.2025-06-21.private-key.pem">
-      <span class="hint">Absolute path to your PEM file on the server. Read automatically — never transmitted.</span>
+      <span class="hint">Ruta absoluta al archivo PEM en el servidor. Se lee automáticamente; nunca se transmite.</span>
+    </div>
+    <div class="form-group">
+      <label for="gh-private-key-paste">O pega el contenido del PEM directamente</label>
+      <textarea id="gh-private-key-paste" rows="4" placeholder="-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----" style="font-family:monospace;font-size:0.6rem"></textarea>
+      <span class="hint">El servidor lo guarda automáticamente. No se necesita ruta de archivo si pegas aquí.</span>
     </div>
     <div class="nav-buttons">
       <button id="to-step-1" class="">Back</button>
@@ -279,7 +285,13 @@ async function api(method, path, opts) {
 }
 
 let configured = false
-let stepData = { owner: '', repo: '', appId: '', installationId: '', privateKeyPath: '', scanEnabled: false, webhookSecret: '' }
+function escapeHtml(str) {
+  const div = document.createElement('div')
+  div.textContent = str
+  return div.innerHTML
+}
+
+let stepData = { owner: '', repo: '', appId: '', installationId: '', privateKeyPath: '', privateKey: '', scanEnabled: false, webhookSecret: '' }
 let authenticated = false
 let webhookUrl = ''
 let serverOrigin = ''
@@ -393,6 +405,7 @@ document.getElementById('to-step-3').addEventListener('click', () => {
   stepData.appId = document.getElementById('gh-app-id').value.trim()
   stepData.installationId = document.getElementById('gh-installation-id').value.trim()
   stepData.privateKeyPath = document.getElementById('gh-private-key-path').value.trim()
+  stepData.privateKey = document.getElementById('gh-private-key-paste').value.trim()
   showStep(3)
 })
 
@@ -422,7 +435,8 @@ document.getElementById('test-connection').addEventListener('click', async () =>
     }
     if (stepData.appId) saveBody.appId = stepData.appId
     if (stepData.installationId) saveBody.installationId = stepData.installationId
-    if (stepData.privateKeyPath) saveBody.privateKeyPath = stepData.privateKeyPath
+    if (stepData.privateKey) saveBody.privateKey = stepData.privateKey
+    else if (stepData.privateKeyPath) saveBody.privateKeyPath = stepData.privateKeyPath
 
     await api('POST', '/api/config/github', { body: JSON.stringify(saveBody) })
 
@@ -439,13 +453,13 @@ document.getElementById('test-connection').addEventListener('click', async () =>
       document.getElementById('save-config').textContent = 'Save & Finish'
     } catch (err) {
       resultEl.className = 'result-box'
-      resultEl.innerHTML = '<span class="result-title" style="color:var(--accent-orange)">⚠ Config Saved</span><span class="result-detail">Configuration saved but connection test failed. Verify your GitHub App permissions and restart the server.</span>'
+      resultEl.innerHTML = '<span class="result-title" style="color:var(--accent-orange)">\u26a0 Config Saved</span><span class="result-detail">Configuration saved but connection test failed: ' + escapeHtml(err instanceof Error ? err.message : String(err)) + '</span>'
       document.getElementById('save-config').disabled = false
       document.getElementById('save-config').textContent = 'Save & Finish'
     }
   } catch (err) {
     resultEl.className = 'result-box error'
-    resultEl.innerHTML = '<span class="result-title">// Error</span><span class="result-detail">' + err.message + '</span>'
+    resultEl.innerHTML = '<span class="result-title">// Error</span><span class="result-detail">' + escapeHtml(err.message) + '</span>'
   } finally {
     btn.disabled = false
     btn.textContent = 'Test Connection'

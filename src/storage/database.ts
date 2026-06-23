@@ -86,6 +86,18 @@ export interface ScanResultRow {
   intelJson?: string
 }
 
+export interface AIAnalysisRow {
+  prNumber: number
+  scanHash: string
+  analysisJson: string
+  reviewPriority: string
+  impactLevel: string
+  complexity: string
+  injectionDetected: number
+  injectionAttemptsJson: string
+  analyzedAt: number
+}
+
 export class DatabaseStore {
     private db: Database.Database;
     private encryptionKey: Buffer;
@@ -264,6 +276,21 @@ export class DatabaseStore {
             CREATE INDEX IF NOT EXISTS idx_scan_results_pr ON scan_results(pr_number);
         `)
         this.runMigration("ALTER TABLE scan_results ADD COLUMN intel_json TEXT DEFAULT ''")
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS ai_analysis (
+                pr_number INTEGER NOT NULL,
+                scan_hash TEXT NOT NULL,
+                analysis_json TEXT NOT NULL,
+                review_priority TEXT NOT NULL DEFAULT 'low',
+                impact_level TEXT NOT NULL DEFAULT 'low',
+                complexity TEXT NOT NULL DEFAULT 'low',
+                injection_detected INTEGER NOT NULL DEFAULT 0,
+                injection_attempts_json TEXT NOT NULL DEFAULT '[]',
+                analyzed_at INTEGER NOT NULL,
+                UNIQUE(pr_number, scan_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_ai_analysis_pr ON ai_analysis(pr_number);
+        `)
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS capability_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -858,6 +885,36 @@ export class DatabaseStore {
                    intel_json as intelJson
             FROM scan_results ORDER BY scanned_at DESC
         `).all() as ScanResultRow[]
+    }
+
+    saveAnalysisResult(prNumber: number, scanHash: string, result: {
+      analysisJson: string
+      reviewPriority: string
+      impactLevel: string
+      complexity: string
+      injectionDetected: boolean
+      injectionAttemptsJson: string
+    }): void {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO ai_analysis (pr_number, scan_hash, analysis_json, review_priority, impact_level, complexity, injection_detected, injection_attempts_json, analyzed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(prNumber, scanHash, result.analysisJson, result.reviewPriority, result.impactLevel, result.complexity, result.injectionDetected ? 1 : 0, result.injectionAttemptsJson, Date.now())
+    }
+
+    getLatestAnalysisResult(prNumber: number): AIAnalysisRow | undefined {
+      const rows = this.db.prepare(`
+        SELECT pr_number as prNumber, scan_hash as scanHash, analysis_json as analysisJson,
+               review_priority as reviewPriority, impact_level as impactLevel, complexity,
+               injection_detected as injectionDetected, injection_attempts_json as injectionAttemptsJson,
+               analyzed_at as analyzedAt
+        FROM ai_analysis WHERE pr_number = ? ORDER BY analyzed_at DESC LIMIT 1
+      `).all(prNumber) as AIAnalysisRow[]
+      return rows.length > 0 ? rows[0] : undefined
+    }
+
+    hasAnalysisHash(prNumber: number, scanHash: string): boolean {
+      const row = this.db.prepare('SELECT 1 FROM ai_analysis WHERE pr_number = ? AND scan_hash = ?').get(prNumber, scanHash) as any
+      return !!row
     }
 
     close(): void {

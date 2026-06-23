@@ -14,6 +14,10 @@
   </div>
   <div class="sidebar-nav">
     <div class="nav-group">
+      <div class="nav-group-label">00 // AUTH</div>
+      <a class="nav-item" data-target="auth-section">Authentication</a>
+    </div>
+    <div class="nav-group">
       <div class="nav-group-label">01 // SECURITY OPERATIONS</div>
       <a class="nav-item" data-target="soc-section">Security Posture</a>
       <a class="nav-item" data-target="dna-section">Security DNA</a>
@@ -55,6 +59,7 @@
     </div>
     <div class="nav-group">
       <div class="nav-group-label">00 // REFERENCE</div>
+      <a class="nav-item" data-target="about-section">About Sentinel</a>
       <a class="nav-item" data-target="help-section">Help & Guide</a>
     </div>
   </div>
@@ -243,10 +248,31 @@
     </div>
   </section>
 
+  <section id="auth-section" class="section panel" style="display:none">
+    <h2>Authentication</h2>
+    <div id="auth-section-content"></div>
+  </section>
+
+  <section id="about-section" class="section panel" style="display:none">
+    <h2>About Sentinel Oracle</h2>
+    <div id="about-content"></div>
+  </section>
+
   <section id="help-section" class="section panel" style="display:none">
     <h2>Help & Guide</h2>
     <div id="help-content"></div>
   </section>
+
+  <!-- Auth Required Modal -->
+  <div id="auth-modal" class="modal" style="display:none;">
+    <div class="modal-overlay" id="auth-modal-overlay"></div>
+    <div class="modal-content" style="max-width:400px;text-align:center">
+      <h3>Authentication Required</h3>
+      <p id="auth-modal-message">Authenticate with your passkey to access the dashboard.</p>
+      <button id="auth-modal-btn" class="auth-btn" style="width:100%;margin-top:1rem">Authenticate</button>
+      <div id="auth-modal-status" class="status"></div>
+    </div>
+  </div>
 
   <div id="reassert-modal" class="modal" style="display:none;">
     <div class="modal-content">
@@ -285,7 +311,6 @@
   </div>
 </main>
 
-<script src="/qrcode.min.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

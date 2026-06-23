@@ -5,7 +5,7 @@ import * as fs from 'fs'
 import * as http from 'http'
 import { DatabaseStore } from '../../src/storage/database'
 import { createApp } from '../../src/server'
-import type { GitHubClient } from '../../src/github/client'
+import { GitHubApiError, type GitHubClient } from '../../src/github/client'
 import type { Config } from '../../src/config'
 import { initHmacKey } from '../../src/crypto/signing'
 
@@ -15,7 +15,7 @@ function tmpDir(): string {
   return dir
 }
 
-function createMockClient(): GitHubClient {
+function createMockClient(overrides: Partial<GitHubClient> = {}): GitHubClient {
   return {
     owner: 'test-owner',
     repo: 'test-repo',
@@ -24,6 +24,7 @@ function createMockClient(): GitHubClient {
     listOpenPRs: async () => [],
     updateCheckRun: async () => {},
     mergePR: async () => true,
+    ...overrides,
   } as unknown as GitHubClient
 }
 
@@ -47,12 +48,19 @@ function createTestConfig(dataDir: string): Config {
     rateLimitWindowMs: 60000,
     encryptionKey: Buffer.alloc(0),
     cookieSecret: 'test-cookie-secret',
+    hmacSeed: Buffer.from('test-hmac-key-for-e2e', 'utf8'),
     approveReasonRequired: false,
     locked: false,
     passwordHash: '',
     enrollmentTokenTtlMs: 300000,
     githubWebhookSecret: '',
     scanEnabled: false,
+    autoScan: false,
+    aiEnabled: false,
+    autoAnalyze: false,
+    securityInbox: true,
+    analystQueue: true,
+    aiModel: '',
   }
 }
 
@@ -86,6 +94,7 @@ describe('E2E: full HTTP API flow', () => {
   let baseUrl: string
   let csrfToken: string
   let sessionCookie: string
+  let mockClient: GitHubClient
 
   beforeAll(async () => {
     dir = tmpDir()
@@ -105,7 +114,7 @@ describe('E2E: full HTTP API flow', () => {
     const sid = db.createSession('test-credential-e2e', 'E2E Test Device', 86400000, undefined, 'test-agent')
     csrfToken = db.getSessionCSRFToken(sid) || ''
 
-    const mockClient = createMockClient()
+    mockClient = createMockClient()
     const config = createTestConfig(dir)
     const { app } = createApp(config, db, mockClient)
 
@@ -164,6 +173,24 @@ describe('E2E: full HTTP API flow', () => {
     expect(res.status).toBe(200)
     const data = JSON.parse(res.body)
     expect(Array.isArray(data)).toBe(true)
+  })
+
+  it('surfaces GitHub PR polling failures instead of returning an empty list', async () => {
+    const original = mockClient.listOpenPRs
+    mockClient.listOpenPRs = async () => {
+      throw new GitHubApiError(404, '{"message":"Not Found"}', 'GET', '/repos/test-owner/test-repo/pulls')
+    }
+
+    try {
+      const res = await fetch('GET', `${baseUrl}/api/prs`, { Cookie: sessionCookie })
+      expect(res.status).toBe(424)
+      const data = JSON.parse(res.body)
+      expect(data.code).toBe('REPO_NOT_ACCESSIBLE')
+      expect(data.repo).toBe('test-owner/test-repo')
+      expect(data.githubStatus).toBe(404)
+    } finally {
+      mockClient.listOpenPRs = original
+    }
   })
 
   it('returns CSRF token for authenticated session', async () => {

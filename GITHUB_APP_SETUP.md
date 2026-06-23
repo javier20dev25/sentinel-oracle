@@ -54,13 +54,9 @@ This guide covers GitHub App setup. Each Sentinel Oracle instance requires its o
 1. After creating the app, scroll to the bottom of the app settings page.
 2. Click **Generate a private key**.
 3. A `.pem` file will be downloaded automatically.
-4. Save this file to a secure location on your oracle server.
+4. Abra el archivo con Notepad o cualquier editor de texto.
 
-   ```
-   C:\Users\sentinel\.sentinel-oracle\github-app-key.pem
-   ```
-
-   The file should look like:
+   El contenido se ve asi:
 
    ```
    -----BEGIN RSA PRIVATE KEY-----
@@ -69,9 +65,12 @@ This guide covers GitHub App setup. Each Sentinel Oracle instance requires its o
    -----END RSA PRIVATE KEY-----
    ```
 
-5. Set file permissions so only the oracle process can read it:
-   - **Linux**: `chmod 600 /home/sentinel/.sentinel-oracle/github-app-key.pem`
-   - **Windows**: Right-click > Properties > Security > Remove inheritance > Add your user only
+5. **No necesita copiar el archivo al servidor.** En el setup web (paso 2 del formulario)
+   hay un textarea donde puede pegar el contenido directamente. El servidor lo guarda solo.
+
+   > Si prefiere usar la ruta del archivo: copie el .pem al servidor Oracle
+   > (ej. `C:\Users\sleyt\.sentinel-oracle\app.private-key.pem`) y escriba la ruta
+   > absoluta en el campo "Private Key File Path".
 
 ---
 
@@ -82,31 +81,58 @@ This guide covers GitHub App setup. Each Sentinel Oracle instance requires its o
 3. Select **Only select repositories** and choose the repository(s) you want Sentinel Oracle to protect.
 4. Click **Install**.
 
-5. After installation, note the **Installation ID**:
-   - Go to `https://api.github.com/app/installations` (authenticated with your personal account)
-   - Find the installation for your app
-   - The `id` field is your installation ID
-   - Alternatively, the URL of your installation page contains the ID:
-     `https://github.com/settings/installations/<INSTALLATION_ID>`
+5. **Obtenga el Installation ID** (importante: no esta en la pagina de la app):
+
+   Hay dos formas de encontrarlo:
+
+   **Forma A — Desde la pagina de la app:**
+   - En `github.com/settings/apps/tu-app` → sidebar **Install App**
+   - Al lado del repositorio instalado, haga click en el engranaje ⚙️ **Configure**
+   - La URL del navegador cambia a: `https://github.com/settings/installations/<INSTALLATION_ID>`
+   - Ejemplo: si la URL es `https://github.com/settings/installations/139924356`,
+     el Installation ID es `139924356`
+
+   **Forma B — Desde el repositorio:**
+   - Vaya a `github.com/tu-org/tu-repo/settings`
+   - Sidebar izquierdo → **GitHub Apps** (bajo "Integrations")
+   - Al lado de "Sentinel Oracle" → click **Configure**
+   - Misma URL: `https://github.com/settings/installations/<INSTALLATION_ID>`
+
+   > :warning: NO es el App ID (`4119820`) ni el Client ID (`Iv23li...`).
+   > El Installation ID es un numero distinto que solo aparece DESPUES de instalar
+   > la app en un repositorio.
 
 ---
 
 ## Step 4: Configure Sentinel Oracle
 
-Edit your `config.json` (`~/.sentinel-oracle/config.json`):
+### Opcion A — Usando el setup web (recomendado)
+
+Abra `https://{IP_TAILSCALE}:3443/setup` en un navegador. El formulario paso a paso le
+pedira: Owner, Repository, App ID, Installation ID, y Private Key.
+
+En el campo de Private Key tiene dos alternativas:
+- **Pegar el contenido**: Abra el .pem con Notepad, copie todo (incluyendo `-----BEGIN` y
+  `-----END`), y peguelo en el textarea "O pega el contenido del PEM directamente"
+- **Ruta de archivo**: Copie el .pem al servidor y ponga la ruta absoluta
+
+### Opcion B — Editando config.json directamente
 
 ```json
 {
-  "githubAppId": "123456",
-  "githubInstallationId": "654321",
-  "githubPrivateKeyPath": "C:\\Users\\sentinel\\.sentinel-oracle\\github-app-key.pem",
-  "githubOwner": "your-org-or-user",
-  "githubRepo": "your-repo",
+  "githubAppId": "4119820",
+  "githubInstallationId": "139924356",
+  "githubPrivateKeyPath": "C:\\Users\\sleyt\\.sentinel-oracle\\github-app-key.pem",
+  "githubOwner": "tu-org",
+  "githubRepo": "tu-repo",
   "githubStatusContext": "Sentinel Authorization",
   "host": "0.0.0.0",
   "port": 3443
 }
 ```
+
+> Si usa la Opcion B, el archivo .pem DEBE existir en la ruta especificada en el servidor.
+> En Windows use doble backslash `\\` en la ruta.
 
 Remove the `githubToken` field if present — if both are provided, GitHub App mode takes precedence.
 

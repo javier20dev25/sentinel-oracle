@@ -21,8 +21,14 @@ export function initSessionDb(db: DatabaseStore): void {
   sessionDb = db
 }
 
+let noAuthMode = false
+export function setNoAuthMode(v: boolean): void {
+  noAuthMode = v
+}
+
 export function requireAuth() {
   return (req: Request, res: Response, next: NextFunction) => {
+    if (noAuthMode) return next()
     const raw = req.signedCookies?.[COOKIE_NAME]
     if (!raw || typeof raw !== 'string') {
       return res.status(401).json({ error: 'Authentication required' })

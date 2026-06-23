@@ -1,10 +1,16 @@
 import { setDefaultResultOrder } from 'dns'
 import * as fs from 'fs'
+import * as readline from 'readline'
 setDefaultResultOrder('ipv4first')
 
 const packageJson = JSON.parse(fs.readFileSync(__dirname + '/../package.json', 'utf8'))
 
 const args = process.argv.slice(2)
+const noAuth = args.includes('--noauth')
+if (noAuth) {
+  console.log(' [--noauth] WebAuthn session auth DISABLED — all requests accepted without authentication')
+}
+
 if (args.includes('--help') || args.includes('-h')) {
   console.log(`sentinel-oracle v${packageJson.version}
 
@@ -14,6 +20,7 @@ Usage:
   sentinel-oracle scan               Run a one-time security scan on the configured repository
   sentinel-oracle --version, -v      Print version
   sentinel-oracle --help, -h         Print this help
+  sentinel-oracle --noauth           Start without WebAuthn session authentication
 
 Environment:
   SENTINEL_CONFIG_DIR    Configuration directory (default: ~/.config/sentinel-oracle)
@@ -174,28 +181,42 @@ async function main() {
 
   let valid = false
   const isTty = process.stdout.isTTY
+  const hasApp = !!config.githubAppId && !!config.githubInstallationId && (!!config.githubPrivateKeyPath || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY || !!process.env.SENTINEL_GITHUB_PRIVATE_KEY_PATH)
 
-  if (process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1') {
-    configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
-  } else if (!tokenOrConfig && isTty) {
-    const result = await runSetupWizard(config.githubOwner, config.githubRepo)
-    if (result) {
-      const reloaded = loadConfig()
-      const r = resolveCredentials(reloaded)
-      configWarnings.push(...r.warnings)
-      client = new GitHubClient(r.tokenOrConfig, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
-      Object.assign(config, reloaded)
-      valid = await client.verifyToken()
-    }
+  function startSetupMode(msg: string) {
+    console.log()
+    console.log(` ${msg}`)
+    console.log(' Starting in setup mode — configure via the Web UI.')
+    console.log()
+  }
+
+  // Check if GitHub App is configured but verify fails — skip PAT wizard
+  if (tokenOrConfig && typeof tokenOrConfig !== 'string') {
+    valid = await client.verifyToken()
     if (!valid) {
       console.log()
-      console.log(' Starting in setup mode — configure via the Web UI.')
-      console.log(' Run sentinel-oracle again after configuring.')
+      console.log(' GitHub App verification failed — check clock sync and private key.')
+      console.log(' Starting in setup mode. Configure GitHub or fix the App credentials')
+      console.log(' via the Web UI (Settings > GitHub Config).')
       console.log()
+    } else {
+      configWarnings.push(`[auth] Using ${client.authMode} authentication`)
     }
-  } else if (tokenOrConfig) {
-    valid = await client.verifyToken()
-    if (!valid && isTty) {
+  } else if (process.env.SENTINEL_SKIP_TOKEN_VERIFY === '1') {
+    configWarnings.push('[dev] SENTINEL_SKIP_TOKEN_VERIFY=1 — GitHub token verification skipped')
+  } else if (!tokenOrConfig && isTty) {
+    // ─── No credentials at all → offer menu ───
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+    console.log()
+    console.log(' GitHub not configured.')
+    console.log()
+    console.log('  1 — Configure via terminal (fine-grained PAT)')
+    console.log('  2 — Configure via Web UI  (start server, then set up from browser)')
+    console.log()
+    const answer = await new Promise<string>(resolve => rl.question(' Choose (1/2): ', resolve))
+    rl.close()
+
+    if (answer.trim() === '1') {
       const result = await runSetupWizard(config.githubOwner, config.githubRepo)
       if (result) {
         const reloaded = loadConfig()
@@ -206,17 +227,33 @@ async function main() {
         valid = await client.verifyToken()
       }
     }
+    if (!valid) startSetupMode('Configure a PAT or GitHub App from the Web UI.')
+  } else if (tokenOrConfig && isTty && typeof tokenOrConfig === 'string') {
+    // ─── PAT configured but may be invalid → verify first ───
+    valid = await client.verifyToken()
     if (!valid) {
-      if (isTty) {
-        console.log()
-        console.log(' Token invalid — starting in setup mode.')
-        console.log(' Run sentinel-oracle again after fixing the token,')
-        console.log(' or set SENTINEL_SKIP_TOKEN_VERIFY=1 to skip.')
-        console.log()
-      } else {
-        console.error('GitHub credential verification failed — run with SENTINEL_SKIP_TOKEN_VERIFY=1 to skip')
-        gracefulExit(1)
+      console.log()
+      console.log(' Saved PAT is invalid or expired.')
+      console.log()
+      console.log('  1 — Replace with a new PAT')
+      console.log('  2 — Start in setup mode (configure via Web UI)')
+      console.log()
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+      const answer = await new Promise<string>(resolve => rl.question(' Choose (1/2): ', resolve))
+      rl.close()
+
+      if (answer.trim() === '1') {
+        const result = await runSetupWizard(config.githubOwner, config.githubRepo)
+        if (result) {
+          const reloaded = loadConfig()
+          const r = resolveCredentials(reloaded)
+          configWarnings.push(...r.warnings)
+          client = new GitHubClient(r.tokenOrConfig, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
+          Object.assign(config, reloaded)
+          valid = await client.verifyToken()
+        }
       }
+      if (!valid) startSetupMode('Fix the PAT or switch to GitHub App from the Web UI.')
     } else {
       configWarnings.push(`[auth] Using ${client.authMode} authentication`)
     }
@@ -230,7 +267,7 @@ async function main() {
     configWarnings.push('[setup] Server running in setup mode — configure via the Web UI')
   }
 
-  const { app, startPolling, stopPolling } = createApp(config, db, client)
+  const { app, startPolling, stopPolling } = createApp(config, db, client, noAuth)
 
   const httpsOptions = getHttpsOptions(config.dataDir)
 
