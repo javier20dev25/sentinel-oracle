@@ -95,6 +95,7 @@ describe('E2E: full HTTP API flow', () => {
   let csrfToken: string
   let sessionCookie: string
   let mockClient: GitHubClient
+  let config: Config
 
   beforeAll(async () => {
     dir = tmpDir()
@@ -115,7 +116,7 @@ describe('E2E: full HTTP API flow', () => {
     csrfToken = db.getSessionCSRFToken(sid) || ''
 
     mockClient = createMockClient()
-    const config = createTestConfig(dir)
+    config = createTestConfig(dir)
     const { app } = createApp(config, db, mockClient)
 
     await new Promise<void>((resolve) => {
@@ -190,6 +191,25 @@ describe('E2E: full HTTP API flow', () => {
       expect(data.githubStatus).toBe(404)
     } finally {
       mockClient.listOpenPRs = original
+    }
+  })
+
+  it('surfaces GitHub API errors on PR scan instead of returning 404', async () => {
+    config.scanEnabled = true
+    const original = mockClient.getPRFiles
+    mockClient.getPRFiles = async () => {
+      throw new GitHubApiError(403, '{"message":"Forbidden"}', 'GET', '/repos/test-owner/test-repo/pulls/1/files')
+    }
+
+    try {
+      const res = await fetch('POST', `${baseUrl}/api/prs/1/scan`, { Cookie: sessionCookie })
+      expect(res.status).toBe(403)
+      const data = JSON.parse(res.body)
+      expect(data.code).toBe('GITHUB_API_ERROR')
+      expect(data.githubStatus).toBe(403)
+    } finally {
+      mockClient.getPRFiles = original
+      config.scanEnabled = false
     }
   })
 

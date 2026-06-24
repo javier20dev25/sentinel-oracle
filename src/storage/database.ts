@@ -114,8 +114,12 @@ export class DatabaseStore {
     private runMigration(sql: string): void {
       try {
         this.db.prepare(sql).run()
-      } catch (err) {
-        console.error(`[db] Migration warning: ${sql} — ${err instanceof Error ? err.message : err}`)
+      } catch (err: any) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (msg.includes('duplicate column name') || msg.includes('duplicate column')) {
+          return
+        }
+        console.error(`[db] Migration warning: ${sql} — ${msg}`)
       }
     }
 

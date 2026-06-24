@@ -1,6 +1,7 @@
 import { setDefaultResultOrder } from 'dns'
 import * as fs from 'fs'
 import * as readline from 'readline'
+import * as path from 'path'
 setDefaultResultOrder('ipv4first')
 
 const packageJson = JSON.parse(fs.readFileSync(__dirname + '/../package.json', 'utf8'))
@@ -113,13 +114,13 @@ function ensureCredentials(config: ReturnType<typeof loadConfig>): boolean {
 function validatePermissions(configDir: string): void {
   const items = [
     { path: configDir, required: 'dir' },
-    { path: `${configDir}\\config.json`, required: 'optional' },
-    { path: `${configDir}\\server.key`, required: 'file' },
-    { path: `${configDir}\\server.cert`, required: 'file' },
-    { path: `${configDir}\\private-key.pem`, required: 'optional' },
-    { path: `${configDir}\\.encryption_key`, required: 'file' },
-    { path: `${configDir}\\.cookie_secret`, required: 'file' },
-    { path: `${configDir}\\.hmac_seed`, required: 'file' },
+    { path: path.join(configDir, 'config.json'), required: 'optional' },
+    { path: path.join(configDir, 'server.key'), required: 'file' },
+    { path: path.join(configDir, 'server.cert'), required: 'file' },
+    { path: path.join(configDir, 'private-key.pem'), required: 'optional' },
+    { path: path.join(configDir, '.encryption_key'), required: 'file' },
+    { path: path.join(configDir, '.cookie_secret'), required: 'file' },
+    { path: path.join(configDir, '.hmac_seed'), required: 'file' },
   ]
   for (const item of items) {
     try {
@@ -140,8 +141,8 @@ function validatePermissions(configDir: string): void {
 }
 
 function getHttpsOptions(configDir: string): { key: string; cert: string } {
-  const keyPath = `${configDir}\\server.key`
-  const certPath = `${configDir}\\server.cert`
+  const keyPath = path.join(configDir, 'server.key')
+  const certPath = path.join(configDir, 'server.cert')
 
   try {
     return {

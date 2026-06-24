@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser'
 import * as path from 'path'
 import type { Config } from './config'
 import type { DatabaseStore } from './storage/database'
-import type { GitHubClient } from './github/client'
+import { GitHubApiError, type GitHubClient } from './github/client'
 import { AuthorizationQueue } from './queue/authorization'
 import { PollPRsError, pollPRs } from './github/monitor'
 import { securityHeaders, corsBlock, auditLogger, csrfProtection } from './middleware/security'
@@ -620,6 +620,13 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       })
     } catch (err) {
       db.log('error', null, `PR scan: ${err instanceof Error ? err.message : err}`)
+      if (err instanceof GitHubApiError) {
+        return res.status(err.status === 401 ? 401 : err.status === 403 ? 403 : 424).json({
+          error: err.message,
+          code: 'GITHUB_API_ERROR',
+          githubStatus: err.status,
+        })
+      }
       res.status(500).json({ error: 'Failed to scan PR' })
     }
   })
@@ -657,6 +664,13 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       res.json({ cached: false, ...analysis })
     } catch (err) {
       db.log('error', null, `AI analysis: ${err instanceof Error ? err.message : err}`)
+      if (err instanceof GitHubApiError) {
+        return res.status(err.status === 401 ? 401 : err.status === 403 ? 403 : 424).json({
+          error: err.message,
+          code: 'GITHUB_API_ERROR',
+          githubStatus: err.status,
+        })
+      }
       res.status(500).json({ error: 'Failed to analyze PR' })
     }
   })

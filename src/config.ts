@@ -225,7 +225,10 @@ export function loadConfig(): Config {
 
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      const raw = fs.readFileSync(CONFIG_PATH, 'utf8')
+      let raw = fs.readFileSync(CONFIG_PATH, 'utf8')
+      if (raw.startsWith('\uFEFF')) {
+        raw = raw.slice(1)
+      }
       const user = JSON.parse(raw)
       const merged = { ...defaults, ...user, encryptionKey: defaults.encryptionKey, cookieSecret: defaults.cookieSecret, hmacSeed: defaults.hmacSeed }
 
@@ -310,7 +313,11 @@ export function saveConfig(partial: Partial<Config>): void {
   const existing: Record<string, unknown> = {}
   try {
     if (fs.existsSync(CONFIG_PATH)) {
-      Object.assign(existing, JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')))
+      let raw = fs.readFileSync(CONFIG_PATH, 'utf8')
+      if (raw.startsWith('\uFEFF')) {
+        raw = raw.slice(1)
+      }
+      Object.assign(existing, JSON.parse(raw))
     }
   } catch {}
   for (const [k, v] of Object.entries(partial)) {

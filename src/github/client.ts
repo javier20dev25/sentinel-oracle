@@ -245,15 +245,11 @@ export class GitHubClient {
   }
 
   async mergePR(prNumber: number, sha: string): Promise<boolean> {
-    try {
-      const out = await this.api('PUT', `/repos/${this.owner}/${this.repo}/pulls/${prNumber}/merge`,
-        { sha, merge_method: 'squash' },
-      )
-      const data = JSON.parse(out)
-      return data.merged === true
-    } catch {
-      return false
-    }
+    const out = await this.api('PUT', `/repos/${this.owner}/${this.repo}/pulls/${prNumber}/merge`,
+      { sha, merge_method: 'squash' },
+    )
+    const data = JSON.parse(out)
+    return data.merged === true
   }
 
   async verifyToken(): Promise<boolean> {
@@ -448,8 +444,11 @@ export class GitHubClient {
         patch: f.patch || '',
         contents_url: f.contents_url,
       }))
-    } catch {
-      return []
+    } catch (err) {
+      if (err instanceof GitHubApiError && err.status === 404) {
+        return []
+      }
+      throw err
     }
   }
 
