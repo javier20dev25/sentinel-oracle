@@ -9,7 +9,7 @@ import { GitHubApiError, type GitHubClient } from './github/client'
 import { AuthorizationQueue } from './queue/authorization'
 import { PollPRsError, pollPRs } from './github/monitor'
 import { securityHeaders, corsBlock, auditLogger, csrfProtection } from './middleware/security'
-import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF, initSessionDb, setNoAuthMode } from './middleware/session'
+import { requireAuth, createSessionCookie, clearSessionCookie, getSessionTTL, requireCSRF, initSessionDb, setNoAuthMode, isNoAuthMode } from './middleware/session'
 import { authRateLimiter, apiRateLimiter } from './middleware/rateLimit'
 import {
   generateRegistration,
@@ -22,7 +22,7 @@ import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
-import { analyzePR as aiAnalyzePR } from './ai/analyzer'
+import { analyzePR as aiAnalyzePR, analyzeScanResults } from './ai/analyzer'
 import { detectAIBackend, detectAllModels, checkModelHealth } from './ai/detector'
 import { buildCapabilitySnapshot, buildDNAReport } from './scanner/intel/security-dna'
 import { TokenInventoryScanner } from './inventory/tokens'
@@ -189,12 +189,18 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
 
   // ----- Session -----
   app.get('/api/session/check', (req, res) => {
+    if (isNoAuthMode()) {
+      return res.json({ authenticated: true, noAuth: true, deviceName: '--noauth mode' })
+    }
     const raw = req.signedCookies?.sentinel_session
+    console.log(`[session] check: hasCookie=${!!raw} type=${typeof raw} allSigned=${Object.keys(req.signedCookies || {}).join(',')} path=${req.path}`)
     if (!raw || typeof raw !== 'string') {
+      if (raw === false) console.warn('[session] check: cookie signature INVALID')
       return res.json({ authenticated: false })
     }
     try {
       const cookieData = JSON.parse(raw)
+      console.log(`[session] check: parsed sessionId=${cookieData.id?.slice(0, 16)}`)
       if (!cookieData.id) {
         const cookie = clearSessionCookie()
         res.cookie(cookie.name, cookie.value, cookie.options)
@@ -672,6 +678,27 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         })
       }
       res.status(500).json({ error: 'Failed to analyze PR' })
+    }
+  })
+
+  // ----- AI Scan Analysis -----
+  app.post('/api/prs/:number/ai-scan-analyze', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    if (!config.aiEnabled) {
+      return res.status(404).json({ error: 'AI analysis is not enabled. Enable it in settings.' })
+    }
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const scanResult = db.getLatestScanResult(prNumber)
+      if (!scanResult) return res.status(404).json({ error: 'No scan results found for this PR. Run a scan first.' })
+      const findings = (scanResult as any).findings || []
+      const analysis = await analyzeScanResults(prNumber, pr.title, findings, config.aiModel || 'auto')
+      db.log('ai_scan_analyzed', prNumber, 'Scan AI analysis complete')
+      res.json({ ...analysis, prNumber, analyzedAt: Date.now(), modelName: config.aiModel || 'auto' })
+    } catch (err) {
+      db.log('error', null, `AI scan analysis: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to analyze scan results' })
     }
   })
 

@@ -37,14 +37,14 @@ function checkTailscale(): HealthCheck[] {
     const out = execSync(`"${tailscaleBin()}" status --json`, { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] })
     const status = JSON.parse(out)
     const self = status.Self || {}
-    const online = self.Online === true
+    const online = self.Online === true || status.BackendState === 'Running'
     const dnsName = (self.DNSName || '').replace(/\.$/, '')
     const ip = (self.TailscaleIPs || [])[0] || ''
 
     checks.push({
       label: 'Tailscale connected',
       ok: online,
-      detail: online ? `${dnsName || ip}` : 'Tailscale is not connected',
+      detail: online ? `${dnsName || ip}` : (status.BackendState || 'Tailscale is not connected'),
       fix: online ? undefined : 'Run "tailscale up" to connect to your tailnet',
     })
 

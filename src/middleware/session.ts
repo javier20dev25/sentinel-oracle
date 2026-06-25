@@ -25,22 +25,29 @@ let noAuthMode = false
 export function setNoAuthMode(v: boolean): void {
   noAuthMode = v
 }
+export function isNoAuthMode(): boolean {
+  return noAuthMode
+}
 
 export function requireAuth() {
   return (req: Request, res: Response, next: NextFunction) => {
     if (noAuthMode) return next()
     const raw = req.signedCookies?.[COOKIE_NAME]
+    console.log(`[auth] requireAuth: path=${req.path} hasCookie=${!!raw} cookieType=${typeof raw} allSignedCookies=${Object.keys(req.signedCookies || {}).join(',')}`)
     if (!raw || typeof raw !== 'string') {
+      if (raw === false) console.warn(`[auth] requireAuth: cookie signature INVALID for ${req.path}`)
       return res.status(401).json({ error: 'Authentication required' })
     }
     let cookieData: { id: string }
     try {
       cookieData = JSON.parse(raw)
-    } catch {
+    } catch (parseErr) {
+      console.warn(`[auth] requireAuth: cookie parse FAILED raw="${raw}" error=${parseErr}`)
       res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' })
       return res.status(401).json({ error: 'Session invalid' })
     }
     if (!cookieData.id) {
+      console.warn(`[auth] requireAuth: cookie missing id field`)
       res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' })
       return res.status(401).json({ error: 'Session invalid' })
     }
@@ -51,9 +58,11 @@ export function requireAuth() {
 
     const dbSession = sessionDb.getSession(cookieData.id)
     if (!dbSession) {
+      console.warn(`[auth] requireAuth: session not found in DB for id=${cookieData.id?.slice(0, 16)}`)
       res.clearCookie(COOKIE_NAME, { httpOnly: true, secure: true, sameSite: 'strict', path: '/' })
       return res.status(401).json({ error: 'Session revoked or expired' })
     }
+    console.log(`[auth] requireAuth: PASSED device=${dbSession.deviceName}`)
 
     sessionDb.touchSession(cookieData.id)
 

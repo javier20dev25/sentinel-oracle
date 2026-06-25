@@ -306,7 +306,26 @@
         <button class="scan-report-btn" id="scan-report-export-json">Export JSON</button>
         <button class="scan-report-btn" id="scan-report-export-sarif">Export SARIF</button>
         <button class="scan-report-btn scan-report-btn-primary" id="scan-report-print">Print / PDF</button>
+        <button class="scan-report-btn scan-report-btn-ai" id="scan-report-ai-btn" style="margin-left:auto;background:var(--accent-purple);color:#fff;">AI ANALYZE</button>
       </div>
+    </div>
+  </div>
+
+  <!-- AI Report Modal -->
+  <div id="ai-report-modal" class="modal scan-report-modal" style="display:none;">
+    <div class="scan-report-overlay" id="ai-report-overlay"></div>
+    <div class="scan-report-container">
+      <div class="scan-report-header">
+        <div class="scan-report-header-left">
+          <div class="snt-badge" style="background:var(--accent-purple);">AI</div>
+          <div>
+            <h2 class="scan-report-title">AI Intelligence Report</h2>
+            <span class="scan-report-pr" id="ai-report-pr"></span>
+          </div>
+        </div>
+        <button class="scan-report-close" id="ai-report-close">&times;</button>
+      </div>
+      <div class="scan-report-body" id="ai-report-body"></div>
     </div>
   </div>
 </main>

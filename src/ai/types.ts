@@ -94,6 +94,13 @@ export interface DetectedModel {
   modelPath: string
 }
 
+export interface ScanAnalysisResult {
+  analysis: string
+  criticalIssues: string[]
+  recommendations: string[]
+  explanation: string
+}
+
 export interface AIBackendStatus {
   available: boolean
   backend: 'ollama' | 'node-llama-cpp' | 'none'

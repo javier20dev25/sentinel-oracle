@@ -278,7 +278,7 @@ async function main() {
     for (const w of configWarnings) {
       console.error(w)
     }
-    printHealthSummary(config)
+    printHealthSummary(config).catch(() => {})
     const wasLocked = db.getConfig('system_lockdown') === 'true'
     if (wasLocked) {
       console.error('[lockdown] System was in lockdown mode at shutdown — restoring')

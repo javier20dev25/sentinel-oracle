@@ -13,6 +13,7 @@
   --accent-red: #d32f2f;      /* Security intervention required */
   --accent-orange: #c69026;   /* Tactical warning */
   --accent-yellow: #d4a72c;   /* Scan timeline marker */
+  --accent-purple: #9c27b0;   /* AI / Intelligence */
   
   --text-main: #b0b5c0;       /* Muted slate text */
   --text-bright: #ffffff;     /* Highlighted values */
@@ -302,6 +303,16 @@ button:disabled, .btn:disabled {
 .scan-btn:hover:not(:disabled) {
   border-color: var(--text-main);
   color: var(--text-bright);
+}
+
+.view-ai-btn {
+  color: var(--accent-purple);
+  border-color: var(--accent-purple);
+  background: transparent;
+}
+.view-ai-btn:hover {
+  background: rgba(156, 39, 176, 0.1);
+  color: #ce93d8;
 }
 
 .checks-toggle-btn {
@@ -858,6 +869,32 @@ button:disabled, .btn:disabled {
 .ai-summary-list li.ai-warn {
   color: var(--error);
   font-weight: 600;
+}
+
+.ai-report-subsection {
+  margin-bottom: 0.75rem;
+}
+.ai-subsection-title {
+  font-size: 0.5rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 0.35rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.ai-argumentation-box {
+  background: var(--bg-dark);
+  border-left: 2px solid var(--accent-cyan);
+  padding: 0.5rem;
+  border-radius: 3px;
+}
+.ai-arg-text {
+  color: var(--text-primary);
+  font-size: 0.6rem;
+  line-height: 1.7;
+  margin: 0;
 }
 
 .reviewer-notes {

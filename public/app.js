@@ -461,8 +461,16 @@
 
       if (prs.length === 0) {
         prList.innerHTML = '<p class="empty">No pending PRs awaiting authorization.</p>';
+        _prevPRKeys = ''
         } else {
-        prList.innerHTML = '';
+        // Remove cards for PRs no longer in the list
+        const active = new Set(prs.map(p => p.prNumber))
+        prList.querySelectorAll('.pr-card').forEach(el => {
+          var num = parseInt(el.id.replace('pr-card-', ''), 10)
+          if (!isNaN(num) && !active.has(num)) el.remove()
+        })
+
+        var newCards = []
         for (const pr of prs) {
           const existing = document.getElementById('pr-card-' + pr.prNumber)
           if (existing) {
@@ -525,71 +533,66 @@
             expandPRDetail(pr.prNumber)
           })
           prList.appendChild(card);
+          newCards.push(card)
         }
 
-        document.querySelectorAll('.auth-btn').forEach(btn => {
-          btn.addEventListener('click', authorizePR);
-        });
-        document.querySelectorAll('.direct-auth-btn').forEach(btn => {
-          btn.addEventListener('click', authorizeDirectPR);
-        });
-        document.querySelectorAll('.reject-btn').forEach(btn => {
-          btn.addEventListener('click', rejectPR);
-        });
-        if (currentStatus?.scanEnabled) {
-          document.querySelectorAll('.scan-btn').forEach(btn => {
-            const pr = parseInt(btn.dataset.pr, 10)
-            if (!isNaN(pr)) btn.addEventListener('click', () => scanPR(pr, btn));
-          });
-        }
-        if (currentStatus?.aiEnabled) {
-          document.querySelectorAll('.ai-btn').forEach(btn => {
-            const pr = parseInt(btn.dataset.pr, 10)
-            if (!isNaN(pr)) btn.addEventListener('click', () => analyzePR(pr, btn));
-          });
-        }
-        document.querySelectorAll('.checks-toggle-btn').forEach(btn => {
-          btn.addEventListener('click', function () {
-            togglePRChecks(this.dataset.pr, this);
-          });
-        });
-
-        // Auto-load cached scan results when autoScan is enabled
-        if (currentStatus?.autoScan) {
-          (async function loadCachedScans() {
-            var cards = document.querySelectorAll('.pr-card')
-            for (var ci = 0; ci < cards.length; ci++) {
-              var card = cards[ci]
-              var numEl = card.querySelector('.pr-number')
-              if (!numEl) continue
-              var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
-              if (isNaN(num)) continue
-              try {
-                await api('/api/prs/' + num + '/scan-result')
-                scanPR(num, { disabled: false, textContent: 'Re-scan' })
-              } catch {}
+        if (newCards.length > 0) {
+          newCards.forEach(card => {
+            card.querySelectorAll('.auth-btn').forEach(btn => btn.addEventListener('click', authorizePR))
+            card.querySelectorAll('.direct-auth-btn').forEach(btn => btn.addEventListener('click', authorizeDirectPR))
+            card.querySelectorAll('.reject-btn').forEach(btn => btn.addEventListener('click', rejectPR))
+            if (currentStatus?.scanEnabled) {
+              card.querySelectorAll('.scan-btn').forEach(btn => {
+                var p = parseInt(btn.dataset.pr, 10)
+                if (!isNaN(p)) btn.addEventListener('click', function () { scanPR(p, btn) })
+              })
             }
-          })()
-        }
-        // Auto-load cached AI results when autoAnalyze is enabled
-        if (currentStatus?.autoAnalyze) {
-          (async function loadCachedAI() {
-            var cards = document.querySelectorAll('.pr-card')
-            for (var ci = 0; ci < cards.length; ci++) {
-              var card = cards[ci]
-              var numEl = card.querySelector('.pr-number')
-              if (!numEl) continue
-              var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
-              if (isNaN(num)) continue
-              var btn = card.querySelector('.ai-btn')
-              if (btn) {
+            if (currentStatus?.aiEnabled) {
+              card.querySelectorAll('.ai-btn').forEach(btn => {
+                var p = parseInt(btn.dataset.pr, 10)
+                if (!isNaN(p)) btn.addEventListener('click', function () { analyzePR(p, btn) })
+              })
+            }
+            card.querySelectorAll('.checks-toggle-btn').forEach(btn => {
+              btn.addEventListener('click', function () { togglePRChecks(this.dataset.pr, this) })
+            })
+          })
+
+          // Auto-load cached scan results for new cards when autoScan is enabled
+          if (currentStatus?.autoScan) {
+            (async function loadCachedScans() {
+              for (var ci = 0; ci < newCards.length; ci++) {
+                var card = newCards[ci]
+                var numEl = card.querySelector('.pr-number')
+                if (!numEl) continue
+                var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
+                if (isNaN(num)) continue
                 try {
-                  await api('/api/prs/' + num + '/ai-analyze', { method: 'POST' })
-                  analyzePR(num, { disabled: false, textContent: 'Re-analyze' })
+                  await api('/api/prs/' + num + '/scan-result')
+                  scanPR(num, { disabled: false, textContent: 'Re-scan' })
                 } catch {}
               }
-            }
-          })()
+            })()
+          }
+          // Auto-load cached AI results for new cards when autoAnalyze is enabled
+          if (currentStatus?.autoAnalyze) {
+            (async function loadCachedAI() {
+              for (var ci = 0; ci < newCards.length; ci++) {
+                var card = newCards[ci]
+                var numEl = card.querySelector('.pr-number')
+                if (!numEl) continue
+                var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
+                if (isNaN(num)) continue
+                var btn = card.querySelector('.ai-btn')
+                if (btn) {
+                  try {
+                    await api('/api/prs/' + num + '/ai-analyze', { method: 'POST' })
+                    analyzePR(num, { disabled: false, textContent: 'Re-analyze' })
+                  } catch {}
+                }
+              }
+            })()
+          }
         }
       }
 
@@ -847,6 +850,7 @@
   }
 
   // ----- AI Analysis -----
+  var _aiResults = {}
   async function analyzePR(prNumber, btn) {
     const aiPanel = document.getElementById('ai-panel-' + prNumber);
     if (!aiPanel) {
@@ -858,75 +862,23 @@
     btn.innerHTML = '<span class="spinner"></span> Analyzing...';
     try {
       const result = await api('/api/prs/' + prNumber + '/ai-analyze', { method: 'POST' });
+      _aiResults[prNumber] = result
       const p = result.priority || {};
       const prioClass = p.reviewPriority === 'critical' ? 'risk-critical' : p.reviewPriority === 'high' ? 'risk-high' : p.reviewPriority === 'medium' ? 'risk-medium' : 'risk-low';
-      const injCount = (result.instructionManipulation || []).length;
-      aiPanel.innerHTML = `
-        <div class="scan-panel-header">
-          <div class="threat-score-block ${prioClass}">
-            <span class="threat-label">REVIEW PRIORITY</span>
-            <span class="threat-value">${(p.reviewPriority || 'low').toUpperCase()}</span>
-          </div>
-          <div class="threat-breakdown">
-            <h3 class="risk-label-title ${prioClass}">AI INTELLIGENCE REPORT</h3>
-            <div class="severity-grid">
-              <span class="sev-cell low">IMPACT: ${(p.impactLevel || 'low').toUpperCase()}</span>
-              <span class="sev-cell low">COMPLEXITY: ${(p.estimatedComplexity || 'low').toUpperCase()}</span>
-              ${injCount > 0 ? '<span class="sev-cell high">INJECTION ATTEMPTS: ' + injCount + '</span>' : ''}
-            </div>
-          </div>
-        </div>
-        <div class="ai-report-section">
-          <div class="ai-report-tabs">
-            <button class="ai-tab-btn active" data-tab="executive-${prNumber}">EXECUTIVE SUMMARY</button>
-            <button class="ai-tab-btn" data-tab="hotspots-${prNumber}">REVIEW HOTSPOTS</button>
-            <button class="ai-tab-btn" data-tab="security-${prNumber}">SECURITY</button>
-            ${injCount > 0 ? '<button class="ai-tab-btn" data-tab="injection-${prNumber}" style="color:var(--error)">INJECTION</button>' : ''}
-          </div>
-          <div class="ai-tab-content" id="tab-executive-${prNumber}">
-            <ul class="ai-summary-list">
-              ${(result.executiveSummary || []).map(function(s) {
-                var isWarn = s.includes('⚠') || s.includes('manipulation');
-                return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
-              }).join('')}
-            </ul>
-          </div>
-          <div class="ai-tab-content" id="tab-hotspots-${prNumber}" style="display:none">
-            ${(result.reviewHotspots || []).length > 0 ? (result.reviewHotspots || []).map(function(h) {
-              return '<div class="scan-finding-card severity-medium"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(h.file) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(h.reason) + '</p></div></div>';
-            }).join('') : '<p class="empty">No hotspots identified.</p>'}
-          </div>
-          <div class="ai-tab-content" id="tab-security-${prNumber}" style="display:none">
-            ${(result.securityRelevantChanges || []).length > 0 ? (result.securityRelevantChanges || []).map(function(c) {
-              return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
-            }).join('') : '<p class="empty">No security-relevant changes detected.</p>'}
-            <div class="scan-clean-card" style="margin-top:0.5rem">
-              <span class="clean-status-label">// Scanner Correlation</span>
-              <p>Risk score: ${result.scannerCorrelation?.riskScore || 0} — ${result.scannerCorrelation?.findings || 0} finding(s)</p>
-            </div>
-          </div>
-          ${injCount > 0 ? '<div class="ai-tab-content" id="tab-injection-${prNumber}" style="display:none">' + (result.instructionManipulation || []).map(function(i) {
-            var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
-            return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
-          }).join('') + '</div>' : ''}
-        </div>
-        <div class="reviewer-notes" style="margin-top:0.75rem;padding:0.5rem;background:var(--bg-dark);border-radius:4px;font-size:0.55rem">
-          ${(result.reviewerNotes || []).map(function(n) { return '<div style="color:var(--text-dark);margin-bottom:0.25rem">// ' + escapeHtml(n) + '</div>'; }).join('')}
-        </div>
-      `;
-      aiPanel.style.display = 'block';
+      aiPanel.style.display = 'none';
       btn.textContent = 'Re-analyze';
-      // Wire tabs
-      aiPanel.querySelectorAll('.ai-tab-btn').forEach(function(tab) {
-        tab.addEventListener('click', function() {
-          aiPanel.querySelectorAll('.ai-tab-btn').forEach(function(t) { t.classList.remove('active'); });
-          aiPanel.querySelectorAll('.ai-tab-content').forEach(function(c) { c.style.display = 'none'; });
-          this.classList.add('active');
-          var target = document.getElementById('tab-' + this.dataset.tab);
-          if (target) target.style.display = 'block';
-        });
-      });
-      // Update badge on card
+      // Show "VER INFORME" button
+      var viewBtn = document.getElementById('ai-view-btn-' + prNumber);
+      if (!viewBtn) {
+        viewBtn = document.createElement('button');
+        viewBtn.id = 'ai-view-btn-' + prNumber;
+        viewBtn.className = 'view-ai-btn';
+        viewBtn.textContent = 'VER INFORME IA';
+        btn.parentNode.insertBefore(viewBtn, btn.nextSibling);
+      }
+      viewBtn.style.display = 'inline-block';
+      viewBtn.onclick = function() { showAIReport(prNumber); };
+      // Update badge
       var badge = document.getElementById('ai-badge-' + prNumber);
       if (badge) {
         badge.className = 'badge ' + prioClass;
@@ -934,12 +886,191 @@
       }
     } catch (err) {
       console.error('AI analysis failed for PR #' + prNumber + ':', err);
-      aiPanel.innerHTML = '<div class="scan-header scan-critical">AI Analysis failed: ' + escapeHtml(err.message) + '</div>';
-      aiPanel.style.display = 'block';
       btn.textContent = 'AI Analyze';
     } finally {
       btn.disabled = false;
     }
+  }
+
+  function showAIReport(prNumber) {
+    var result = _aiResults[prNumber];
+    if (!result) return;
+    var p = result.priority || {};
+    var prioClass = p.reviewPriority === 'critical' ? 'risk-critical' : p.reviewPriority === 'high' ? 'risk-high' : p.reviewPriority === 'medium' ? 'risk-medium' : 'risk-low';
+    var injCount = (result.instructionManipulation || []).length;
+    var modal = document.getElementById('ai-report-modal');
+    var prEl = document.getElementById('ai-report-pr');
+    var body = document.getElementById('ai-report-body');
+    if (!modal || !body) return;
+    prEl.textContent = 'PR #' + prNumber;
+    body.innerHTML = '\
+      <div class="scan-panel-header">\
+        <div class="threat-score-block ' + prioClass + '">\
+          <span class="threat-label">REVIEW PRIORITY</span>\
+          <span class="threat-value">' + (p.reviewPriority || 'low').toUpperCase() + '</span>\
+        </div>\
+        <div class="threat-breakdown">\
+          <h3 class="risk-label-title ' + prioClass + '">AI INTELLIGENCE REPORT</h3>\
+          <div class="severity-grid">\
+            <span class="sev-cell low">IMPACT: ' + (p.impactLevel || 'low').toUpperCase() + '</span>\
+            <span class="sev-cell low">COMPLEXITY: ' + (p.estimatedComplexity || 'low').toUpperCase() + '</span>\
+            ' + (injCount > 0 ? '<span class="sev-cell high">INJECTION ATTEMPTS: ' + injCount + '</span>' : '') + '\
+          </div>\
+        </div>\
+      </div>\
+      <div class="ai-report-section">\
+        <div class="ai-report-tabs">\
+          <button class="ai-tab-btn active" data-tab="modal-analysis-' + prNumber + '">AN\u00c1LISIS</button>\
+          <button class="ai-tab-btn" data-tab="modal-argumentacion-' + prNumber + '">ARGUMENTACI\u00d3N</button>\
+        </div>\
+        <div class="ai-tab-content" id="tab-modal-analysis-' + prNumber + '">\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">RESUMEN</div>' +
+            ((result.executiveSummary || []).length > 0 ? '<ul class="ai-summary-list">' + (result.executiveSummary || []).map(function(s) {
+              var isWarn = s.indexOf('\u26a0') !== -1 || s.indexOf('manipulation') !== -1;
+              return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
+            }).join('') + '</ul>' : '<p class="empty">No summary available.</p>') + '\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">ARCHIVOS MODIFICADOS</div>\
+            ' + ((result.filesOfInterest || []).length > 0 ? result.filesOfInterest.map(function(f) {
+              return '<div class="scan-finding-card severity-' + (f.securityRelevance === 'high' ? 'high' : f.securityRelevance === 'medium' ? 'medium' : 'low') + '"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(f.filename) + '</h4><span class="finding-badge badge-' + (f.securityRelevance === 'high' ? 'high' : 'medium') + '">' + escapeHtml(f.status) + '</span></div><div class="finding-card-body"><p class="finding-desc">+' + f.additions + ' -' + f.deletions + '</p></div></div>';
+            }).join('') : '<p class="empty">No file data.</p>') + '\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">PUNTOS CR\u00cdTICOS</div>\
+            ' + ((result.reviewHotspots || []).length > 0 ? (result.reviewHotspots || []).map(function(h) {
+              return '<div class="scan-finding-card severity-medium"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(h.file) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(h.reason) + '</p></div></div>';
+            }).join('') : '<p class="empty">No critical points identified.</p>') + '\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">SEGURIDAD</div>\
+            ' + ((result.securityRelevantChanges || []).length > 0 ? (result.securityRelevantChanges || []).map(function(c) {
+              return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
+            }).join('') : '<p class="empty">No security-relevant changes detected.</p>') + '\
+            <div class="scan-clean-card" style="margin-top:0.5rem">\
+              <span class="clean-status-label">// Scanner Correlation</span>\
+              <p>Risk score: ' + (result.scannerCorrelation?.riskScore || 0) + ' &mdash; ' + (result.scannerCorrelation?.findings || 0) + ' finding(s)</p>\
+            </div>\
+          </div>' +
+          (injCount > 0 ? '\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title" style="color:var(--accent-red)">MANIPULACI\u00d3N DETECTADA</div>' +
+            (result.instructionManipulation || []).map(function(i) {
+              var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
+              return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
+            }).join('') + '\
+          </div>' : '') + '\
+        </div>\
+        <div class="ai-tab-content" id="tab-modal-argumentacion-' + prNumber + '" style="display:none">\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">ARGUMENTACI\u00d3N DE LA IA</div>\
+            <div class="ai-argumentation-box">\
+              <p class="ai-arg-text">' + ((result.reviewerNotes || []).length > 0 ? (result.reviewerNotes || []).map(function(n) { return escapeHtml(n); }).join('<br>') : 'El an\u00e1lisis se bas\u00f3 en ' + (result.filesOfInterest || []).length + ' archivos modificados. ' + (result.scannerCorrelation?.findings || 0) + ' hallazgo(s) del esc\u00e1ner de seguridad fueron correlacionados. Revisar los puntos cr\u00edticos listados en la pesta\u00f1a de An\u00e1lisis.') + '</p>\
+            </div>\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">EVIDENCIA</div>' +
+            ((result.reviewHotspots || []).length > 0 ? (result.reviewHotspots || []).map(function(h) {
+              return '<div class="scan-finding-card severity-medium"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(h.file) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(h.reason) + '</p></div></div>';
+            }).join('') : '<p class="empty">No specific evidence cited.</p>') + '\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">IMPACTO T\u00c9CNICO</div>\
+            <div class="ai-argumentation-box">\
+              <p class="ai-arg-text">Prioridad: ' + (p.reviewPriority || 'low').toUpperCase() + ' | Impacto: ' + (p.impactLevel || 'low').toUpperCase() + ' | Complejidad: ' + (p.estimatedComplexity || 'low').toUpperCase() + '</p>\
+            </div>\
+          </div>\
+        </div>\
+      </div>';
+    modal.style.display = 'flex';
+    // Wire tabs
+    body.querySelectorAll('.ai-tab-btn').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        body.querySelectorAll('.ai-tab-btn').forEach(function(t) { t.classList.remove('active'); });
+        body.querySelectorAll('.ai-tab-content').forEach(function(c) { c.style.display = 'none'; });
+        this.classList.add('active');
+        var target = document.getElementById('tab-' + this.dataset.tab);
+        if (target) target.style.display = 'block';
+      });
+    });
+  }
+
+  var _scanAIResults = {}
+  async function analyzeScanAI(prNumber) {
+    try {
+      const result = await api('/api/prs/' + prNumber + '/ai-scan-analyze', { method: 'POST' });
+      _scanAIResults[prNumber] = result;
+      showScanAIReport(prNumber);
+    } catch (err) {
+      console.error('Scan AI analysis failed:', err);
+      alert('Error: ' + (err.message || 'Failed to analyze scan results'));
+    }
+  }
+
+  function showScanAIReport(prNumber) {
+    var result = _scanAIResults[prNumber];
+    if (!result) return;
+    var modal = document.getElementById('ai-report-modal');
+    var prEl = document.getElementById('ai-report-pr');
+    var body = document.getElementById('ai-report-body');
+    if (!modal || !body) return;
+    prEl.textContent = 'SCAN ANALYSIS PR #' + prNumber;
+    body.innerHTML = '\
+      <div class="scan-panel-header">\
+        <div class="threat-score-block risk-high">\
+          <span class="threat-label">SCAN AI ANALYSIS</span>\
+          <span class="threat-value">' + (result.criticalIssues || []).length + ' ISSUES</span>\
+        </div>\
+        <div class="threat-breakdown">\
+          <h3 class="risk-label-title risk-high">AI SCAN INTELLIGENCE</h3>\
+        </div>\
+      </div>\
+      <div class="ai-report-section">\
+        <div class="ai-report-tabs">\
+          <button class="ai-tab-btn active" data-tab="scanai-analysis-' + prNumber + '">AN\u00c1LISIS</button>\
+          <button class="ai-tab-btn" data-tab="scanai-argumentacion-' + prNumber + '">ARGUMENTACI\u00d3N</button>\
+        </div>\
+        <div class="ai-tab-content" id="tab-scanai-analysis-' + prNumber + '">\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">AN\u00c1LISIS GENERAL</div>\
+            <div class="ai-argumentation-box">\
+              <p class="ai-arg-text">' + escapeHtml(result.analysis || 'No analysis available.') + '</p>\
+            </div>\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">PROBLEMAS CR\u00cdTICOS</div>\
+            <ul class="ai-summary-list">' +
+              ((result.criticalIssues || []).length > 0 ? (result.criticalIssues || []).map(function(i) { return '<li class="ai-warn">' + escapeHtml(i) + '</li>'; }).join('') : '<li class="empty">No critical issues identified.</li>') + '\
+            </ul>\
+          </div>\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">RECOMENDACIONES</div>\
+            <ul class="ai-summary-list">' +
+              ((result.recommendations || []).length > 0 ? (result.recommendations || []).map(function(r) { return '<li>' + escapeHtml(r) + '</li>'; }).join('') : '<li class="empty">No recommendations.</li>') + '\
+            </ul>\
+          </div>\
+        </div>\
+        <div class="ai-tab-content" id="tab-scanai-argumentacion-' + prNumber + '" style="display:none">\
+          <div class="ai-report-subsection">\
+            <div class="ai-subsection-title">ARGUMENTACI\u00d3N DE LA IA</div>\
+            <div class="ai-argumentation-box">\
+              <p class="ai-arg-text">' + escapeHtml(result.explanation || 'No explanation available.') + '</p>\
+            </div>\
+          </div>\
+        </div>\
+      </div>';
+    modal.style.display = 'flex';
+    // Wire tabs
+    body.querySelectorAll('.ai-tab-btn').forEach(function(tab) {
+      tab.addEventListener('click', function() {
+        body.querySelectorAll('.ai-tab-btn').forEach(function(t) { t.classList.remove('active'); });
+        body.querySelectorAll('.ai-tab-content').forEach(function(c) { c.style.display = 'none'; });
+        this.classList.add('active');
+        var target = document.getElementById('tab-' + this.dataset.tab);
+        if (target) target.style.display = 'block';
+      });
+    });
   }
 
   // ----- Intel Rendering -----
@@ -1410,6 +1541,15 @@
     `
 
     modal.style.display = 'flex'
+
+    // Wire AI ANALYZE button in modal footer — now analyzes scan results specifically
+    const aiBtn = document.getElementById('scan-report-ai-btn')
+    if (aiBtn) {
+      aiBtn.onclick = function() {
+        modal.style.display = 'none'
+        analyzeScanAI(result.prNumber)
+      }
+    }
   }
 
   // SARIF v2.1.0 export builder
@@ -3394,6 +3534,17 @@ sentinel-oracle/
     })
     document.getElementById('scan-report-print').addEventListener('click', function () {
       window.print()
+    })
+  }
+
+  // AI report modal events
+  var aiReportModal = document.getElementById('ai-report-modal')
+  if (aiReportModal) {
+    document.getElementById('ai-report-close').addEventListener('click', function () {
+      aiReportModal.style.display = 'none'
+    })
+    document.getElementById('ai-report-overlay').addEventListener('click', function () {
+      aiReportModal.style.display = 'none'
     })
   }
 

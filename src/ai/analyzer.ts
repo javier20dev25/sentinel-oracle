@@ -1,8 +1,8 @@
 import type { PRFile } from '../github/client'
-import type { AIAnalysisResult, PRFileSummary, InstructionManipulationAttempt } from './types'
+import type { AIAnalysisResult, PRFileSummary, InstructionManipulationAttempt, ScanAnalysisResult } from './types'
 import { detectInstructionManipulation } from './injection'
-import { SYSTEM_PROMPT, PER_FILE_PROMPT, AGGREGATE_PROMPT } from './prompts'
-import { ollamaGenerateJSON } from './ollama'
+import { SYSTEM_PROMPT, PER_FILE_PROMPT, AGGREGATE_PROMPT, SCAN_ANALYSIS_PROMPT } from './prompts'
+import { ollamaGenerateJSON, ollamaGenerate } from './ollama'
 import { sanitizeSummary, sanitizeBulletPoint } from './sanitizer'
 
 function buildScanContext(prNumber: number, db: any): string {
@@ -80,7 +80,25 @@ async function callModelFallback<T>(modelName: string, prompt: string, systemPro
       const ollamaModel = modelName.replace(/^ollama:/, '')
       const result = await ollamaGenerateJSON<T>(ollamaModel, prompt, systemPrompt)
       if (result !== null) return result
-      console.warn(`[analyzer] Ollama returned null for ${ollamaModel}, falling back to deterministic`)
+      console.warn(`[analyzer] Ollama JSON returned null for ${ollamaModel}, trying text generation`)
+      // Try text generation as second attempt
+      try {
+        const text = await ollamaGenerate(ollamaModel, `Briefly analyze this PR: ${prompt.slice(0, 500)}. Focus on what changed and why.`, systemPrompt)
+        if (text && text.length > 30) {
+          // Try to parse text as JSON in case model output JSON after all
+          try {
+            const cleaned = text.trim()
+            const braceIdx = cleaned.indexOf('{')
+            if (braceIdx !== -1) {
+              const json = cleaned.slice(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1)
+              return JSON.parse(json) as T
+            }
+          } catch {}
+        }
+      } catch (e) {
+        console.warn(`[analyzer] Ollama text fallback also failed: ${e instanceof Error ? e.message : e}`)
+      }
+      console.warn(`[analyzer] Ollama all attempts failed for ${ollamaModel}, using deterministic fallback`)
       return fallback()
     }
     case 'node-llama-cpp': {
@@ -259,6 +277,61 @@ export async function analyzePR(
     analyzedAt: Date.now(),
     modelName,
   }
+}
+
+function formatFindingsForAI(findings: any[]): string {
+  return findings.slice(0, 20).map((f, i) => {
+    return `[${i + 1}] ${f.severity || 'info'}: ${f.file || f.path || '?'} — ${f.message || f.description || f.title || '?'}`
+  }).join('\n')
+}
+
+export async function analyzeScanResults(
+  prNumber: number,
+  prTitle: string,
+  findings: any[],
+  modelName = 'sentinel-ai-engine',
+): Promise<ScanAnalysisResult> {
+  const fallbackResult: ScanAnalysisResult = {
+    analysis: `${findings.length} security finding(s) found in this PR. Review each finding for potential vulnerabilities.`,
+    criticalIssues: findings.filter(f => (f.severity || '').toLowerCase() === 'critical' || (f.severity || '').toLowerCase() === 'high').map(f => `${f.file || f.path || '?'}: ${f.message || f.description || f.title || '?'}`) || ['No critical issues identified.'],
+    recommendations: ['Review all findings in the security scan report', 'Address critical and high-severity issues before merging'],
+    explanation: 'Each finding was detected by Sentinel\'s static analysis engine. The scanner flags patterns commonly associated with security vulnerabilities. Review flagged code sections and validate whether each pattern represents an actual risk in your specific context.',
+  }
+
+  if (!modelName || modelName === 'auto' || modelName === 'sentinel-ai-engine') {
+    return fallbackResult
+  }
+
+  const backend = modelName.startsWith('ollama:') ? 'ollama' : 'unknown'
+  if (backend !== 'ollama') return fallbackResult
+
+  const ollamaModel = modelName.replace(/^ollama:/, '')
+  try {
+    const prompt = SCAN_ANALYSIS_PROMPT
+      .replace('{prNumber}', String(prNumber))
+      .replace('{prTitle}', sanitizeSummary(prTitle))
+      .replace('{findingCount}', String(findings.length))
+      .replace('{findings}', formatFindingsForAI(findings))
+
+    const result = await ollamaGenerateJSON<ScanAnalysisResult>(ollamaModel, prompt, SYSTEM_PROMPT)
+    if (result !== null && result.analysis) return result
+
+    // Fallback: try text generation
+    const textPrompt = `Analyze these security scan findings for PR #${prNumber}: ${formatFindingsForAI(findings)}. Give a brief analysis, list critical issues, and suggest fixes.`
+    const text = await ollamaGenerate(ollamaModel, textPrompt)
+    if (text && text.length > 20) {
+      return {
+        analysis: text.slice(0, 500),
+        criticalIssues: fallbackResult.criticalIssues,
+        recommendations: fallbackResult.recommendations,
+        explanation: text.length > 500 ? text.slice(500, 1000) : 'Review findings above.',
+      }
+    }
+  } catch (err) {
+    console.warn(`[scanAnalyze] Error: ${err instanceof Error ? err.message : err}`)
+  }
+
+  return fallbackResult
 }
 
 export { computeScanHash }
