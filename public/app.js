@@ -851,6 +851,7 @@
 
   // ----- AI Analysis -----
   var _aiResults = {}
+  var _aiExplanations = {}
   async function analyzePR(prNumber, btn) {
     const aiPanel = document.getElementById('ai-panel-' + prNumber);
     if (!aiPanel) {
@@ -863,6 +864,14 @@
     try {
       const result = await api('/api/prs/' + prNumber + '/ai-analyze', { method: 'POST' });
       _aiResults[prNumber] = result
+      // Also call the text-based explanation endpoint
+      btn.innerHTML = '<span class="spinner"></span> AI explaining...';
+      try {
+        const explanation = await api('/api/prs/' + prNumber + '/ai-explain', { method: 'POST' });
+        _aiExplanations[prNumber] = explanation
+      } catch (explainErr) {
+        console.warn('AI explain failed, will use analysis data:', explainErr);
+      }
       const p = result.priority || {};
       const prioClass = p.reviewPriority === 'critical' ? 'risk-critical' : p.reviewPriority === 'high' ? 'risk-high' : p.reviewPriority === 'medium' ? 'risk-medium' : 'risk-low';
       aiPanel.style.display = 'none';
@@ -895,6 +904,7 @@
   function showAIReport(prNumber) {
     var result = _aiResults[prNumber];
     if (!result) return;
+    var explanation = _aiExplanations[prNumber];
     var p = result.priority || {};
     var prioClass = p.reviewPriority === 'critical' ? 'risk-critical' : p.reviewPriority === 'high' ? 'risk-high' : p.reviewPriority === 'medium' ? 'risk-medium' : 'risk-low';
     var injCount = (result.instructionManipulation || []).length;
@@ -903,6 +913,56 @@
     var body = document.getElementById('ai-report-body');
     if (!modal || !body) return;
     prEl.textContent = 'PR #' + prNumber;
+
+    // Build ANÁLISIS tab content — use AI explanation if available, else fallback to analysis data
+    var analysisSummaryHtml = '';
+    if (explanation && explanation.summary && explanation.summary.length > 0) {
+      analysisSummaryHtml = '<ul class="ai-summary-list">' + explanation.summary.map(function(s) {
+        return '<li>' + escapeHtml(s) + '</li>';
+      }).join('') + '</ul>';
+    } else if ((result.executiveSummary || []).length > 0) {
+      analysisSummaryHtml = '<ul class="ai-summary-list">' + result.executiveSummary.map(function(s) {
+        var isWarn = s.indexOf('\u26a0') !== -1 || s.indexOf('manipulation') !== -1;
+        return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
+      }).join('') + '</ul>';
+    } else {
+      analysisSummaryHtml = '<p class="empty">No summary available.</p>';
+    }
+
+    // Build ARGUMENTACIÓN tab content
+    var argumentationHtml = '';
+    if (explanation && explanation.argumentation) {
+      // Convert newlines to paragraphs for readability
+      var paragraphs = explanation.argumentation.split(/\n\n+/).filter(function(p) { return p.trim().length > 0; });
+      argumentationHtml = paragraphs.map(function(para) {
+        return '<p class="ai-arg-text">' + escapeHtml(para.trim()) + '</p>';
+      }).join('');
+    } else if ((result.reviewerNotes || []).length > 0) {
+      argumentationHtml = '<p class="ai-arg-text">' + result.reviewerNotes.map(function(n) { return escapeHtml(n); }).join('<br>') + '</p>';
+    } else {
+      argumentationHtml = '<p class="ai-arg-text">El an\u00e1lisis se bas\u00f3 en ' + (result.filesOfInterest || []).length + ' archivos modificados con sus diffs. Revisar los puntos cr\u00edticos listados en la pesta\u00f1a de An\u00e1lisis.</p>';
+    }
+
+    // Security and injection sections (kept from original)
+    var securityHtml = '';
+    if ((result.securityRelevantChanges || []).length > 0) {
+      securityHtml = '<div class="ai-report-subsection">' +
+        '<div class="ai-subsection-title">SEGURIDAD</div>' +
+        result.securityRelevantChanges.map(function(c) {
+          return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
+        }).join('') + '</div>';
+    }
+
+    var injectionHtml = '';
+    if (injCount > 0) {
+      injectionHtml = '<div class="ai-report-subsection">' +
+        '<div class="ai-subsection-title" style="color:var(--accent-red)">MANIPULACI\u00d3N DETECTADA</div>' +
+        (result.instructionManipulation || []).map(function(i) {
+          var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
+          return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
+        }).join('') + '</div>';
+    }
+
     body.innerHTML = '\
       <div class="ai-report-section">\
         <div class="ai-report-tabs">\
@@ -911,44 +971,17 @@
         </div>\
         <div class="ai-tab-content" id="tab-modal-analysis-' + prNumber + '">\
           <div class="ai-report-subsection">\
-            <div class="ai-subsection-title">RESUMEN EJECUTIVO</div>' +
-            ((result.executiveSummary || []).length > 0 ? '<ul class="ai-summary-list">' + (result.executiveSummary || []).map(function(s) {
-              var isWarn = s.indexOf('\u26a0') !== -1 || s.indexOf('manipulation') !== -1;
-              return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
-            }).join('') + '</ul>' : '<p class="empty">No summary available.</p>') + '\
-          </div>\
-          <div class="ai-report-subsection">\
-            <div class="ai-subsection-title">ARCHIVOS MODIFICADOS</div>\
-            ' + ((result.filesOfInterest || []).length > 0 ? result.filesOfInterest.map(function(f) {
-              return '<div class="scan-finding-card severity-' + (f.securityRelevance === 'high' ? 'high' : f.securityRelevance === 'medium' ? 'medium' : 'low') + '"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(f.filename) + '</h4><span class="finding-badge badge-' + (f.securityRelevance === 'high' ? 'high' : 'medium') + '">' + escapeHtml(f.status) + '</span></div><div class="finding-card-body"><p class="finding-desc">+' + f.additions + ' -' + f.deletions + '</p></div></div>';
-            }).join('') : '<p class="empty">No file data.</p>') + '\
-          </div>\
-          <div class="ai-report-subsection">\
-            <div class="ai-subsection-title">PUNTOS CR\u00cdTICOS</div>\
-            ' + ((result.reviewHotspots || []).length > 0 ? (result.reviewHotspots || []).map(function(h) {
-              return '<div class="scan-finding-card severity-medium"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(h.file) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(h.reason) + '</p></div></div>';
-            }).join('') : '<p class="empty">No critical points identified.</p>') + '\
-          </div>\
-          <div class="ai-report-subsection">\
-            <div class="ai-subsection-title">SEGURIDAD</div>\
-            ' + ((result.securityRelevantChanges || []).length > 0 ? (result.securityRelevantChanges || []).map(function(c) {
-              return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
-            }).join('') : '<p class="empty">No security-relevant changes detected.</p>') + '\
+            <div class="ai-subsection-title">RESUMEN</div>' +
+            analysisSummaryHtml + '\
           </div>' +
-          (injCount > 0 ? '\
-          <div class="ai-report-subsection">\
-            <div class="ai-subsection-title" style="color:var(--accent-red)">MANIPULACI\u00d3N DETECTADA</div>' +
-            (result.instructionManipulation || []).map(function(i) {
-              var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
-              return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
-            }).join('') + '\
-          </div>' : '') + '\
+          securityHtml +
+          injectionHtml + '\
         </div>\
         <div class="ai-tab-content" id="tab-modal-argumentacion-' + prNumber + '" style="display:none">\
           <div class="ai-report-subsection">\
             <div class="ai-subsection-title">RAZONAMIENTO DE LA IA</div>\
-            <div class="ai-argumentation-box">\
-              <p class="ai-arg-text">' + ((result.reviewerNotes || []).length > 0 ? (result.reviewerNotes || []).map(function(n) { return escapeHtml(n); }).join('<br>') : 'El an\u00e1lisis se bas\u00f3 en ' + (result.filesOfInterest || []).length + ' archivos modificados con sus diffs. Revisar los puntos cr\u00edticos listados en la pesta\u00f1a de An\u00e1lisis.') + '</p>\
+            <div class="ai-argumentation-box">' +
+              argumentationHtml + '\
             </div>\
           </div>\
         </div>\
@@ -974,31 +1007,40 @@
     status.textContent = 'Analyzing...';
     content.innerHTML = '<div class="scan-ai-loading"><span class="spinner"></span> Analyzing scan results with AI...</div>';
     try {
-      const result = await api('/api/prs/' + prNumber + '/ai-scan-analyze', { method: 'POST' });
+      const result = await api('/api/prs/' + prNumber + '/ai-scan-explain', { method: 'POST' });
       status.textContent = 'Complete';
+
+      // Build summary bullets
+      var summaryHtml = '';
+      if (result.summary && result.summary.length > 0) {
+        summaryHtml = '<ul class="ai-summary-list">' + result.summary.map(function(s) {
+          var isWarn = s.indexOf('CRITICAL') !== -1 || s.indexOf('CRÍTICO') !== -1 || s.indexOf('HIGH') !== -1;
+          return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
+        }).join('') + '</ul>';
+      } else {
+        summaryHtml = '<p class="empty">No summary available.</p>';
+      }
+
+      // Build argumentation paragraphs
+      var argHtml = '';
+      if (result.argumentation) {
+        var paragraphs = result.argumentation.split(/\n\n+/).filter(function(p) { return p.trim().length > 0; });
+        argHtml = paragraphs.map(function(para) {
+          return '<p class="ai-arg-text">' + escapeHtml(para.trim()) + '</p>';
+        }).join('');
+      } else {
+        argHtml = '<p class="ai-arg-text">No argumentation available.</p>';
+      }
+
       content.innerHTML = '\
         <div class="ai-report-subsection">\
-          <div class="ai-subsection-title">AN\u00c1LISIS</div>\
-          <div class="ai-argumentation-box">\
-            <p class="ai-arg-text">' + escapeHtml(result.analysis || 'No analysis available.') + '</p>\
-          </div>\
+          <div class="ai-subsection-title">RESUMEN</div>' +
+          summaryHtml + '\
         </div>\
         <div class="ai-report-subsection">\
-          <div class="ai-subsection-title">PROBLEMAS CR\u00cdTICOS</div>\
-          <ul class="ai-summary-list">' +
-            ((result.criticalIssues || []).length > 0 ? (result.criticalIssues || []).map(function(i) { return '<li class="ai-warn">' + escapeHtml(i) + '</li>'; }).join('') : '<li class="empty">No critical issues identified.</li>') + '\
-          </ul>\
-        </div>\
-        <div class="ai-report-subsection">\
-          <div class="ai-subsection-title">RECOMENDACIONES</div>\
-          <ul class="ai-summary-list">' +
-            ((result.recommendations || []).length > 0 ? (result.recommendations || []).map(function(r) { return '<li>' + escapeHtml(r) + '</li>'; }).join('') : '<li class="empty">No recommendations.</li>') + '\
-          </ul>\
-        </div>\
-        <div class="ai-report-subsection">\
-          <div class="ai-subsection-title">RAZONAMIENTO</div>\
-          <div class="ai-argumentation-box">\
-            <p class="ai-arg-text">' + escapeHtml(result.explanation || 'No explanation available.') + '</p>\
+          <div class="ai-subsection-title">ARGUMENTACI\u00d3N</div>\
+          <div class="ai-argumentation-box">' +
+            argHtml + '\
           </div>\
         </div>';
     } catch (err) {

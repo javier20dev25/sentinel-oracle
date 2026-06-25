@@ -22,7 +22,7 @@ import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
-import { analyzePR as aiAnalyzePR, analyzeScanResults } from './ai/analyzer'
+import { analyzePR as aiAnalyzePR, analyzeScanResults, explainPR, explainScanFindings } from './ai/analyzer'
 import { detectAIBackend, detectAllModels, checkModelHealth } from './ai/detector'
 import { buildCapabilitySnapshot, buildDNAReport } from './scanner/intel/security-dna'
 import { TokenInventoryScanner } from './inventory/tokens'
@@ -692,13 +692,61 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (!pr) return res.status(404).json({ error: 'PR not found' })
       const scanResult = db.getLatestScanResult(prNumber)
       if (!scanResult) return res.status(404).json({ error: 'No scan results found for this PR. Run a scan first.' })
-      const findings = (scanResult as any).findings || []
+      let findings: any[] = []
+      try { findings = JSON.parse((scanResult as any).findingsJson || '[]') } catch { findings = [] }
       const analysis = await analyzeScanResults(prNumber, pr.title, findings, config.aiModel || 'auto')
       db.log('ai_scan_analyzed', prNumber, 'Scan AI analysis complete')
       res.json({ ...analysis, prNumber, analyzedAt: Date.now(), modelName: config.aiModel || 'auto' })
     } catch (err) {
       db.log('error', null, `AI scan analysis: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to analyze scan results' })
+    }
+  })
+
+  // ----- AI Explanation (text-based, for PR code) -----
+  app.post('/api/prs/:number/ai-explain', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    if (!config.aiEnabled) {
+      return res.status(404).json({ error: 'AI analysis is not enabled. Enable it in settings.' })
+    }
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const files = await client.getPRFiles(prNumber)
+      if (files.length === 0) return res.status(404).json({ error: 'No files found for this PR' })
+      const result = await explainPR(prNumber, pr.title, pr.author, files, config.aiModel || 'auto')
+      res.json({ ...result, prNumber, modelName: config.aiModel || 'auto' })
+    } catch (err) {
+      db.log('error', null, `AI explain: ${err instanceof Error ? err.message : err}`)
+      if (err instanceof GitHubApiError) {
+        return res.status(err.status === 401 ? 401 : err.status === 403 ? 403 : 424).json({
+          error: err.message,
+          code: 'GITHUB_API_ERROR',
+          githubStatus: err.status,
+        })
+      }
+      res.status(500).json({ error: 'Failed to explain PR' })
+    }
+  })
+
+  // ----- AI Explanation (text-based, for scan findings) -----
+  app.post('/api/prs/:number/ai-scan-explain', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
+    if (!config.aiEnabled) {
+      return res.status(404).json({ error: 'AI analysis is not enabled. Enable it in settings.' })
+    }
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const scanResult = db.getLatestScanResult(prNumber)
+      if (!scanResult) return res.status(404).json({ error: 'No scan results found for this PR. Run a scan first.' })
+      let findings: any[] = []
+      try { findings = JSON.parse((scanResult as any).findingsJson || '[]') } catch { findings = [] }
+      const result = await explainScanFindings(prNumber, pr.title, findings, config.aiModel || 'auto')
+      res.json({ ...result, prNumber, modelName: config.aiModel || 'auto' })
+    } catch (err) {
+      db.log('error', null, `AI scan explain: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to explain scan findings' })
     }
   })
 

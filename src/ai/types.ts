@@ -101,6 +101,11 @@ export interface ScanAnalysisResult {
   explanation: string
 }
 
+export interface ExplanationResult {
+  summary: string[]
+  argumentation: string
+}
+
 export interface AIBackendStatus {
   available: boolean
   backend: 'ollama' | 'node-llama-cpp' | 'none'

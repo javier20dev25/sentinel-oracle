@@ -1,7 +1,7 @@
 import type { PRFile } from '../github/client'
-import type { AIAnalysisResult, PRFileSummary, InstructionManipulationAttempt, ScanAnalysisResult } from './types'
+import type { AIAnalysisResult, PRFileSummary, InstructionManipulationAttempt, ScanAnalysisResult, ExplanationResult } from './types'
 import { detectInstructionManipulation } from './injection'
-import { SYSTEM_PROMPT, PER_FILE_PROMPT, AGGREGATE_PROMPT, SCAN_ANALYSIS_PROMPT } from './prompts'
+import { SYSTEM_PROMPT, PER_FILE_PROMPT, AGGREGATE_PROMPT, SCAN_ANALYSIS_PROMPT, PR_EXPLANATION_PROMPT, SCAN_EXPLANATION_PROMPT } from './prompts'
 import { ollamaGenerateJSON, ollamaGenerate } from './ollama'
 import { sanitizeSummary, sanitizeBulletPoint } from './sanitizer'
 
@@ -339,6 +339,159 @@ export async function analyzeScanResults(
   }
 
   return fallbackResult
+}
+
+function parseExplanationSections(text: string): { summary: string[], argumentation: string } {
+  const summaryMatch = text.match(/##\s*RESUMEN[\s\S]*?(?=##\s*ARGUMENTACI[ÓO]N|$)/i)
+  const argMatch = text.match(/##\s*ARGUMENTACI[ÓO]N[\s\S]*/i)
+
+  let summary: string[] = []
+  if (summaryMatch) {
+    const block = summaryMatch[0].replace(/##\s*RESUMEN/i, '').trim()
+    summary = block
+      .split('\n')
+      .map(l => l.replace(/^[•\-\*]\s*/, '').trim())
+      .filter(l => l.length > 5)
+  }
+
+  let argumentation = ''
+  if (argMatch) {
+    argumentation = argMatch[0].replace(/##\s*ARGUMENTACI[ÓO]N/i, '').trim()
+  }
+
+  return { summary, argumentation }
+}
+
+export async function explainPR(
+  prNumber: number,
+  prTitle: string,
+  prAuthor: string,
+  files: PRFile[],
+  modelName = 'auto',
+): Promise<ExplanationResult> {
+  const MAX_DIFF_CHARS = 4000
+  const fileDiffs = files.map(f => {
+    const patch = f.patch || ''
+    const truncated = patch.length > MAX_DIFF_CHARS ? patch.slice(0, MAX_DIFF_CHARS) + '\n...(truncated)' : patch
+    return `FILE: ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n\`\`\`diff\n${truncated}\n\`\`\``
+  }).join('\n\n')
+
+  const fallbackSummary = files.map(f => `${f.status === 'added' ? 'Se agregó' : f.status === 'removed' || f.status === 'deleted' ? 'Se eliminó' : 'Se modificó'} ${f.filename} (+${f.additions} -${f.deletions})`)
+  const fallbackArg = `Este PR modifica ${files.length} archivo(s) con un total de ${files.reduce((s, f) => s + f.additions, 0)} líneas añadidas y ${files.reduce((s, f) => s + f.deletions, 0)} líneas eliminadas. Revisa los diffs individuales para entender los cambios específicos en cada archivo.`
+
+  const fallback: ExplanationResult = { summary: fallbackSummary, argumentation: fallbackArg }
+
+  if (!modelName || modelName === 'auto' || modelName === 'sentinel-ai-engine') {
+    return fallback
+  }
+
+  const backend = modelName.startsWith('ollama:') ? 'ollama' : 'unknown'
+  if (backend !== 'ollama') return fallback
+
+  const ollamaModel = modelName.replace(/^ollama:/, '')
+  try {
+    const prompt = PR_EXPLANATION_PROMPT
+      .replace('{prNumber}', String(prNumber))
+      .replace('{prTitle}', sanitizeSummary(prTitle))
+      .replace('{prAuthor}', sanitizeSummary(prAuthor))
+      .replace('{fileDiffs}', fileDiffs)
+
+    console.log(`[explainPR] Calling Ollama model ${ollamaModel} for PR #${prNumber}...`)
+    const text = await ollamaGenerate(ollamaModel, prompt)
+    console.log(`[explainPR] Ollama returned ${text.length} chars`)
+
+    if (!text || text.length < 50) {
+      console.warn('[explainPR] Response too short, using fallback')
+      return fallback
+    }
+
+    const parsed = parseExplanationSections(text)
+
+    // Validate we got meaningful content
+    if (parsed.summary.length === 0 && !parsed.argumentation) {
+      // Model didn't use section headers — treat entire response as argumentation
+      return {
+        summary: fallbackSummary,
+        argumentation: text.slice(0, 2000),
+      }
+    }
+
+    return {
+      summary: parsed.summary.length > 0 ? parsed.summary : fallbackSummary,
+      argumentation: parsed.argumentation || text.slice(0, 2000),
+    }
+  } catch (err) {
+    console.warn(`[explainPR] Error: ${err instanceof Error ? err.message : err}`)
+    return fallback
+  }
+}
+
+export async function explainScanFindings(
+  prNumber: number,
+  prTitle: string,
+  findings: any[],
+  modelName = 'auto',
+): Promise<ExplanationResult> {
+  const findingsText = findings.slice(0, 20).map((f, i) => {
+    const parts = [`[${i + 1}] ${(f.severity || 'info').toUpperCase()}: ${f.title || f.message || '?'}`]
+    if (f.file) parts.push(`    File: ${f.file}${f.line != null ? ':' + f.line : ''}`)
+    if (f.description) parts.push(`    ${f.description}`)
+    if (f.code) parts.push(`    Code: ${f.code}`)
+    if (f.cwe) parts.push(`    CWE: ${f.cwe}`)
+    if (f.recommendation) parts.push(`    Fix: ${f.recommendation}`)
+    return parts.join('\n')
+  }).join('\n\n')
+
+  const fallbackSummary = findings.slice(0, 6).map(f => `${(f.severity || 'info').toUpperCase()}: ${f.title || f.message || f.description || 'Hallazgo de seguridad'} en ${f.file || 'archivo desconocido'}`)
+  const fallbackArg = `El escaneo de seguridad detectó ${findings.length} hallazgo(s) en este PR. ${findings.filter(f => f.severity === 'critical').length} son críticos, ${findings.filter(f => f.severity === 'high').length} son de severidad alta. Revisa cada hallazgo en el reporte de escaneo para evaluar el riesgo real en tu contexto.`
+
+  const fallback: ExplanationResult = { summary: fallbackSummary.length > 0 ? fallbackSummary : ['No se encontraron hallazgos de seguridad.'], argumentation: fallbackArg }
+
+  if (!modelName || modelName === 'auto' || modelName === 'sentinel-ai-engine') {
+    return fallback
+  }
+
+  if (findings.length === 0) {
+    return { summary: ['No se detectaron hallazgos de seguridad en este PR.'], argumentation: 'El escaneo de seguridad no encontró patrones sospechosos ni vulnerabilidades en los archivos modificados.' }
+  }
+
+  const backend = modelName.startsWith('ollama:') ? 'ollama' : 'unknown'
+  if (backend !== 'ollama') return fallback
+
+  const ollamaModel = modelName.replace(/^ollama:/, '')
+  try {
+    const prompt = SCAN_EXPLANATION_PROMPT
+      .replace('{prNumber}', String(prNumber))
+      .replace('{prTitle}', sanitizeSummary(prTitle))
+      .replace('{findingCount}', String(findings.length))
+      .replace('{findings}', findingsText)
+
+    console.log(`[explainScan] Calling Ollama model ${ollamaModel} for PR #${prNumber} scan (${findings.length} findings)...`)
+    const text = await ollamaGenerate(ollamaModel, prompt)
+    console.log(`[explainScan] Ollama returned ${text.length} chars`)
+
+    if (!text || text.length < 50) {
+      console.warn('[explainScan] Response too short, using fallback')
+      return fallback
+    }
+
+    const parsed = parseExplanationSections(text)
+
+    if (parsed.summary.length === 0 && !parsed.argumentation) {
+      return {
+        summary: fallbackSummary,
+        argumentation: text.slice(0, 2000),
+      }
+    }
+
+    return {
+      summary: parsed.summary.length > 0 ? parsed.summary : fallbackSummary,
+      argumentation: parsed.argumentation || text.slice(0, 2000),
+    }
+  } catch (err) {
+    console.warn(`[explainScan] Error: ${err instanceof Error ? err.message : err}`)
+    return fallback
+  }
 }
 
 export { computeScanHash }

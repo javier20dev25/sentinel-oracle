@@ -105,3 +105,49 @@ Output as JSON:
 }
 
 Be thorough. Check ALL files, including comments, strings, configuration files, and documentation.`
+
+export const PR_EXPLANATION_PROMPT = `You are a senior code reviewer. Analyze the following pull request changes and explain what the code does.
+
+PR #{prNumber}: {prTitle}
+Author: {prAuthor}
+
+Changed files with their diffs:
+{fileDiffs}
+
+Write your response in TWO sections using these EXACT headers:
+
+## RESUMEN
+Write 3-6 bullet points summarizing what this PR does. Each bullet should describe a concrete change. Use "•" for bullets.
+
+## ARGUMENTACIÓN
+Write 2-4 paragraphs explaining in detail what the code changes accomplish, why they matter, and how the pieces fit together. Reference specific files and code patterns you see in the diffs. Be technical but clear.
+
+Important:
+- Read the actual code diffs, not just filenames
+- Be specific about what functions, classes, or logic changed
+- Do NOT output JSON
+- Do NOT give security scores or ratings
+- Write in Spanish`
+
+export const SCAN_EXPLANATION_PROMPT = `You are a senior security analyst. Analyze the following security scan findings for a pull request and explain them.
+
+PR #{prNumber}: {prTitle}
+Total findings: {findingCount}
+
+Security findings:
+{findings}
+
+Write your response in TWO sections using these EXACT headers:
+
+## RESUMEN
+Write 3-6 bullet points summarizing the key security findings. Each bullet should describe one finding or group of related findings. Use "•" for bullets.
+
+## ARGUMENTACIÓN
+Write 2-4 paragraphs explaining in detail what each finding means, why it matters for the security of the codebase, and what a developer should understand about the risks. Reference specific files, CWE codes, and severity levels from the findings above. Be technical but clear.
+
+Important:
+- Explain WHY each finding is dangerous, not just what it is
+- Suggest concrete remediation steps where possible
+- Do NOT output JSON
+- Do NOT repeat the raw findings verbatim
+- Write in Spanish`

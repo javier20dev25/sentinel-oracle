@@ -1,7 +1,7 @@
 import type { AIAnalysisResult, AIBackendStatus } from './types'
 export type { AIAnalysisResult, AIBackendStatus, InstructionManipulationAttempt } from './types'
 export { detectAIBackend, detectAllModels, buildSetupInstructions, checkModelHealth } from './detector'
-export { analyzePR, computeScanHash } from './analyzer'
+export { analyzePR, computeScanHash, explainPR, explainScanFindings } from './analyzer'
 export { detectInstructionManipulation, hasInstructionManipulation } from './injection'
 export { createSkills } from './skills'
 export { sanitizeAIOutput, sanitizeJSONOutput, sanitizeSummary, sanitizeBulletPoint } from './sanitizer'

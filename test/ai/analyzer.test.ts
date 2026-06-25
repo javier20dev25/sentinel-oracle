@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest'
-import { analyzePR, computeScanHash } from '../../src/ai/analyzer'
+import { describe, it, expect, vi } from 'vitest'
+import { analyzePR, computeScanHash, explainPR, explainScanFindings } from '../../src/ai/analyzer'
 import type { PRFile } from '../../src/github/client'
+
+let mockOllamaGenerateResponse = ''
+
+vi.mock('../../src/ai/ollama', () => ({
+  ollamaGenerate: vi.fn(async () => mockOllamaGenerateResponse),
+  ollamaGenerateJSON: vi.fn(async () => null),
+}))
 
 function makeFile(overrides: Partial<PRFile> & { filename: string }): PRFile {
   return {
@@ -75,5 +82,77 @@ describe('analyzePR', () => {
     const hash1 = computeScanHash(files1, 'sha1')
     const hash2 = computeScanHash(files2, 'sha1')
     expect(hash1).not.toBe(hash2)
+  })
+})
+
+describe('explainPR', () => {
+  it('returns fallback explanation when model is auto or sentinel-ai-engine', async () => {
+    const files: PRFile[] = [
+      makeFile({ filename: 'src/main.ts', additions: 10, deletions: 2, status: 'modified' })
+    ]
+    const result = await explainPR(1, 'Test Title', 'author', files, 'auto')
+    expect(result.summary).toContain('Se modificó src/main.ts (+10 -2)')
+    expect(result.argumentation).toContain('Este PR modifica 1 archivo(s)')
+  })
+
+  it('uses ollama model when specified and parses sections correctly', async () => {
+    const files: PRFile[] = [
+      makeFile({ filename: 'src/main.ts', additions: 10, deletions: 2, status: 'modified' })
+    ]
+    mockOllamaGenerateResponse = `
+## RESUMEN
+• Added helper functions
+• Cleaned up code
+
+## ARGUMENTACIÓN
+This PR does a bunch of cleanups to improve codebase health. We refactored main.ts.
+`
+    const result = await explainPR(1, 'Test Title', 'author', files, 'ollama:qwen')
+    expect(result.summary).toEqual(['Added helper functions', 'Cleaned up code'])
+    expect(result.argumentation).toContain('This PR does a bunch of cleanups')
+  })
+
+  it('falls back to file list summary if LLM response is invalid or missing sections', async () => {
+    const files: PRFile[] = [
+      makeFile({ filename: 'src/main.ts', additions: 10, deletions: 2, status: 'modified' })
+    ]
+    mockOllamaGenerateResponse = 'This is just a random plain text explanation with no headers.'
+    const result = await explainPR(1, 'Test Title', 'author', files, 'ollama:qwen')
+    expect(result.summary).toContain('Se modificó src/main.ts (+10 -2)')
+    expect(result.argumentation).toBe('This is just a random plain text explanation with no headers.')
+  })
+})
+
+describe('explainScanFindings', () => {
+  it('returns fallback summary and argumentation when model is auto', async () => {
+    const findings = [
+      { severity: 'high', title: 'SQL Injection', file: 'db.ts', message: 'Raw query check' }
+    ]
+    const result = await explainScanFindings(1, 'Test Title', findings, 'auto')
+    expect(result.summary[0]).toContain('HIGH: SQL Injection')
+    expect(result.argumentation).toContain('El escaneo de seguridad detectó 1 hallazgo')
+  })
+
+  it('returns message for empty findings', async () => {
+    const result = await explainScanFindings(1, 'Test Title', [], 'ollama:qwen')
+    expect(result.summary[0]).toContain('No se detectaron hallazgos')
+    expect(result.argumentation).toContain('El escaneo de seguridad no encontró patrones')
+  })
+
+  it('uses ollama model when specified and parses sections', async () => {
+    const findings = [
+      { severity: 'high', title: 'SQL Injection', file: 'db.ts', message: 'Raw query check' }
+    ]
+    mockOllamaGenerateResponse = `
+## RESUMEN
+• Critical SQL vulnerability found
+• Immediate fix required
+
+## ARGUMENTACIÓN
+The SQL injection vulnerability in db.ts is highly critical because it allows unauthorized access to the database.
+`
+    const result = await explainScanFindings(1, 'Test Title', findings, 'ollama:qwen')
+    expect(result.summary).toEqual(['Critical SQL vulnerability found', 'Immediate fix required'])
+    expect(result.argumentation).toContain('The SQL injection vulnerability in db.ts')
   })
 })
