@@ -302,6 +302,17 @@
         <!-- filled by showScanReport() -->
       </div>
 
+      <div id="scan-ai-inline" class="scan-ai-inline" style="display:none;">
+        <div class="scan-ai-header">
+          <span class="snt-badge" style="background:var(--accent-purple);font-size:0.55rem;padding:2px 6px;">AI</span>
+          <span style="font-size:0.7rem;font-weight:600;color:var(--text-bright);">SCAN AI ANALYSIS</span>
+          <span id="scan-ai-status" style="margin-left:auto;font-size:0.6rem;color:var(--text-dark);"></span>
+        </div>
+        <div id="scan-ai-content" class="scan-ai-content">
+          <div class="scan-ai-loading"><span class="spinner"></span> Analyzing scan results with AI...</div>
+        </div>
+      </div>
+
       <div class="scan-report-footer">
         <button class="scan-report-btn" id="scan-report-export-json">Export JSON</button>
         <button class="scan-report-btn" id="scan-report-export-sarif">Export SARIF</button>

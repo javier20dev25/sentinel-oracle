@@ -28,26 +28,27 @@ Output a JSON object with:
   ]
 }`
 
-export const AGGREGATE_PROMPT = `You are analyzing a complete pull request.
+export const AGGREGATE_PROMPT = `You are analyzing a complete pull request. You are given actual code diffs below — analyze the REAL code changes.
 
 PR #{prNumber}: {prTitle}
 Author: {prAuthor}
 Base: {base} → Head: {head}
 
-Changed files:
+Full code diffs of changed files:
 {fileAnalyses}
 
 {scanContext}
 
 Produce a JSON analysis with this EXACT structure. Return ONLY valid JSON, no other text:
 {
-  "executiveSummary": ["2-4 points summarizing what this PR does and its scope"],
-  "securityRelevantChanges": [{"title": "change name", "description": "what changed and why it matters", "evidence": ["file/path"]}],
-  "reviewHotspots": [{"file": "file/path", "reason": "why this file needs careful review"}],
-  "reviewerNotes": ["actionable notes for the reviewer"]
+  "executiveSummary": ["2-4 points describing what this PR actually does and its scope, based on the code changes"],
+  "securityRelevantChanges": [{"title": "change name", "description": "what changed and why it matters, referencing specific code", "evidence": ["file/path"]}],
+  "reviewHotspots": [{"file": "file/path", "reason": "why this file needs careful review, referencing specific lines or patterns in the diff"}],
+  "reviewerNotes": ["actionable notes for the reviewer based on the actual code changes"]
 }
 
 Rules:
+- Read the actual code diffs provided, do NOT summarize filenames only
 - EVERY item MUST cite at least one evidence file path from the changed files list
 - Do NOT invent evidence or files not in the list above
 - Keep it concise and technical`

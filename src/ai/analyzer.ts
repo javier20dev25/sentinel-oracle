@@ -197,6 +197,13 @@ export async function analyzePR(
 
   if (files.length === 0) return fallback()
 
+  const MAX_DIFF_CHARS = 3000
+  const fileDiffs = files.map(f => {
+    const patch = f.patch || ''
+    const truncated = patch.length > MAX_DIFF_CHARS ? patch.slice(0, MAX_DIFF_CHARS) + '\n...(truncated)' : patch
+    return `FILE: ${f.filename} (${f.status}, +${f.additions} -${f.deletions})\n\`\`\`diff\n${truncated}\n\`\`\``
+  }).join('\n\n')
+
   const aggregate = await callModelFallback<AggregateResult>(
     modelName,
     AGGREGATE_PROMPT
@@ -205,7 +212,7 @@ export async function analyzePR(
       .replace('{prAuthor}', sanitizeSummary(prAuthor))
       .replace('{base}', sanitizeSummary(base))
       .replace('{head}', sanitizeSummary(head))
-      .replace('{fileAnalyses}', fileSummaries.map(f => `- ${f.filename} (${f.status}): ${f.additions}+ ${f.deletions}-`).join('\n'))
+      .replace('{fileAnalyses}', fileDiffs)
       .replace('{scanContext}', scanContext),
     SYSTEM_PROMPT,
     fallback,

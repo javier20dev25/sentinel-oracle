@@ -2848,3 +2848,72 @@ button:disabled, .btn:disabled {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Inline AI analysis section inside scan modal */
+.scan-ai-inline {
+  border-top: 1px solid var(--border-color);
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  animation: about-fade-in 0.2s ease;
+}
+.scan-ai-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.scan-ai-content {
+  font-size: 0.65rem;
+}
+.scan-ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  color: var(--text-dark);
+  font-size: 0.65rem;
+}
+.scan-ai-content .ai-report-subsection {
+  margin-bottom: 0.75rem;
+}
+.scan-ai-content .ai-subsection-title {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-dark);
+  letter-spacing: 0.08em;
+  margin-bottom: 0.3rem;
+}
+.scan-ai-content .ai-argumentation-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 0.5rem;
+}
+.scan-ai-content .ai-arg-text {
+  color: var(--text-main);
+  line-height: 1.5;
+  font-size: 0.65rem;
+  white-space: pre-wrap;
+}
+.scan-ai-content .ai-summary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.scan-ai-content .ai-summary-list li {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 0.65rem;
+  color: var(--text-main);
+}
+.scan-ai-content .ai-summary-list li:last-child {
+  border-bottom: none;
+}
+.scan-ai-content .ai-summary-list li.ai-warn {
+  color: var(--accent-red);
+}
+.scan-ai-content .empty {
+  color: var(--text-dark);
+  font-style: italic;
+  font-size: 0.6rem;
+}

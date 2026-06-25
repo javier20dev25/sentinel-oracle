@@ -24,7 +24,7 @@ export async function ollamaGenerate(model: string, prompt: string, systemPrompt
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(300000),
   })
 
   if (!res.ok) {
@@ -41,7 +41,7 @@ export async function ollamaChat(model: string, messages: { role: string; conten
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ model, messages, stream: false }),
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(300000),
   })
 
   if (!res.ok) {
