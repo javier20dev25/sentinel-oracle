@@ -129,25 +129,34 @@ Important:
 - Do NOT give security scores or ratings
 - Write in Spanish`
 
-export const SCAN_EXPLANATION_PROMPT = `You are a senior security analyst. Analyze the following security scan findings for a pull request and explain them.
+export const SCAN_EXPLANATION_PROMPT = `You are a senior security analyst. Analyze the following security scan findings for a pull request.
 
 PR #{prNumber}: {prTitle}
-Total findings: {findingCount}
+{summaryHeader}
 
-Security findings:
+Total findings: {findingCount} ({criticalCount} critical, {highCount} high, {mediumCount} medium, {lowCount} low)
+
+Detailed findings:
 {findings}
 
 Write your response in TWO sections using these EXACT headers:
 
 ## RESUMEN
-Write 3-6 bullet points summarizing the key security findings. Each bullet should describe one finding or group of related findings. Use "•" for bullets.
+Write 3-6 bullet points that tell a STORY about what this code is doing. Do NOT just list findings. Instead, describe what the attacker or malicious code is trying to accomplish. For example: "El código malicioso está intentando ejecutar comandos del sistema para establecer persistencia" instead of "Se detectó ejecución de comandos". Use "•" for bullets.
 
 ## ARGUMENTACIÓN
-Write 2-4 paragraphs explaining in detail what each finding means, why it matters for the security of the codebase, and what a developer should understand about the risks. Reference specific files, CWE codes, and severity levels from the findings above. Be technical but clear.
+Write 2-4 paragraphs that go BEYOND the raw findings. Explain:
+- What is the attacker's objective? (persistence, data exfiltration, privilege escalation, etc.)
+- How do the findings work together to achieve that objective?
+- What specific code patterns or techniques are being used?
+- What is the real business risk if this PR is merged?
+- What specific remediation steps should the developer take?
+
+Reference specific files, code snippets, and severity levels from the findings above. Be technical, specific, and write in a narrative style.
 
 Important:
-- Explain WHY each finding is dangerous, not just what it is
-- Suggest concrete remediation steps where possible
+- Do NOT just repeat the raw findings — ANALYZE them
+- Connect the dots between different findings to show the full attack picture
+- Explain WHAT the malicious code is trying to do, not just what was detected
 - Do NOT output JSON
-- Do NOT repeat the raw findings verbatim
 - Write in Spanish`

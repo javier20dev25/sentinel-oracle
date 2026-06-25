@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { analyzePR, computeScanHash, explainPR, explainScanFindings } from '../../src/ai/analyzer'
 import type { PRFile } from '../../src/github/client'
 
@@ -8,6 +8,14 @@ vi.mock('../../src/ai/ollama', () => ({
   ollamaGenerate: vi.fn(async () => mockOllamaGenerateResponse),
   ollamaGenerateJSON: vi.fn(async () => null),
 }))
+
+vi.mock('../../src/ai/detector', () => ({
+  detectAIBackend: vi.fn(() => ({ available: false, backend: 'none', modelName: '', modelPath: '', availableModels: [] })),
+}))
+
+beforeEach(() => {
+  mockOllamaGenerateResponse = ''
+})
 
 function makeFile(overrides: Partial<PRFile> & { filename: string }): PRFile {
   return {

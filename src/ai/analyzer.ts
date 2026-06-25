@@ -4,6 +4,7 @@ import { detectInstructionManipulation } from './injection'
 import { SYSTEM_PROMPT, PER_FILE_PROMPT, AGGREGATE_PROMPT, SCAN_ANALYSIS_PROMPT, PR_EXPLANATION_PROMPT, SCAN_EXPLANATION_PROMPT } from './prompts'
 import { ollamaGenerateJSON, ollamaGenerate } from './ollama'
 import { sanitizeSummary, sanitizeBulletPoint } from './sanitizer'
+import { detectAIBackend } from './detector'
 
 function buildScanContext(prNumber: number, db: any): string {
   try {
@@ -381,14 +382,22 @@ export async function explainPR(
 
   const fallback: ExplanationResult = { summary: fallbackSummary, argumentation: fallbackArg }
 
-  if (!modelName || modelName === 'auto' || modelName === 'sentinel-ai-engine') {
-    return fallback
+  let resolvedModel = modelName
+  if (!resolvedModel || resolvedModel === 'auto' || resolvedModel === 'sentinel-ai-engine') {
+    const status = detectAIBackend()
+    if (status.available && status.backend === 'ollama') {
+      resolvedModel = 'ollama:' + status.modelName
+      console.log(`[explainPR] Auto-detected Ollama model: ${status.modelName}`)
+    } else {
+      console.warn('[explainPR] No Ollama model available, using fallback')
+      return fallback
+    }
   }
 
-  const backend = modelName.startsWith('ollama:') ? 'ollama' : 'unknown'
+  const backend = resolvedModel.startsWith('ollama:') ? 'ollama' : 'unknown'
   if (backend !== 'ollama') return fallback
 
-  const ollamaModel = modelName.replace(/^ollama:/, '')
+  const ollamaModel = resolvedModel.replace(/^ollama:/, '')
   try {
     const prompt = PR_EXPLANATION_PROMPT
       .replace('{prNumber}', String(prNumber))
@@ -432,38 +441,65 @@ export async function explainScanFindings(
   findings: any[],
   modelName = 'auto',
 ): Promise<ExplanationResult> {
-  const findingsText = findings.slice(0, 20).map((f, i) => {
+  const criticalCount = findings.filter(f => f.severity === 'critical').length
+  const highCount = findings.filter(f => f.severity === 'high').length
+  const mediumCount = findings.filter(f => f.severity === 'medium').length
+  const lowCount = findings.filter(f => f.severity === 'low').length
+
+  const findingsText = findings.slice(0, 30).map((f, i) => {
     const parts = [`[${i + 1}] ${(f.severity || 'info').toUpperCase()}: ${f.title || f.message || '?'}`]
     if (f.file) parts.push(`    File: ${f.file}${f.line != null ? ':' + f.line : ''}`)
-    if (f.description) parts.push(`    ${f.description}`)
+    if (f.category) parts.push(`    Category: ${f.category}`)
+    if (f.description) parts.push(`    Description: ${f.description}`)
+    if (f.businessImpact) parts.push(`    Impact: ${f.businessImpact}`)
     if (f.code) parts.push(`    Code: ${f.code}`)
     if (f.cwe) parts.push(`    CWE: ${f.cwe}`)
-    if (f.recommendation) parts.push(`    Fix: ${f.recommendation}`)
+    if (f.confidence != null) parts.push(`    Confidence: ${f.confidence}%`)
+    if (f.recommendation) parts.push(`    Recommendation: ${f.recommendation}`)
     return parts.join('\n')
   }).join('\n\n')
 
-  const fallbackSummary = findings.slice(0, 6).map(f => `${(f.severity || 'info').toUpperCase()}: ${f.title || f.message || f.description || 'Hallazgo de seguridad'} en ${f.file || 'archivo desconocido'}`)
-  const fallbackArg = `El escaneo de seguridad detectó ${findings.length} hallazgo(s) en este PR. ${findings.filter(f => f.severity === 'critical').length} son críticos, ${findings.filter(f => f.severity === 'high').length} son de severidad alta. Revisa cada hallazgo en el reporte de escaneo para evaluar el riesgo real en tu contexto.`
+  const summaryHeader = findings.length > 0
+    ? `Resumen de hallazgos: ${criticalCount} crítico(s), ${highCount} alto(s), ${mediumCount} medio(s), ${lowCount} bajo(s)`
+    : 'No se encontraron hallazgos de seguridad.'
+
+  const fallbackSummary = findings.slice(0, 8).map(f =>
+    `${(f.severity || 'info').toUpperCase()}: ${f.title || f.message || f.description || 'Hallazgo de seguridad'} en ${f.file || 'archivo desconocido'}`
+  )
+  const fallbackArg = `El escaneo de seguridad detectó ${findings.length} hallazgo(s) en este PR. ${criticalCount} crítico(s), ${highCount} alto(s), ${mediumCount} medio(s), ${lowCount} bajo(s). Los hallazgos críticos y altos requieren atención inmediata. ${findings.filter(f => f.businessImpact).slice(0, 2).map(f => f.businessImpact).join('. ')}`
 
   const fallback: ExplanationResult = { summary: fallbackSummary.length > 0 ? fallbackSummary : ['No se encontraron hallazgos de seguridad.'], argumentation: fallbackArg }
-
-  if (!modelName || modelName === 'auto' || modelName === 'sentinel-ai-engine') {
-    return fallback
-  }
 
   if (findings.length === 0) {
     return { summary: ['No se detectaron hallazgos de seguridad en este PR.'], argumentation: 'El escaneo de seguridad no encontró patrones sospechosos ni vulnerabilidades en los archivos modificados.' }
   }
 
-  const backend = modelName.startsWith('ollama:') ? 'ollama' : 'unknown'
+  let resolvedModel = modelName
+  if (!resolvedModel || resolvedModel === 'auto' || resolvedModel === 'sentinel-ai-engine') {
+    const status = detectAIBackend()
+    if (status.available && status.backend === 'ollama') {
+      resolvedModel = 'ollama:' + status.modelName
+      console.log(`[explainScan] Auto-detected Ollama model: ${status.modelName}`)
+    } else {
+      console.warn('[explainScan] No Ollama model available, using fallback')
+      return fallback
+    }
+  }
+
+  const backend = resolvedModel.startsWith('ollama:') ? 'ollama' : 'unknown'
   if (backend !== 'ollama') return fallback
 
-  const ollamaModel = modelName.replace(/^ollama:/, '')
+  const ollamaModel = resolvedModel.replace(/^ollama:/, '')
   try {
     const prompt = SCAN_EXPLANATION_PROMPT
       .replace('{prNumber}', String(prNumber))
       .replace('{prTitle}', sanitizeSummary(prTitle))
       .replace('{findingCount}', String(findings.length))
+      .replace('{criticalCount}', String(criticalCount))
+      .replace('{highCount}', String(highCount))
+      .replace('{mediumCount}', String(mediumCount))
+      .replace('{lowCount}', String(lowCount))
+      .replace('{summaryHeader}', summaryHeader)
       .replace('{findings}', findingsText)
 
     console.log(`[explainScan] Calling Ollama model ${ollamaModel} for PR #${prNumber} scan (${findings.length} findings)...`)
@@ -480,13 +516,13 @@ export async function explainScanFindings(
     if (parsed.summary.length === 0 && !parsed.argumentation) {
       return {
         summary: fallbackSummary,
-        argumentation: text.slice(0, 2000),
+        argumentation: text.slice(0, 3000),
       }
     }
 
     return {
       summary: parsed.summary.length > 0 ? parsed.summary : fallbackSummary,
-      argumentation: parsed.argumentation || text.slice(0, 2000),
+      argumentation: parsed.argumentation || text.slice(0, 3000),
     }
   } catch (err) {
     console.warn(`[explainScan] Error: ${err instanceof Error ? err.message : err}`)
