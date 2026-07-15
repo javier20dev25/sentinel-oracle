@@ -12,3 +12,5 @@ config.local.json
 .sentinel-oracle/
 
 start-server.bat
+start-server.cmd
+start.cmd
