@@ -3275,9 +3275,7 @@ sentinel-oracle/
 │   ├── setup-test-db.cjs    # Create test database with sample data
 │   ├── reset-test-db.cjs    # Reset test database
 │   ├── refresh-session.cjs  # Utility to inspect/clear sessions
-│   ├── redteam_attack.cjs   # Red-team attack simulation
-│   ├── redteam_final.cjs    # Red-team comprehensive test
-│   └── redteam_focused.cjs  # Red-team focused scenario
+
 ├── test/                    # Unit tests (Vitest)
 │   ├── authorization.test.ts
 │   ├── e2e.test.ts
