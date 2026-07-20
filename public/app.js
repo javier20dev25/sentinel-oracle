@@ -3285,14 +3285,11 @@ sentinel-oracle/
 │   ├── github-auth.test.ts
 │   ├── scanner.test.ts
 │   └── signing.test.ts
-├── tests/                   # Integration/race tests (run with node)
-│   ├── race_test.cjs        # Concurrent authorization race conditions
-│   ├── replay_test.cjs      # WebAuthn replay attack tests
-│   └── restart_test.cjs     # Server restart with active sessions
-├── GITHUB_APP_SETUP.md      # Step-by-step GitHub App creation guide
 ├── README.md                # Project overview
-├── SECURITY_AUDIT.md        # Security audit report
-├── ATTACK_VECTORS.md        # Documented attack vectors and mitigations
+├── docs/
+│   ├── github-app-setup.md  # Step-by-step GitHub App creation guide
+│   ├── security-audit.md    # Security audit report
+│   └── attack-vectors.md    # Documented attack vectors and mitigations
 ├── tsconfig.json            # TypeScript compiler configuration
 ├── package.json             # Dependencies and scripts
 └── start.cmd                # Windows start script</pre>

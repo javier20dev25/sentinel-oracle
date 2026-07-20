@@ -47,7 +47,7 @@ node --version   # Requiere >= 20
 
 ### 4. GitHub App
 
-Cree una GitHub App antes de iniciar el servidor (ver [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)).
+Cree una GitHub App antes de iniciar el servidor (ver [docs/github-app-setup.md](docs/github-app-setup.md)).
 Necesitara:
 - **App ID** (pagina principal de la app)
 - **Installation ID** (de la URL al instalar la app en tu repo)

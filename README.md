@@ -36,7 +36,7 @@ producción: la workstation comprometida con credenciales de merge.
 
 ---
 
-Two authentication modes are supported: Personal Access Token (PAT) and GitHub App (recommended). See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for detailed GitHub App setup instructions.
+Two authentication modes are supported: Personal Access Token (PAT) and GitHub App (recommended). See [docs/github-app-setup.md](docs/github-app-setup.md) for detailed GitHub App setup instructions.
 
 ---
 
@@ -83,7 +83,7 @@ tailscale up
 tailscale status   # Verificar que los 3 dispositivos aparecen
 ```
 
-**2. Crear GitHub App** (ver [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md) para detalles):
+**2. Crear GitHub App** (ver [docs/github-app-setup.md](docs/github-app-setup.md) para detalles):
 
 - Vaya a `github.com/settings/apps/new`
 - Nombre: `sentinel-oracle-tu-org`
@@ -758,7 +758,7 @@ Sentinel Oracle supports two authentication modes for GitHub API access:
 
 Using a GitHub App eliminates the risk of a long-lived PAT being exfiltrated from the oracle server. Even if an attacker gains access to the server, the installation token expires within 60 minutes and is scoped to a single repository.
 
-See [GITHUB_APP_SETUP.md](./GITHUB_APP_SETUP.md) for complete setup instructions, including registering a GitHub App, installing it on your organization, generating a private key, and configuring the required environment variables.
+See [docs/github-app-setup.md](docs/github-app-setup.md) for complete setup instructions, including registering a GitHub App, installing it on your organization, generating a private key, and configuring the required environment variables.
 
 ---
 
