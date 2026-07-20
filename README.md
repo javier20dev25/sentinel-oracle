@@ -324,6 +324,8 @@ Tests are organized by intention:
 | `test/red-team/` | Adversarial attack scenarios | PASS = detection confirmed |
 | `test/integration/` | Multi-layer integration (HTTP, DB, WebAuthn) | FAIL on failure |
 
+> These files **test that Sentinel Oracle detects** malicious code patterns. They import the scanner modules and verify detection works. They are not standalone exploits and pose no risk outside this repo. Security tools like SonarQube, Semgrep, and CodeQL follow the same pattern.
+
 ---
 
 ## Table of Contents
