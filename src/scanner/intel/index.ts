@@ -1,5 +1,5 @@
 import type { PRFile } from '../rules'
-import type { IntelReport } from './types'
+import type { IntelReport, IntelRisk } from './types'
 import { analyzeDependencies } from './dependencies'
 import { analyzeEndpoints } from './endpoints'
 import { analyzeServices } from './services'
@@ -31,16 +31,28 @@ function buildSecurityDelta(report: IntelReport) {
   const infra = report.infrastructure
   const trustDrift = report.trustDrift
 
-  const totalRisk = [deps?.risk, endpoints?.risk, services?.risk, permissions?.risk,
-    capabilities?.risk, secrets?.risk, trust?.risk, crypto?.risk, auth?.risk, infra?.risk, trustDrift?.risk]
-    .filter((r): r is NonNullable<typeof r> => !!r)
+  const moduleEntries: { name: string; risk: IntelRisk }[] = []
+  const pushIf = (name: string, val: { risk?: IntelRisk } | undefined) => {
+    if (val?.risk) moduleEntries.push({ name, risk: val.risk })
+  }
+  pushIf('Dependencies', deps)
+  pushIf('Endpoints', endpoints)
+  pushIf('Services', services)
+  pushIf('Permissions', permissions)
+  pushIf('Capabilities', capabilities)
+  pushIf('Secrets', secrets)
+  pushIf('Trust Boundaries', trust)
+  pushIf('Crypto', crypto)
+  pushIf('Auth', auth)
+  pushIf('Infrastructure', infra)
+  pushIf('Trust Drift', trustDrift)
 
   let totalRiskChange = 0
-  for (const r of totalRisk) {
-    if (r === 'critical') totalRiskChange += 4
-    else if (r === 'high') totalRiskChange += 3
-    else if (r === 'medium') totalRiskChange += 2
-    else if (r === 'low') totalRiskChange += 1
+  for (const m of moduleEntries) {
+    if (m.risk === 'critical') totalRiskChange += 4
+    else if (m.risk === 'high') totalRiskChange += 3
+    else if (m.risk === 'medium') totalRiskChange += 2
+    else if (m.risk === 'low') totalRiskChange += 1
   }
 
   const capList: string[] = []
@@ -64,7 +76,8 @@ function buildSecurityDelta(report: IntelReport) {
     cryptoWeakness: !!crypto?.changes?.length,
     infraDrift: !!infra?.changes?.length,
     secretExposure: !!secrets?.sources?.length,
-    summary: `${totalRisk.length} modules triggered, score: ${totalRiskChange}`,
+    summary: `${moduleEntries.length} modules triggered, score: ${totalRiskChange}`,
+    modules: moduleEntries,
   }
 }
 

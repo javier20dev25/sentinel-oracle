@@ -421,6 +421,33 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     }
   })
 
+  app.get('/api/scans', requireAuth(), apiRateLimiter(20, 60000), (_req, res) => {
+    try {
+      const scans = db.getAllScanResults()
+      const history = db.getCompletedPRs()
+      const lookup = new Map(history.map(p => [p.prNumber, p]))
+      const enriched = scans.map(s => ({
+        prNumber: s.prNumber,
+        riskScore: s.riskScore,
+        critical: s.critical,
+        high: s.high,
+        medium: s.medium,
+        low: s.low,
+        scannedAt: s.scannedAt,
+        findingsCount: (() => {
+          try { return JSON.parse(s.findingsJson || '[]').length } catch { return 0 }
+        })(),
+        title: lookup.get(s.prNumber)?.title || '',
+        author: lookup.get(s.prNumber)?.author || '',
+        authStatus: lookup.get(s.prNumber)?.authStatus || 'unknown',
+      }))
+      res.json(enriched)
+    } catch (err) {
+      db.log('error', null, `List scans: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to list scans' })
+    }
+  })
+
   app.post('/api/prs/:number/authorize', requireAuth(), authRateLimiter(config.rateLimitAuth, config.rateLimitWindowMs), async (req, res) => {
     try {
       const prNumber = parseInt(req.params.number as string, 10)
@@ -519,6 +546,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
       res.json({
         riskScore: row.riskScore,
+        scanHash: row.scanHash,
         critical: row.critical,
         high: row.high,
         medium: row.medium,
@@ -567,6 +595,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           db.log('pr_scanned', prNumber, `Scan cache HIT — returning cached result (risk ${row.riskScore})`)
           return res.json({
             riskScore: row.riskScore,
+            scanHash,
             critical: row.critical,
             high: row.high,
             medium: row.medium,
@@ -614,6 +643,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const prFiles = db.getPRFiles(prNumber)
       res.json({
         ...result,
+        scanHash,
         files: prFiles,
         prNumber,
         prTitle: pr?.title || '',
@@ -714,8 +744,9 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       if (!pr) return res.status(404).json({ error: 'PR not found' })
       const files = await client.getPRFiles(prNumber)
       if (files.length === 0) return res.status(404).json({ error: 'No files found for this PR' })
+      const scanHash = computeScanHash(files, pr.sha)
       const result = await explainPR(prNumber, pr.title, pr.author, files, config.aiModel || 'auto')
-      res.json({ ...result, prNumber, modelName: config.aiModel || 'auto' })
+      res.json({ ...result, prNumber, scanHash, modelName: config.aiModel || 'auto' })
     } catch (err) {
       db.log('error', null, `AI explain: ${err instanceof Error ? err.message : err}`)
       if (err instanceof GitHubApiError) {
@@ -743,10 +774,95 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       let findings: any[] = []
       try { findings = JSON.parse((scanResult as any).findingsJson || '[]') } catch { findings = [] }
       const result = await explainScanFindings(prNumber, pr.title, findings, config.aiModel || 'auto')
-      res.json({ ...result, prNumber, modelName: config.aiModel || 'auto' })
+      res.json({ ...result, prNumber, scanHash: (scanResult as any).scanHash || '', modelName: config.aiModel || 'auto' })
     } catch (err) {
       db.log('error', null, `AI scan explain: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to explain scan findings' })
+    }
+  })
+
+  // ----- Save/Load AI Explanation -----
+  app.post('/api/prs/:number/ai-explain/save', requireAuth(), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const { type } = req.body as { type: 'pr' | 'scan' }
+      if (!type || !['pr', 'scan'].includes(type)) {
+        return res.status(400).json({ error: 'type must be "pr" or "scan"' })
+      }
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const scanResult = db.getLatestScanResult(prNumber)
+      let findings: any[] = []
+      try { findings = scanResult ? JSON.parse(scanResult.findingsJson || '[]') : [] } catch {}
+      let result: { summary: string[]; argumentation: string }
+      if (type === 'pr') {
+        const files = await client.getPRFiles(prNumber)
+        result = await explainPR(prNumber, pr.title, pr.author, files, config.aiModel || 'auto')
+      } else {
+        result = await explainScanFindings(prNumber, pr.title, findings, config.aiModel || 'auto')
+      }
+      db.saveExplanation(prNumber, type, result.summary, result.argumentation)
+      db.log('ai_explanation_saved', prNumber, `Saved ${type} explanation`)
+      res.json({ saved: true, ...result })
+    } catch (err) {
+      db.log('error', null, `Save explanation: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to save explanation' })
+    }
+  })
+
+  app.get('/api/prs/:number/ai-explain/saved', requireAuth(), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const type = (req.query.type as string) || 'pr'
+      if (!['pr', 'scan'].includes(type)) {
+        return res.status(400).json({ error: 'type must be "pr" or "scan"' })
+      }
+      const row = db.getSavedExplanation(prNumber, type as 'pr' | 'scan')
+      if (!row) return res.status(404).json({ error: 'No saved explanation found' })
+      let summary: string[]
+      try { summary = JSON.parse(row.summaryJson) } catch { summary = [] }
+      res.json({ summary, argumentation: row.argumentation, savedAt: row.savedAt })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get saved explanation' })
+    }
+  })
+
+  // ----- Blacklist PRs -----
+  app.post('/api/prs/:number/blacklist', requireAuth(), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const pr = db.getPRByNumber(prNumber)
+      if (!pr) return res.status(404).json({ error: 'PR not found' })
+      const reason = (req.body?.reason as string) || ''
+      if (db.getBlacklistPR(prNumber)) {
+        return res.json({ blacklisted: true, message: 'PR already blacklisted' })
+      }
+      db.addBlacklistPR(prNumber, pr.owner, pr.repo, pr.title, pr.author, pr.sha, reason)
+      db.log('pr_blacklisted', prNumber, `PR added to blacklist: ${reason}`)
+      res.json({ blacklisted: true, prNumber })
+    } catch (err) {
+      db.log('error', null, `Blacklist add: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to blacklist PR' })
+    }
+  })
+
+  app.delete('/api/prs/:number/blacklist', requireAuth(), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      db.removeBlacklistPR(prNumber)
+      db.log('pr_unblacklisted', prNumber, 'PR removed from blacklist')
+      res.json({ removed: true, prNumber })
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to remove from blacklist' })
+    }
+  })
+
+  app.get('/api/blacklist', requireAuth(), async (_req, res) => {
+    try {
+      const list = db.getAllBlacklistPRs()
+      res.json(list)
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to list blacklist' })
     }
   })
 

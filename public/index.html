@@ -9,7 +9,7 @@
 <body>
 <nav id="sidebar" class="sidebar">
   <div class="sidebar-header">
-    <div class="sidebar-logo">SENTINEL<br>ORACLE</div>
+    <img src="/logo.png" alt="Sentinel Oracle" class="sidebar-logo-img">
     <div id="conn-indicator" class="conn-ok" title="Connected"></div>
   </div>
   <div class="sidebar-nav">
@@ -27,6 +27,7 @@
     <div class="nav-group">
       <div class="nav-group-label">02 // OPERATION DECK</div>
       <a class="nav-item active" data-target="pr-section">Pull Requests</a>
+      <a class="nav-item" data-target="scans-section">Scan History</a>
       <a class="nav-item" data-target="history-section">History</a>
     </div>
     <div class="nav-group">
@@ -56,6 +57,10 @@
       <div class="nav-group-label">07 // ENCLAVE DECK</div>
       <a class="nav-item" data-target="token-section">Token Inspector</a>
       <a class="nav-item" data-target="admin-section">Backfill</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">08 // BLACKLIST</div>
+      <a class="nav-item" data-target="blacklist-section">Lista Negra</a>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">00 // REFERENCE</div>
@@ -132,6 +137,31 @@
     <div id="pr-list">
       <p class="empty">No pending PRs awaiting authorization.</p>
     </div>
+  </section>
+
+  <section id="scans-section" class="section panel" style="display:none">
+    <h2>Scan History</h2>
+    <div class="scan-filters" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
+      <label style="font-size:0.6rem;color:var(--text-dark)">From:
+        <input type="date" id="scan-filter-from" style="font-size:0.6rem;padding:0.2rem 0.4rem;background:var(--bg-main);border:1px solid var(--border-color);color:var(--text-main);border-radius:2px">
+      </label>
+      <label style="font-size:0.6rem;color:var(--text-dark)">To:
+        <input type="date" id="scan-filter-to" style="font-size:0.6rem;padding:0.2rem 0.4rem;background:var(--bg-main);border:1px solid var(--border-color);color:var(--text-main);border-radius:2px">
+      </label>
+      <label style="font-size:0.6rem;color:var(--text-dark)">Min risk:
+        <select id="scan-filter-risk" style="font-size:0.6rem;padding:0.2rem 0.4rem;background:var(--bg-main);border:1px solid var(--border-color);color:var(--text-main);border-radius:2px">
+          <option value="0">All</option>
+          <option value="1">≥ Low</option>
+          <option value="2">≥ Medium</option>
+          <option value="3">≥ High</option>
+          <option value="4">Critical only</option>
+        </select>
+      </label>
+      <button id="scan-filter-apply" style="font-size:0.6rem;padding:0.25rem 0.6rem;background:var(--accent-cyan);color:#000;border:none;border-radius:2px;cursor:pointer">Apply</button>
+    </div>
+    <div id="scan-metrics" style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem"></div>
+    <div id="scan-chart-container" style="margin-bottom:1rem;background:var(--bg-sidebar);border:1px solid var(--border-color);border-radius:4px;padding:0.75rem;overflow-x:auto"></div>
+    <div id="scan-list"><p class="empty">No scans yet.</p></div>
   </section>
 
   <section id="history-section" class="section panel" style="display:none">
@@ -289,7 +319,7 @@
     <div class="scan-report-container">
       <div class="scan-report-header">
         <div class="scan-report-header-left">
-          <div class="snt-badge">SNT</div>
+          <img src="/logo.png" alt="" class="snt-badge-img">
           <div>
             <h2 class="scan-report-title">Security Scan Report</h2>
             <span class="scan-report-pr" id="scan-report-pr"></span>
@@ -304,12 +334,16 @@
 
       <div id="scan-ai-inline" class="scan-ai-inline" style="display:none;">
         <div class="scan-ai-header">
-          <span class="snt-badge" style="background:var(--accent-purple);font-size:0.55rem;padding:2px 6px;">AI</span>
+          <img src="/logo.png" alt="" class="snt-badge-img" style="width:20px;height:20px;">
           <span style="font-size:0.7rem;font-weight:600;color:var(--text-bright);">SCAN AI ANALYSIS</span>
           <span id="scan-ai-status" style="margin-left:auto;font-size:0.6rem;color:var(--text-dark);"></span>
         </div>
         <div id="scan-ai-content" class="scan-ai-content">
-          <div class="scan-ai-loading"><span class="spinner"></span> Analyzing scan results with AI...</div>
+          <div class="scan-ai-loading"><img src="/logo.png" alt="" class="loading-logo"><span>Analyzing scan results with AI...</span></div>
+        </div>
+        <div class="scan-ai-actions" id="scan-ai-actions" style="display:none;margin-top:0.5rem;display:flex;gap:0.5rem;">
+          <button class="scan-report-btn scan-report-btn-primary" id="scan-ai-save-btn" style="font-size:0.6rem;padding:0.3rem 0.6rem;">GUARDAR RESPUESTA</button>
+          <span id="scan-ai-scan-hash" style="margin-left:auto;font-size:0.55rem;color:var(--text-dark);align-self:center;"></span>
         </div>
       </div>
 
@@ -322,13 +356,21 @@
     </div>
   </div>
 
+  <!-- Blacklist Section -->
+  <section id="blacklist-section" class="section panel" style="display:none">
+    <h2>Lista Negra / Blacklist <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">PRs maliciosos archivados para estudio</span></h2>
+    <div id="blacklist-display">
+      <p class="empty">No hay PRs en la lista negra.</p>
+    </div>
+  </section>
+
   <!-- AI Report Modal -->
   <div id="ai-report-modal" class="modal scan-report-modal" style="display:none;">
     <div class="scan-report-overlay" id="ai-report-overlay"></div>
     <div class="scan-report-container">
       <div class="scan-report-header">
         <div class="scan-report-header-left">
-          <div class="snt-badge" style="background:var(--accent-purple);">AI</div>
+          <img src="/logo.png" alt="" class="snt-badge-img">
           <div>
             <h2 class="scan-report-title">AI Intelligence Report</h2>
             <span class="scan-report-pr" id="ai-report-pr"></span>
@@ -337,6 +379,11 @@
         <button class="scan-report-close" id="ai-report-close">&times;</button>
       </div>
       <div class="scan-report-body" id="ai-report-body"></div>
+      <div class="scan-report-footer" id="ai-report-footer" style="display:none">
+        <button class="scan-report-btn scan-report-btn-primary" id="ai-report-save-btn">GUARDAR RESPUESTA</button>
+        <button class="scan-report-btn" id="ai-report-blacklist-btn">AÑADIR A LISTA NEGRA</button>
+        <span id="ai-report-scan-hash" style="margin-left:auto;font-size:0.55rem;color:var(--text-dark);"></span>
+      </div>
     </div>
   </div>
 </main>

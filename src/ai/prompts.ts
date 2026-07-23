@@ -106,7 +106,7 @@ Output as JSON:
 
 Be thorough. Check ALL files, including comments, strings, configuration files, and documentation.`
 
-export const PR_EXPLANATION_PROMPT = `You are a senior code reviewer. Analyze the following pull request changes and explain what the code does.
+export const PR_EXPLANATION_PROMPT = `You are a senior code reviewer. Analyze the following pull request changes and explain what the code does at a deep technical level.
 
 PR #{prNumber}: {prTitle}
 Author: {prAuthor}
@@ -117,16 +117,22 @@ Changed files with their diffs:
 Write your response in TWO sections using these EXACT headers:
 
 ## RESUMEN
-Write 3-6 bullet points summarizing what this PR does. Each bullet should describe a concrete change. Use "•" for bullets.
+Write 3-6 bullet points that describe the INTENT of each change, not just the file names. Each bullet should explain: "What was changed and WHY". For example, instead of "Se modificó src/auth.ts", write "Se refactorizó el middleware de autenticación para validar tokens JWT con expiración, evitando sesiones stale". Use "•" for bullets.
 
 ## ARGUMENTACIÓN
-Write 2-4 paragraphs explaining in detail what the code changes accomplish, why they matter, and how the pieces fit together. Reference specific files and code patterns you see in the diffs. Be technical but clear.
+Write 3-5 paragraphs that provide a comprehensive technical narrative. MUST include:
+
+1. **Propósito general** — ¿Qué problema resuelve este PR? ¿Es una feature, fix, refactor, o cambio de configuración?
+2. **Análisis archivo por archivo** — Para cada archivo modificado, explica específicamente qué cambió en las funciones, clases o lógica. Cita el nombre del archivo y describe el cambio concreto.
+3. **Impacto y riesgos** — ¿Cómo afectan estos cambios al sistema? ¿Hay riesgos de regresión, problemas de compatibilidad, o dependencias afectadas?
+4. **Conexión entre cambios** — ¿Cómo se relacionan los cambios en distintos archivos? ¿Siguen un patrón o objetivo común?
 
 Important:
 - Read the actual code diffs, not just filenames
-- Be specific about what functions, classes, or logic changed
+- Each paragraph must reference at least one specific file by name
+- Be technical and precise about what functions, classes, or logic changed
 - Do NOT output JSON
-- Do NOT give security scores or ratings
+- Do NOT give security scores or ratings (use Argumentación section for risk notes)
 - Write in Spanish`
 
 export const SCAN_EXPLANATION_PROMPT = `You are a senior security analyst. Analyze the following security scan findings for a pull request.
@@ -142,21 +148,21 @@ Detailed findings:
 Write your response in TWO sections using these EXACT headers:
 
 ## RESUMEN
-Write 3-6 bullet points that tell a STORY about what this code is doing. Do NOT just list findings. Instead, describe what the attacker or malicious code is trying to accomplish. For example: "El código malicioso está intentando ejecutar comandos del sistema para establecer persistencia" instead of "Se detectó ejecución de comandos". Use "•" for bullets.
+Write 3-6 bullet points where EACH bullet describes a specific attack technique or vulnerability pattern, citing the file and severity. Do NOT just restate finding titles. Instead, explain what the code is doing wrong and why it matters. For example: "El archivo src/api.js:45 usa exec() con concatenación de strings del usuario, permitiendo inyección de comandos remotos (CRITICAL)". Use "•" for bullets.
 
 ## ARGUMENTACIÓN
-Write 2-4 paragraphs that go BEYOND the raw findings. Explain:
-- What is the attacker's objective? (persistence, data exfiltration, privilege escalation, etc.)
-- How do the findings work together to achieve that objective?
-- What specific code patterns or techniques are being used?
-- What is the real business risk if this PR is merged?
-- What specific remediation steps should the developer take?
+Write 3-5 paragraphs that provide a deep security analysis. MUST include:
 
-Reference specific files, code snippets, and severity levels from the findings above. Be technical, specific, and write in a narrative style.
+1. **Análisis por severidad** — Agrupa los hallazgos por criticidad y explica el impacto real de cada grupo. ¿Qué pasa si un atacante explota los críticos?
+2. **Análisis por archivo** — Para cada archivo con hallazgos, explica qué patrones inseguros se detectaron y cómo podrían explotarse. Cita líneas específicas.
+3. **Narrativa de ataque** — Describe una secuencia de ataque realista que combine múltiples hallazgos. Por ejemplo: "El atacante podría usar la inyección SQL en db.js:120 para extraer credenciales, luego usar esas credenciales para acceder al panel admin expuesto en admin.js:15".
+4. **Recomendaciones específicas** — Da pasos concretos de remediación para cada hallazgo crítico/alto, citando buenas prácticas (prepared statements, input validation, least privilege, etc.).
+
+Reference specific files, line numbers, code snippets, and severity levels from the findings above. Be technical, specific, and write in a narrative style.
 
 Important:
 - Do NOT just repeat the raw findings — ANALYZE them
 - Connect the dots between different findings to show the full attack picture
-- Explain WHAT the malicious code is trying to do, not just what was detected
+- Every claim must cite a specific file from the findings
 - Do NOT output JSON
 - Write in Spanish`

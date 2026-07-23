@@ -86,6 +86,25 @@ export interface ScanResultRow {
   intelJson?: string
 }
 
+export interface SavedExplanationRow {
+  prNumber: number
+  type: 'pr' | 'scan'
+  summaryJson: string
+  argumentation: string
+  savedAt: number
+}
+
+export interface BlacklistPRRow {
+  prNumber: number
+  owner: string
+  repo: string
+  title: string
+  author: string
+  sha: string
+  reason: string
+  savedAt: number
+}
+
 export interface AIAnalysisRow {
   prNumber: number
   scanHash: string
@@ -305,6 +324,28 @@ export class DatabaseStore {
                 created_at INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_snapshots_repo ON capability_snapshots(owner, repo, created_at);
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS saved_explanations (
+                pr_number INTEGER NOT NULL,
+                type TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                argumentation TEXT NOT NULL,
+                saved_at INTEGER NOT NULL,
+                UNIQUE(pr_number, type)
+            );
+        `)
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS blacklist_prs (
+                pr_number INTEGER PRIMARY KEY,
+                owner TEXT NOT NULL,
+                repo TEXT NOT NULL,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                sha TEXT NOT NULL DEFAULT '',
+                reason TEXT NOT NULL DEFAULT '',
+                saved_at INTEGER NOT NULL
+            );
         `)
     }
 
@@ -919,6 +960,47 @@ export class DatabaseStore {
     hasAnalysisHash(prNumber: number, scanHash: string): boolean {
       const row = this.db.prepare('SELECT 1 FROM ai_analysis WHERE pr_number = ? AND scan_hash = ?').get(prNumber, scanHash) as any
       return !!row
+    }
+
+    saveExplanation(prNumber: number, type: 'pr' | 'scan', summary: string[], argumentation: string): void {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO saved_explanations (pr_number, type, summary_json, argumentation, saved_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(prNumber, type, JSON.stringify(summary), argumentation, Date.now())
+    }
+
+    getSavedExplanation(prNumber: number, type: 'pr' | 'scan'): SavedExplanationRow | undefined {
+      const row = this.db.prepare(`
+        SELECT pr_number as prNumber, type, summary_json as summaryJson, argumentation, saved_at as savedAt
+        FROM saved_explanations WHERE pr_number = ? AND type = ?
+      `).get(prNumber, type) as any
+      return row || undefined
+    }
+
+    addBlacklistPR(prNumber: number, owner: string, repo: string, title: string, author: string, sha: string, reason: string): void {
+      this.db.prepare(`
+        INSERT OR REPLACE INTO blacklist_prs (pr_number, owner, repo, title, author, sha, reason, saved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(prNumber, owner, repo, title, author, sha, reason, Date.now())
+    }
+
+    removeBlacklistPR(prNumber: number): void {
+      this.db.prepare('DELETE FROM blacklist_prs WHERE pr_number = ?').run(prNumber)
+    }
+
+    getBlacklistPR(prNumber: number): BlacklistPRRow | undefined {
+      const row = this.db.prepare(`
+        SELECT pr_number as prNumber, owner, repo, title, author, sha, reason, saved_at as savedAt
+        FROM blacklist_prs WHERE pr_number = ?
+      `).get(prNumber) as any
+      return row || undefined
+    }
+
+    getAllBlacklistPRs(): BlacklistPRRow[] {
+      return this.db.prepare(`
+        SELECT pr_number as prNumber, owner, repo, title, author, sha, reason, saved_at as savedAt
+        FROM blacklist_prs ORDER BY saved_at DESC
+      `).all() as BlacklistPRRow[]
     }
 
     close(): void {

@@ -7,6 +7,8 @@
   let currentStatus = null;
   let _connected = true
   let lastScanResult = null
+  var _intelData = {}
+  var _currentAiPrNumber = null
 
   function updateConnectionIndicator(ok) {
     _connected = ok
@@ -632,6 +634,111 @@
     }
   }
 
+  async function loadScans() {
+    var el = document.getElementById('scan-list');
+    var metricsEl = document.getElementById('scan-metrics');
+    var chartEl = document.getElementById('scan-chart-container');
+    if (!el) return;
+    el.innerHTML = '<p class="empty">Loading scans...</p>';
+    try {
+      var scans = await api('/api/scans');
+      if (!scans || scans.length === 0) {
+        el.innerHTML = '<p class="empty">No scans performed yet.</p>';
+        if (metricsEl) metricsEl.innerHTML = '';
+        if (chartEl) chartEl.innerHTML = '';
+        return;
+      }
+
+      // Apply filters
+      var fromVal = document.getElementById('scan-filter-from')?.value
+      var toVal = document.getElementById('scan-filter-to')?.value
+      var minRisk = parseInt(document.getElementById('scan-filter-risk')?.value || '0', 10)
+      if (fromVal) {
+        var fromTs = new Date(fromVal).getTime()
+        scans = scans.filter(function(s) { return s.scannedAt >= fromTs })
+      }
+      if (toVal) {
+        var toTs = new Date(toVal).getTime() + 86400000
+        scans = scans.filter(function(s) { return s.scannedAt <= toTs })
+      }
+      if (minRisk > 0) {
+        var riskLevel = function(score) {
+          if (score >= 20) return 4
+          if (score >= 10) return 3
+          if (score >= 5) return 2
+          if (score >= 1) return 1
+          return 0
+        }
+        scans = scans.filter(function(s) { return riskLevel(s.riskScore) >= minRisk })
+      }
+
+      // Metrics
+      if (metricsEl) {
+        var totalScans = scans.length
+        var avgRisk = Math.round(scans.reduce(function(s, sc) { return s + sc.riskScore }, 0) / totalScans)
+        var totalCritical = scans.reduce(function(s, sc) { return s + sc.critical }, 0)
+        var totalHigh = scans.reduce(function(s, sc) { return s + sc.high }, 0)
+        var cleanScans = scans.filter(function(sc) { return sc.riskScore === 0 }).length
+        metricsEl.innerHTML = '\
+          <div class="delta-pill">' + totalScans + ' scans</div>\
+          <div class="delta-pill' + (avgRisk >= 10 ? ' risk-high' : avgRisk >= 5 ? ' risk-medium' : '') + '">Avg risk: ' + avgRisk + '%</div>\
+          <div class="delta-pill' + (totalCritical > 0 ? ' risk-critical' : '') + '">' + totalCritical + ' critical</div>\
+          <div class="delta-pill' + (totalHigh > 0 ? ' risk-high' : '') + '">' + totalHigh + ' high</div>\
+          <div class="delta-pill">' + cleanScans + ' clean</div>\
+        '
+      }
+
+      // Bar chart (risk scores over time)
+      if (chartEl) {
+        var maxScore = Math.max.apply(null, scans.map(function(s) { return s.riskScore })) || 1
+        var barW = Math.max(20, Math.min(60, 800 / scans.length))
+        var chartW = Math.max(400, scans.length * (barW + 4))
+        var chartH = 160
+        chartEl.innerHTML = '<svg width="' + chartW + '" height="' + chartH + '" viewBox="0 0 ' + chartW + ' ' + chartH + '" xmlns="http://www.w3.org/2000/svg" style="display:block">' +
+          '<rect width="100%" height="100%" fill="#0a0a14" rx="4"/>' +
+          '<text x="8" y="14" fill="#8b949e" font-size="11" font-family="Consolas,monospace">Risk Score Timeline</text>' +
+          scans.map(function(s, i) {
+            var x = 10 + i * (barW + 4)
+            var bh = (s.riskScore / maxScore) * 110
+            var y = chartH - 30 - bh
+            var color = s.riskScore >= 20 ? '#ff3333' : s.riskScore >= 10 ? '#ff7700' : s.riskScore >= 5 ? '#ffaa00' : '#44cc44'
+            var dateStr = new Date(s.scannedAt).toLocaleDateString()
+            var titleStr = 'PR #' + s.prNumber + ': ' + s.riskScore + '% risk' + (s.title ? ' — ' + escapeHtml(s.title) : '')
+            return '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + bh + '" rx="2" fill="' + color + '" opacity="0.8">' +
+              '<title>' + titleStr + '</title></rect>' +
+              '<text x="' + (x + barW / 2) + '" y="' + (chartH - 14) + '" text-anchor="middle" fill="#8b949e" font-size="7" font-family="Consolas,monospace">#' + s.prNumber + '</text>'
+          }).join('') +
+          '</svg>'
+      }
+
+      // Table
+      el.innerHTML = '<div class="checks-table"><table><thead><tr>' +
+        '<th>PR</th><th>Title</th><th>Risk</th><th>Crit</th><th>High</th><th>Med</th><th>Low</th><th>Findings</th><th>Status</th><th>Date</th>' +
+        '</tr></thead><tbody>' +
+        scans.map(function(s) {
+          var riskClass = s.riskScore >= 20 ? 'risk-critical' : s.riskScore >= 10 ? 'risk-high' : s.riskScore >= 5 ? 'risk-medium' : 'risk-low'
+          var dateStr = new Date(s.scannedAt).toLocaleString()
+          var statusBadge = s.authStatus === 'authorized' ? '<span class="badge success">Authorized</span>' :
+            s.authStatus === 'rejected' ? '<span class="badge error">Rejected</span>' : '<span class="badge warning">Pending</span>'
+          return '<tr>' +
+            '<td><a href="#" onclick="showPanel(\'pr-section\');return false" style="color:var(--accent-cyan)">#' + s.prNumber + '</a></td>' +
+            '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + escapeHtml(s.title) + '</td>' +
+            '<td><span class="badge ' + riskClass + '">' + s.riskScore + '%</span></td>' +
+            '<td>' + s.critical + '</td>' +
+            '<td>' + s.high + '</td>' +
+            '<td>' + s.medium + '</td>' +
+            '<td>' + s.low + '</td>' +
+            '<td>' + s.findingsCount + '</td>' +
+            '<td>' + statusBadge + '</td>' +
+            '<td style="font-size:0.5rem;white-space:nowrap">' + dateStr + '</td>' +
+            '</tr>'
+        }).join('') +
+        '</tbody></table></div>'
+    } catch (err) {
+      el.innerHTML = '<p class="empty">Error loading scans: ' + escapeHtml(err.message) + '</p>'
+    }
+  }
+
   async function authorizePR(e) {
     const prNumber = e.target.dataset.pr;
     const qrSection = document.getElementById(`qr-section-${prNumber}`);
@@ -762,7 +869,8 @@
       lastScanResult = result;
       const severityClass = result.critical > 0 || result.high > 0 ? 'scan-critical' : result.medium > 0 ? 'scan-warning' : 'scan-clean';
       const severityLabel = result.critical > 0 ? 'CRITICAL' : result.high > 0 ? 'HIGH' : result.medium > 0 ? 'MEDIUM' : 'LOW';
-      var intelHtml = renderIntel(result.intel, prNumber)
+      // Cache intel data for checks drawer
+      if (result.intel) _intelData[prNumber] = result.intel
       scanPanel.innerHTML = `
         <div class="scan-panel-header">
           <div class="threat-score-block ${severityClass}">
@@ -782,7 +890,6 @@
         <div style="text-align:right;margin-bottom:0.75rem;">
           <button class="scan-report-open-btn" data-pr="${prNumber}">FULL REPORT</button>
         </div>
-        ${intelHtml}
         ${result.findings.length > 0 ? `
           <div class="scan-findings-container">
             ${result.findings.map(f => {
@@ -832,13 +939,14 @@
       // Wire Full Report button
       const reportBtn = scanPanel.querySelector('.scan-report-open-btn');
       if (reportBtn) reportBtn.addEventListener('click', () => showScanReport(prNumber));
-      // Wire intel toggles
-      scanPanel.querySelectorAll('.intel-toggle').forEach(function (el) {
-        el.addEventListener('click', function () {
-          var target = document.getElementById(this.dataset.target)
-          if (target) target.style.display = target.style.display === 'none' ? 'block' : 'none'
-        })
-      })
+      // Auto-open checks drawer to show radar chart + intel
+      var checksBtn = document.querySelector('#pr-card-' + prNumber + ' .checks-toggle-btn')
+      if (checksBtn) {
+        var checksSection = document.getElementById('checks-section-' + prNumber)
+        if (checksSection && checksSection.style.display === 'none') {
+          togglePRChecks(prNumber, checksBtn)
+        }
+      }
     } catch (err) {
       console.error('Scan failed for PR #' + prNumber + ':', err)
       scanPanel.innerHTML = `<div class="scan-header scan-critical">Scan failed: ${escapeHtml(err.message)}</div>`;
@@ -901,6 +1009,25 @@
     }
   }
 
+  function inlineMarkdown(text) {
+    if (!text) return ''
+    var s = escapeHtml(text)
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>')
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    s = s.replace(/\*([^*]+)\*/g, '<em>$1</em>')
+    return s
+  }
+
+  function simpleMarkdown(text) {
+    if (!text) return ''
+    var s = inlineMarkdown(text)
+    s = s.replace(/\n\n+/g, '</p><p>')
+    s = s.replace(/\n/g, '<br>')
+    s = s.replace(/<br><\/p>/g, '</p>')
+    s = s.replace(/<p><br>/g, '<p>')
+    return '<p>' + s + '</p>'
+  }
+
   function showAIReport(prNumber) {
     var result = _aiResults[prNumber];
     if (!result) return;
@@ -912,18 +1039,21 @@
     var prEl = document.getElementById('ai-report-pr');
     var body = document.getElementById('ai-report-body');
     if (!modal || !body) return;
+    _currentAiPrNumber = prNumber;
+    var footer = document.getElementById('ai-report-footer');
+    if (footer) footer.style.display = 'flex';
     prEl.textContent = 'PR #' + prNumber;
 
     // Build ANÁLISIS tab content — use AI explanation if available, else fallback to analysis data
     var analysisSummaryHtml = '';
     if (explanation && explanation.summary && explanation.summary.length > 0) {
       analysisSummaryHtml = '<ul class="ai-summary-list">' + explanation.summary.map(function(s) {
-        return '<li>' + escapeHtml(s) + '</li>';
+        return '<li>' + inlineMarkdown(s) + '</li>';
       }).join('') + '</ul>';
     } else if ((result.executiveSummary || []).length > 0) {
       analysisSummaryHtml = '<ul class="ai-summary-list">' + result.executiveSummary.map(function(s) {
         var isWarn = s.indexOf('\u26a0') !== -1 || s.indexOf('manipulation') !== -1;
-        return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + escapeHtml(s) + '</li>';
+        return '<li class="' + (isWarn ? 'ai-warn' : '') + '">' + inlineMarkdown(s) + '</li>';
       }).join('') + '</ul>';
     } else {
       analysisSummaryHtml = '<p class="empty">No summary available.</p>';
@@ -932,13 +1062,9 @@
     // Build ARGUMENTACIÓN tab content
     var argumentationHtml = '';
     if (explanation && explanation.argumentation) {
-      // Convert newlines to paragraphs for readability
-      var paragraphs = explanation.argumentation.split(/\n\n+/).filter(function(p) { return p.trim().length > 0; });
-      argumentationHtml = paragraphs.map(function(para) {
-        return '<p class="ai-arg-text">' + escapeHtml(para.trim()) + '</p>';
-      }).join('');
+      argumentationHtml = '<div class="ai-arg-text">' + simpleMarkdown(explanation.argumentation) + '</div>';
     } else if ((result.reviewerNotes || []).length > 0) {
-      argumentationHtml = '<p class="ai-arg-text">' + result.reviewerNotes.map(function(n) { return escapeHtml(n); }).join('<br>') + '</p>';
+      argumentationHtml = '<div class="ai-arg-text">' + result.reviewerNotes.map(function(n) { return simpleMarkdown(n); }).join('') + '</div>';
     } else {
       argumentationHtml = '<p class="ai-arg-text">El an\u00e1lisis se bas\u00f3 en ' + (result.filesOfInterest || []).length + ' archivos modificados con sus diffs. Revisar los puntos cr\u00edticos listados en la pesta\u00f1a de An\u00e1lisis.</p>';
     }
@@ -949,7 +1075,7 @@
       securityHtml = '<div class="ai-report-subsection">' +
         '<div class="ai-subsection-title">SEGURIDAD</div>' +
         result.securityRelevantChanges.map(function(c) {
-          return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + escapeHtml(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(c.description) + '</p></div></div>';
+          return '<div class="scan-finding-card severity-high"><div class="finding-card-header"><h4 class="finding-title">' + inlineMarkdown(c.title) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + inlineMarkdown(c.description) + '</p></div></div>';
         }).join('') + '</div>';
     }
 
@@ -959,7 +1085,7 @@
         '<div class="ai-subsection-title" style="color:var(--accent-red)">MANIPULACI\u00d3N DETECTADA</div>' +
         (result.instructionManipulation || []).map(function(i) {
           var sevClass = i.severity === 'critical' ? 'high' : i.severity || 'medium';
-          return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + escapeHtml(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + escapeHtml(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
+          return '<div class="scan-finding-card severity-' + sevClass + '"><div class="finding-card-header"><span class="finding-badge badge-' + sevClass + '">' + (i.severity || '').toUpperCase() + '</span><h4 class="finding-title">' + inlineMarkdown(i.type.replace(/_/g, ' ')) + '</h4></div><div class="finding-card-body"><p class="finding-desc">' + inlineMarkdown(i.description) + '</p><div class="finding-location"><span class="location-path">FILE // ' + escapeHtml(i.evidence?.file || '') + '</span></div></div></div>';
         }).join('') + '</div>';
     }
 
@@ -1047,6 +1173,104 @@
       console.error('Scan AI analysis failed:', err);
       status.textContent = 'Failed';
       content.innerHTML = '<p style="color:var(--accent-red);font-size:0.7rem;">Error: ' + escapeHtml(err.message || 'Failed to analyze scan results') + '</p>';
+    }
+  }
+
+  // ----- Radar Chart -----
+  function renderRadarChart(canvas, intel) {
+    if (!canvas || !intel) return
+    var ctx = canvas.getContext('2d')
+    var w = canvas.width, h = canvas.height
+    var cx = w / 2, cy = h / 2
+    var radius = Math.min(cx, cy) - 30
+
+    var moduleKeys = [
+      { key: 'dependencies', label: 'DEPS' },
+      { key: 'endpoints', label: 'ENDPT' },
+      { key: 'capabilities', label: 'CAPS' },
+      { key: 'secrets', label: 'SECRETS' },
+      { key: 'trustBoundaries', label: 'TRUST' },
+      { key: 'auth', label: 'AUTH' },
+      { key: 'crypto', label: 'CRYPTO' },
+      { key: 'permissions', label: 'PERMS' },
+      { key: 'infrastructure', label: 'INFRA' },
+      { key: 'services', label: 'SRVCS' }
+    ]
+    var riskVal = { critical: 1.0, high: 0.75, medium: 0.5, low: 0.25 }
+    var modules = []
+    for (var i = 0; i < moduleKeys.length; i++) {
+      var mk = moduleKeys[i]
+      if (intel[mk.key]) {
+        modules.push({ label: mk.label, value: riskVal[intel[mk.key].risk] || 0.1 })
+      }
+    }
+    if (modules.length < 3) return
+
+    var n = modules.length
+    var angleStep = (2 * Math.PI) / n
+    var startAngle = -Math.PI / 2
+
+    ctx.clearRect(0, 0, w, h)
+
+    // Grid rings
+    ctx.strokeStyle = 'rgba(139,148,158,0.15)'
+    ctx.lineWidth = 0.5
+    for (var level = 1; level <= 4; level++) {
+      var r = (radius / 4) * level
+      ctx.beginPath()
+      for (var j = 0; j <= n; j++) {
+        var angle = startAngle + j * angleStep
+        var px = cx + r * Math.cos(angle)
+        var py = cy + r * Math.sin(angle)
+        if (j === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+      }
+      ctx.closePath()
+      ctx.stroke()
+    }
+
+    // Axes
+    ctx.strokeStyle = 'rgba(139,148,158,0.2)'
+    for (var k = 0; k < n; k++) {
+      var angle = startAngle + k * angleStep
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.lineTo(cx + radius * Math.cos(angle), cy + radius * Math.sin(angle))
+      ctx.stroke()
+    }
+
+    // Data polygon
+    ctx.fillStyle = 'rgba(255,51,51,0.15)'
+    ctx.strokeStyle = '#ff3333'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    for (var m = 0; m < n; m++) {
+      var angle = startAngle + m * angleStep
+      var r = radius * modules[m].value
+      var px = cx + r * Math.cos(angle)
+      var py = cy + r * Math.sin(angle)
+      if (m === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
+    }
+    ctx.closePath()
+    ctx.fill()
+    ctx.stroke()
+
+    // Dots and labels
+    for (var p = 0; p < n; p++) {
+      var angle = startAngle + p * angleStep
+      var r = radius * modules[p].value
+      var px = cx + r * Math.cos(angle)
+      var py = cy + r * Math.sin(angle)
+      ctx.fillStyle = '#ff3333'
+      ctx.beginPath()
+      ctx.arc(px, py, 3, 0, 2 * Math.PI)
+      ctx.fill()
+      var lx = cx + (radius + 16) * Math.cos(angle)
+      var ly = cy + (radius + 16) * Math.sin(angle)
+      ctx.fillStyle = '#8b949e'
+      ctx.font = '9px monospace'
+      ctx.textAlign = Math.cos(angle) >= 0 ? 'left' : 'right'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(modules[p].label, lx, ly)
     }
   }
 
@@ -1984,7 +2208,17 @@
       section.style.display = 'block';
       btn.textContent = 'Hide Checks';
 
-      const data = await api('/api/prs/' + prNumber + '/checks');
+      const [data, scanData] = await Promise.all([
+        api('/api/prs/' + prNumber + '/checks'),
+        api('/api/prs/' + prNumber + '/scan-result').catch(function() { return null })
+      ]);
+      var intel = null;
+      if (scanData && scanData.intel) {
+        intel = scanData.intel;
+        _intelData[prNumber] = intel;
+      } else if (_intelData[prNumber]) {
+        intel = _intelData[prNumber];
+      }
 
       let html = '<div class="checks-table">';
       html += '<table><thead><tr>';
@@ -2055,6 +2289,15 @@
       }
 
       html += '</div>';
+
+      // Render radar chart and intel sections if scan data available
+      if (intel) {
+        html += '<div class="intel-radar-wrapper"><div class="intel-header">SECURITY RADAR</div>';
+        html += '<canvas id="radar-chart-' + prNumber + '" width="280" height="280" class="radar-canvas"></canvas>';
+        html += '</div>';
+        html += renderIntel(intel, prNumber);
+      }
+
       section.innerHTML = html;
       section.querySelectorAll('.files-toggle').forEach(function (el) {
         el.addEventListener('click', function () {
@@ -2138,6 +2381,17 @@
           })
         })
       })
+      // Render radar chart and wire intel toggles in checks drawer
+      if (intel) {
+        var radarCanvas = document.getElementById('radar-chart-' + prNumber)
+        if (radarCanvas) renderRadarChart(radarCanvas, intel)
+        section.querySelectorAll('.intel-toggle').forEach(function (el) {
+          el.addEventListener('click', function () {
+            var target = document.getElementById(this.dataset.target)
+            if (target) target.style.display = target.style.display === 'none' ? 'block' : 'none'
+          })
+        })
+      }
     } catch (err) {
       section.innerHTML = '<p class="empty">Error: ' + escapeHtml(err.message) + '</p>';
       btn.textContent = 'Show Checks';
@@ -2671,6 +2925,48 @@
     }
   }
 
+  // ----- Blacklist -----
+  async function loadBlacklist() {
+    var display = document.getElementById('blacklist-display')
+    if (!display) return
+    try {
+      var list = await api('/api/blacklist')
+      if (!list || list.length === 0) {
+        display.innerHTML = '<p class="empty">No hay PRs en la lista negra.</p>'
+        return
+      }
+      var html = '<div class="blacklist-list">'
+      for (var i = 0; i < list.length; i++) {
+        var item = list[i]
+        html += '<div class="blacklist-item">'
+        html += '<div class="blacklist-item-header">'
+        html += '<span class="pr-number">PR-' + item.prNumber + '</span>'
+        html += '<span class="pr-title">' + escapeHtml(item.title || '') + '</span>'
+        html += '<button class="blacklist-remove-btn" data-pr="' + item.prNumber + '">REMOVE</button>'
+        html += '</div>'
+        html += '<div class="blacklist-item-meta">'
+        html += '<span>Author: ' + escapeHtml(item.author || '—') + '</span>'
+        if (item.reason) html += '<span class="meta-divider">//</span><span>Reason: ' + escapeHtml(item.reason) + '</span>'
+        html += '</div></div>'
+      }
+      html += '</div>'
+      display.innerHTML = html
+      display.querySelectorAll('.blacklist-remove-btn').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var pr = this.dataset.pr
+          try {
+            await api('/api/prs/' + pr + '/blacklist', { method: 'DELETE' })
+            loadBlacklist()
+          } catch (err) {
+            alert('Error removing from blacklist: ' + err.message)
+          }
+        })
+      })
+    } catch (err) {
+      display.innerHTML = '<p class="empty">Error loading blacklist: ' + escapeHtml(err.message) + '</p>'
+    }
+  }
+
   // Onboarding Checklist
   async function loadSetupChecklist() {
     const el = document.getElementById('onboarding-checklist')
@@ -3067,22 +3363,30 @@
 <li>The PR is authorized and merged.</li></ol>
 <p><b>Rejection:</b> Click REJECT. You must re-authenticate with your passkey (re-assertion modal). Then the PR is marked as rejected.</p></div>
 
-<div class="help-section"><div class="help-section-title">03 // History</div>
+<div class="help-section"><div class="help-section-title">03 // Scan History</div>
+<p>Shows all scan results over time. Features:</p>
+<ul><li>Filters by date range and minimum risk level</li>
+<li>Metric pills: total scans, average risk, critical/high/clean counts</li>
+<li>Risk score timeline bar chart (svg)</li>
+<li>Sortable table with PR number, title, risk score, finding counts, auth status, and date</li></ul>
+<p>Click a PR number to jump back to the PR section.</p></div>
+
+<div class="help-section"><div class="help-section-title">04 // History</div>
 <p>Shows all PRs that have been authorized or rejected, with timestamps and the device name that performed the action.</p></div>
 
-<div class="help-section"><div class="help-section-title">04 // Registered Devices</div>
+<div class="help-section"><div class="help-section-title">05 // Registered Devices</div>
 <p>Lists all passkeys (WebAuthn credentials) registered on the server. Each device has a name, credential ID, and creation date. Devices can be revoked individually.</p>
 <p><b>Registering a new device:</b> Authenticate first, then go to Devices section and use the Register form. The new device must be physically present (WebAuthn create ceremony).</p>
 <p><b>First device (enrollment):</b> When no devices exist, the server shows an enrollment form. You need the enrollment token from the server console. This is a one-time setup step.</p></div>
 
-<div class="help-section"><div class="help-section-title">05 // Lockdown</div>
+<div class="help-section"><div class="help-section-title">06 // Lockdown</div>
 <p>Emergency stop. Activating lockdown:</p>
 <ul><li>All pending authorizations are rejected</li>
 <li>No new merges can be authorized</li>
 <li>The lockdown banner appears at the top of the dashboard</li></ul>
 <p>Deactivate lockdown with the same button (requires re-authentication).</p></div>
 
-<div class="help-section"><div class="help-section-title">06 // Auth Mode</div>
+<div class="help-section"><div class="help-section-title">07 // Auth Mode</div>
 
 <p>Two authentication modes for GitHub. GitHub App is recommended for production; PAT is simpler for testing.</p>
 
@@ -3109,20 +3413,20 @@
 
 <p><b>Single-repo limit:</b> Sentinel Oracle monitors exactly one repository — the one configured in <code>githubOwner</code> / <code>githubRepo</code>. Even if the GitHub App is installed on multiple repos, only the configured repo is polled. To protect multiple repos, run multiple instances on different ports.</p></div>
 
-<div class="help-section"><div class="help-section-title">07 // Branch Protection</div>
+<div class="help-section"><div class="help-section-title">08 // Branch Protection</div>
 <p>Verifies GitHub branch protection rules for the target branch. Shows required status checks, required reviews, and whether the branch is protected. Fetches data live from the GitHub API.</p></div>
 
-<div class="help-section"><div class="help-section-title">08 // Metrics</div>
+<div class="help-section"><div class="help-section-title">09 // Metrics</div>
 <p>Operational telemetry:</p>
 <ul><li>Recent merge times per PR</li>
 <li>Author statistics (number of PRs, average wait)</li>
 <li>Total counts and averages</li></ul>
 <p>Metrics are accumulated from authorization events. Auto-refreshes every 60 seconds.</p></div>
 
-<div class="help-section"><div class="help-section-title">09 // Audit Log</div>
+<div class="help-section"><div class="help-section-title">10 // Audit Log</div>
 <p>Time-ordered event log of all system activity: authorizations, rejections, lockdown events, device registrations and revocations, config changes, errors. Each entry has a timestamp, action type, and detail. Auto-refreshes every 30 seconds.</p></div>
 
-<div class="help-section"><div class="help-section-title">10 // Settings</div>
+<div class="help-section"><div class="help-section-title">11 // Settings</div>
 <p><b>GitHub Integration:</b> Configure repository owner, name, authentication mode (PAT or GitHub App), webhook secret, and scanner toggle. Use the Setup Wizard for guided configuration at /setup.html.</p>
 <p><b>Required GitHub permissions by mode:</b></p>
 <ul>
@@ -3134,10 +3438,10 @@
 <p><b>Webhook:</b> GitHub webhook receiver endpoint POST /api/webhook/github. Configure the webhook secret to verify payload authenticity.</p>
 <p><b>Configuration file:</b> All settings persist in ~/.sentinel-oracle/config.json (JSON format, file mode 0600). Edit directly or use the API endpoints.</p></div>
 
-<div class="help-section"><div class="help-section-title">11 // Token Inspector</div>
+<div class="help-section"><div class="help-section-title">12 // Token Inspector</div>
 <p>Shows the current GitHub token used for API calls: type (PAT vs installation token), scopes/permissions, expiration, and risk assessment. The full inventory view at /inventory.html provides deeper analysis including drift detection and token scanning.</p></div>
 
-<div class="help-section"><div class="help-section-title">12 // System Setup</div>
+<div class="help-section"><div class="help-section-title">13 // System Setup</div>
 <p><b>Fresh install:</b></p>
 <ol><li>Start the server: npm start (or node dist/index.js)</li>
 <li>If GitHub is not configured, the server starts in setup mode.</li>
@@ -3168,7 +3472,7 @@
 <p><b>Configuration file location:</b> ~/.sentinel-oracle/config.json — all user settings persist here.</p>
 <p><b>Data directory:</b> ~/.sentinel-oracle/</p></div>
 
-<div class="help-section"><div class="help-section-title">13 // API Endpoints</div>
+<div class="help-section"><div class="help-section-title">14 // API Endpoints</div>
 <table class="help-table"><tr><th>Method</th><th>Path</th><th>Auth</th><th>Description</th></tr>
 <tr><td>GET</td><td>/api/status</td><td>None</td><td>System status, device count, lockdown state, auth mode</td></tr>
 <tr><td>GET</td><td>/api/config/github-status</td><td>None*</td><td>GitHub configuration state</td></tr>
@@ -3189,9 +3493,9 @@
 <tr><td>POST</td><td>/api/webhook/github</td><td>HMAC</td><td>GitHub webhook receiver</td></tr></table>
 <p><i>* Config endpoints are unauthenticated when GitHub is not configured (setup mode), session-authenticated otherwise.</i></p></div>
 
-<div class="help-section"><div class="help-section-title">14 // Policies and Privacy</div>
+<div class="help-section"><div class="help-section-title">15 // Policies and Privacy</div>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.1 // Data Collection and Storage</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.1 // Data Collection and Storage</div>
 <p>Sentinel Oracle stores the following data on the server filesystem under <code>~/.sentinel-oracle/</code>:</p>
 <ul>
 <li><b>SQLite database (data.db):</b> PR metadata, audit log entries, registered WebAuthn credential IDs and device names, session records, configuration key-value store, and token scan results.</li>
@@ -3203,17 +3507,17 @@
 </ul>
 <p>No data is transmitted to third parties. All API communication occurs between the browser and the server over the configured network interface. GitHub API calls are made exclusively to api.github.com using the configured credentials.</p>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.2 // Credential Handling</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.2 // Credential Handling</div>
 <p>WebAuthn credential IDs are stored in the database for credential verification. Private keys never leave the authenticator device (passkey, security key, or platform authenticator). The server stores only the credential public key and credential ID. Biometric data (fingerprint, face scan) never reaches the server — it is processed entirely by the authenticator.</p>
 <p>GitHub tokens (PAT or installation tokens) are encrypted at rest using AES-256. The encryption key is auto-generated on first launch and stored separately from the database. Decrypted tokens are held in memory only during active API calls and are never written to disk unencrypted.</p>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.3 // Session Management</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.3 // Session Management</div>
 <p>Session cookies are signed with the server's cookie secret to prevent tampering. Sessions expire after a configurable idle timeout (default 24 hours). Session data is stored in the local SQLite database and is never shared across server instances. Clearing browser cookies or logging out destroys the session reference on both client and server.</p>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.4 // Audit Logging</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.4 // Audit Logging</div>
 <p>All authorization events, device registrations, revocations, lockdown toggles, configuration changes, and system errors are recorded in the audit log with an ISO 8601 timestamp. Audit log entries are immutable — no mechanism exists to delete or alter entries once written. The audit log is stored in the local SQLite database and is viewable through the dashboard Audit section.</p>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.5 // Security Responsibilities</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.5 // Security Responsibilities</div>
 <p>The operator bears full responsibility for:</p>
 <ul>
 <li>Securing the server's filesystem and restricting access to the <code>~/.sentinel-oracle/</code> directory.</li>
@@ -3225,10 +3529,10 @@
 <li>Using HTTPS in production (server auto-generates self-signed certs; for production, replace with a CA-signed certificate or place behind a TLS-terminating reverse proxy).</li>
 </ul>
 
-<div class="help-section-title" style="font-size:13px;margin-top:12px">14.6 // Disclaimer</div>
+<div class="help-section-title" style="font-size:13px;margin-top:12px">15.6 // Disclaimer</div>
 <p>Sentinel Oracle is provided as-is without warranty of any kind, express or implied. The software is a security tool that assists in merge authorization workflows but does not guarantee that every unauthorized merge will be prevented. The operator should implement defense in depth, including but not limited to branch protection rules, required status checks, code review policies, and regular security audits. The authors and contributors assume no liability for damages arising from the use or misuse of this software.</p></div>
 
-<div class="help-section"><div class="help-section-title">15 // Project Structure</div>
+<div class="help-section"><div class="help-section-title">16 // Project Structure</div>
 <pre style="font-size:0.62rem;line-height:1.3;color:var(--text-dark);overflow-x:auto;white-space:pre;padding:0.5rem;background:var(--bg-primary);border:1px solid var(--border-color);">
 sentinel-oracle/
 ├── public/                  # Frontend static files (served by Express)
@@ -3299,7 +3603,7 @@ sentinel-oracle/
 <li><code>node scripts/setup.cjs</code> — interactive config.json generator</li>
 </ul></div>
 
-<div class="help-section"><div class="help-section-title">16 // Security Scanner</div>
+<div class="help-section"><div class="help-section-title">17 // Security Scanner</div>
 <p>The PR diff scanner analyzes code changes across 13 intel modules. Scans are deduplicated by SHA-256 of PR sha + file metadata; identical code is never scanned twice.</p>
 <p><b>Intel Modules:</b></p>
 <ul>
@@ -3320,13 +3624,13 @@ sentinel-oracle/
 <p><b>Auto Scan:</b> Toggle in Settings. When ON, all PRs auto-scan on queue refresh. Manual SCAN button when OFF.</p>
 <p><b>Severity levels:</b> Critical (&gt;=10), High (&gt;=7), Medium (&gt;=4), Low (&gt;=1), None (0).</p></div>
 
-<div class="help-section"><div class="help-section-title">17 // CI Integrity Engine</div>
+<div class="help-section"><div class="help-section-title">18 // CI Integrity Engine</div>
 <p>Monitors GitHub Actions workflows for anomalous behavior using MAD-based z-scores across three time windows (7d, 30d, full history).</p>
 <p><b>Detection signals:</b> Step redistribution, cache camouflage, fingerprint churn, synthetic telemetry, evasion signals (YAML anchors, merge tags, template variables), cross-PR campaign detection with weighted scoring.</p>
 <p><b>Multi-window baselines:</b> Each check computed independently for 7d/30d/full; worst z-score across all windows determines anomaly. Trusted baselines only train on PRs with <code>trusted: true</code>.</p>
 <p><b>Integrity Score:</b> Starts at 100. Critical=-25, High=-15, Medium=-5, Low=-1, z&gt;10=-40, z&gt;5=-20, missing sensor=-10.</p></div>
 
-<div class="help-section"><div class="help-section-title">18 // Trust Drift Detection</div>
+<div class="help-section"><div class="help-section-title">19 // Trust Drift Detection</div>
 <p>Monitors GitHub organization changes that weaken security posture. 7 weighted signals:</p>
 <ul>
 <li><b>Collaborator (+2):</b> New users with write/admin access</li>
@@ -3339,13 +3643,13 @@ sentinel-oracle/
 </ul>
 <p><b>Thresholds:</b> &gt;=10 critical, &gt;=6 high, &gt;=3 medium.</p></div>
 
-<div class="help-section"><div class="help-section-title">19 // Security DNA</div>
+<div class="help-section"><div class="help-section-title">20 // Security DNA</div>
 <p>A capability aggregator that reads from existing IntelReport modules to produce a 14-dimension repository fingerprint. It is NOT a new detector — it observes, analyzes, and summarizes.</p>
 <p><b>Dimensions:</b> filesystem, network, shell, dynamicCode, database, crypto, secrets, runners, environments, collaborators, permissionEscalations, newDomains, newIntegrations, workflowCount.</p>
 <p>View at the Security DNA panel under SECURITY OPERATIONS. Snapshots persisted in SQLite and auto-generated after every scan.</p>
 <p><b>API:</b> <code>GET /api/dna</code> returns current snapshot, history, per-field changes, summary statement, and count.</p></div>
 
-<div class="help-section"><div class="help-section-title">20 // Documentation</div>
+<div class="help-section"><div class="help-section-title">21 // Documentation</div>
 <p>Full documentation is available in the <code>docs/</code> directory:</p>
 <ul>
 <li><b>docs/architecture.md</b> — System architecture, module dependency graph, data flow, database schema</li>
@@ -3390,6 +3694,8 @@ sentinel-oracle/
           case 'about-section': loadAboutSentinel(); break
           case 'auth-section': loadAuthSection(); break
           case 'help-section': loadHelp(); break
+          case 'scans-section': loadScans(); break
+          case 'blacklist-section': loadBlacklist(); break
         }
       }
     }
@@ -3515,7 +3821,53 @@ sentinel-oracle/
     document.getElementById('ai-report-overlay').addEventListener('click', function () {
       aiReportModal.style.display = 'none'
     })
+    // Blacklist button in AI report modal
+    var aiBlacklistBtn = document.getElementById('ai-report-blacklist-btn')
+    if (aiBlacklistBtn) {
+      aiBlacklistBtn.addEventListener('click', async function () {
+        if (!_currentAiPrNumber) return
+        var reason = prompt('Razón para añadir a lista negra:')
+        if (!reason) return
+        try {
+          await api('/api/prs/' + _currentAiPrNumber + '/blacklist', {
+            method: 'POST',
+            body: JSON.stringify({ reason: reason })
+          })
+          alert('PR #' + _currentAiPrNumber + ' añadido a lista negra')
+          aiReportModal.style.display = 'none'
+          if (panelsLoaded['blacklist-section']) loadBlacklist()
+        } catch (err) {
+          alert('Error: ' + err.message)
+        }
+      })
+    }
+    // Save AI report as JSON download
+    var aiSaveBtn = document.getElementById('ai-report-save-btn')
+    if (aiSaveBtn) {
+      aiSaveBtn.addEventListener('click', function () {
+        if (!_currentAiPrNumber) return
+        var result = _aiResults[_currentAiPrNumber]
+        var explanation = _aiExplanations[_currentAiPrNumber]
+        var data = { analysis: result, explanation: explanation, prNumber: _currentAiPrNumber, savedAt: new Date().toISOString() }
+        var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        var url = URL.createObjectURL(blob)
+        var a = document.createElement('a')
+        a.href = url
+        a.download = 'sentinel-ai-report-pr-' + _currentAiPrNumber + '.json'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      })
+    }
   }
+
+  // Scan filter button
+  document.getElementById('scan-filter-apply')?.addEventListener('click', loadScans)
+  // Also re-apply on enter key in date inputs
+  document.querySelectorAll('#scan-filter-from, #scan-filter-to').forEach(function(el) {
+    el.addEventListener('change', loadScans)
+  })
 
   loadAudit();
   panelsLoaded['audit-section'] = true

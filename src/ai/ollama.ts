@@ -17,7 +17,7 @@ interface OllamaGenerateResponse {
 }
 
 export async function ollamaGenerate(model: string, prompt: string, systemPrompt?: string): Promise<string> {
-  const body: Record<string, unknown> = { model, prompt, stream: false }
+  const body: Record<string, unknown> = { model, prompt, stream: false, keep_alive: '10m' }
   if (systemPrompt) body.system = systemPrompt
 
   const res = await fetch(`${OLLAMA_HOST}/api/generate`, {

@@ -229,6 +229,7 @@ export interface SecurityDelta {
   infraDrift: boolean
   secretExposure: boolean
   summary: string
+  modules: { name: string; risk: IntelRisk }[]
 }
 
 export interface CapabilitySnapshot {
