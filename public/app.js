@@ -933,6 +933,48 @@
             <p>Static analyzer reports 0 policy breaches or anomalies for commit payload.</p>
           </div>
         `}
+        ${result.buildIntel ? `
+          <div class="build-intel-section" style="margin-top:1rem;border:1px solid var(--border);border-radius:6px;padding:0.75rem;background:var(--bg-card);">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">
+              <span style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-bright);text-transform:uppercase;letter-spacing:0.1em;">Build Intelligence</span>
+              <span class="badge-${result.buildIntel.risk}" style="font-size:0.6rem;padding:0.15rem 0.5rem;border-radius:3px;font-family:var(--font-mono);text-transform:uppercase;">${result.buildIntel.verdict} — Trust ${result.buildIntel.trustScore}/100</span>
+            </div>
+            <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.5rem;">${escapeHtml(result.buildIntel.summary)}</div>
+            ${result.buildIntel.buildTools.length > 0 ? `
+              <div style="margin-top:0.4rem;">
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Build Tools</span>
+                <div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.2rem;">
+                  ${result.buildIntel.buildTools.map(t => `<span style="font-size:0.55rem;padding:0.1rem 0.4rem;border-radius:3px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-main);">${escapeHtml(t.tool)} <span style="color:var(--text-dark);">(${t.file})</span></span>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+            ${result.buildIntel.supplyChainSignals.length > 0 ? `
+              <div style="margin-top:0.4rem;">
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Supply Chain Signals (${result.buildIntel.supplyChainSignals.length})</span>
+                <div style="margin-top:0.2rem;">
+                  ${result.buildIntel.supplyChainSignals.slice(0, 5).map(s => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;border-bottom:1px solid var(--border);"><span class="badge-${s.risk}" style="font-size:0.5rem;padding:0.05rem 0.3rem;border-radius:2px;margin-right:0.3rem;">${s.risk.toUpperCase()}</span>${escapeHtml(s.type)} <span style="color:var(--text-dark);">in ${escapeHtml(s.file)}</span></div>`).join('')}
+                  ${result.buildIntel.supplyChainSignals.length > 5 ? `<div style="font-size:0.55rem;color:var(--text-dark);margin-top:0.2rem;">+ ${result.buildIntel.supplyChainSignals.length - 5} more</div>` : ''}
+                </div>
+              </div>
+            ` : ''}
+            ${result.buildIntel.ciChanges.length > 0 ? `
+              <div style="margin-top:0.4rem;">
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">CI/CD Changes</span>
+                <div style="margin-top:0.2rem;">
+                  ${result.buildIntel.ciChanges.map(c => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;"><span class="badge-${c.risk}" style="font-size:0.5rem;padding:0.05rem 0.3rem;border-radius:2px;margin-right:0.3rem;">${c.risk.toUpperCase()}</span>${escapeHtml(c.file)} <span style="color:var(--text-dark);">(${c.changeType})</span> — ${c.signals.join(', ')}</div>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+            ${result.buildIntel.processIndicators.length > 0 ? `
+              <div style="margin-top:0.4rem;">
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Process Execution</span>
+                <div style="margin-top:0.2rem;">
+                  ${result.buildIntel.processIndicators.map(p => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;">${escapeHtml(p)}</div>`).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
       `;
       scanPanel.classList.add('active');
       btn.textContent = 'Re-scan';
@@ -1670,6 +1712,84 @@
           }).join('')}
         </div>
       </div>
+
+      ${result.buildIntel ? `
+      <!-- Build Intelligence -->
+      <div class="report-section">
+        <div class="report-section-title">Build Intelligence</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.75rem;margin-bottom:1rem;">
+          <div class="report-metric-cell">
+            <span class="report-metric-label">Verdict</span>
+            <span class="report-metric-value summary-${result.buildIntel.verdict === 'CRITICAL' ? 'critical' : result.buildIntel.verdict === 'REVIEW' ? 'high' : 'low'}">${result.buildIntel.verdict}</span>
+          </div>
+          <div class="report-metric-cell">
+            <span class="report-metric-label">Trust Score</span>
+            <span class="report-metric-value">${result.buildIntel.trustScore}/100</span>
+          </div>
+          <div class="report-metric-cell">
+            <span class="report-metric-label">Risk Level</span>
+            <span class="report-metric-value summary-${result.buildIntel.risk === 'critical' ? 'critical' : result.buildIntel.risk === 'high' ? 'high' : 'low'}">${result.buildIntel.risk.toUpperCase()}</span>
+          </div>
+        </div>
+        <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.75rem;">${escapeHtml(result.buildIntel.summary)}</div>
+        ${result.buildIntel.buildTools.length > 0 ? `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Tools</div>
+            <table class="report-findings-table">
+              <thead><tr><th>Tool</th><th>File</th><th>Detail</th><th>Risk</th></tr></thead>
+              <tbody>
+                ${result.buildIntel.buildTools.map(t => `<tr><td>${escapeHtml(t.tool)}</td><td>${escapeHtml(t.file)}</td><td>${escapeHtml(t.detail)}</td><td><span class="report-finding-severity-badge ${t.risk}">${t.risk.toUpperCase()}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${result.buildIntel.buildScripts.length > 0 ? `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Scripts (${result.buildIntel.buildScripts.length})</div>
+            <table class="report-findings-table">
+              <thead><tr><th>Script</th><th>Command</th><th>Detail</th><th>Risk</th></tr></thead>
+              <tbody>
+                ${result.buildIntel.buildScripts.map(s => `<tr><td>${escapeHtml(s.script)}</td><td><code style="font-size:0.55rem;background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:3px;">${escapeHtml(s.command)}</code></td><td>${escapeHtml(s.detail)}</td><td><span class="report-finding-severity-badge ${s.risk}">${s.risk.toUpperCase()}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${result.buildIntel.supplyChainSignals.length > 0 ? `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Supply Chain Signals (${result.buildIntel.supplyChainSignals.length})</div>
+            <table class="report-findings-table">
+              <thead><tr><th>Type</th><th>File</th><th>Detail</th><th>Risk</th></tr></thead>
+              <tbody>
+                ${result.buildIntel.supplyChainSignals.map(s => `<tr><td>${escapeHtml(s.type)}</td><td>${escapeHtml(s.file)}</td><td>${escapeHtml(s.detail)}</td><td><span class="report-finding-severity-badge ${s.risk}">${s.risk.toUpperCase()}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${result.buildIntel.ciChanges.length > 0 ? `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">CI/CD Changes (${result.buildIntel.ciChanges.length})</div>
+            <table class="report-findings-table">
+              <thead><tr><th>File</th><th>Type</th><th>Signals</th><th>Risk</th></tr></thead>
+              <tbody>
+                ${result.buildIntel.ciChanges.map(c => `<tr><td>${escapeHtml(c.file)}</td><td>${c.changeType}</td><td style="font-size:0.55rem;">${c.signals.map(s => escapeHtml(s)).join('<br>')}</td><td><span class="report-finding-severity-badge ${c.risk}">${c.risk.toUpperCase()}</span></td></tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        ` : ''}
+        ${result.buildIntel.processIndicators.length > 0 ? `
+          <div style="margin-bottom:0.75rem;">
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Process Execution Indicators</div>
+            <div style="font-size:0.55rem;color:var(--text-main);">${result.buildIntel.processIndicators.map(p => `<div style="padding:0.1rem 0;border-bottom:1px solid var(--border);">${escapeHtml(p)}</div>`).join('')}</div>
+          </div>
+        ` : ''}
+        ${result.buildIntel.networkIndicators.length > 0 ? `
+          <div>
+            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Network Indicators</div>
+            <div style="font-size:0.55rem;color:var(--text-main);">${result.buildIntel.networkIndicators.map(n => `<div style="padding:0.1rem 0;border-bottom:1px solid var(--border);">${escapeHtml(n)}</div>`).join('')}</div>
+          </div>
+        ` : ''}
+      </div>
+      ` : ''}
 
       <!-- Detailed Findings -->
       <div class="report-section">
