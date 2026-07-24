@@ -939,37 +939,33 @@
               <span style="font-family:var(--font-mono);font-size:0.65rem;color:var(--text-bright);text-transform:uppercase;letter-spacing:0.1em;">Build Intelligence</span>
               <span class="badge-${result.buildIntel.risk}" style="font-size:0.6rem;padding:0.15rem 0.5rem;border-radius:3px;font-family:var(--font-mono);text-transform:uppercase;">${result.buildIntel.verdict} — Trust ${result.buildIntel.trustScore}/100</span>
             </div>
-            <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.5rem;">${escapeHtml(result.buildIntel.summary)}</div>
-            ${result.buildIntel.buildTools.length > 0 ? `
+            <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.5rem;">${escapeHtml(result.buildIntel.story.narrative)}</div>
+            <div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.5rem;">
+              ${result.buildIntel.trust.dimensions.map(d => `<div style="flex:1;min-width:80px;font-size:0.55rem;padding:0.3rem;border-radius:4px;background:var(--bg-input);border:1px solid var(--border);text-align:center;"><div style="color:var(--text-dark);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.15rem;">${d.name.replace(/_/g, ' ')}</div><div style="font-size:0.7rem;font-weight:600;color:${d.score >= 70 ? 'var(--accent-green)' : d.score >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)'};">${d.score}/100</div></div>`).join('')}
+            </div>
+            ${result.buildIntel.buildSurface.tools.length > 0 ? `
               <div style="margin-top:0.4rem;">
-                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Build Tools</span>
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Build Surface — Tools</span>
                 <div style="display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.2rem;">
-                  ${result.buildIntel.buildTools.map(t => `<span style="font-size:0.55rem;padding:0.1rem 0.4rem;border-radius:3px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-main);">${escapeHtml(t.tool)} <span style="color:var(--text-dark);">(${t.file})</span></span>`).join('')}
+                  ${result.buildIntel.buildSurface.tools.map(t => `<span style="font-size:0.55rem;padding:0.1rem 0.4rem;border-radius:3px;background:var(--bg-input);border:1px solid var(--border);color:var(--text-main);">${escapeHtml(t.name)} <span style="color:var(--text-dark);">(${escapeHtml(t.file)})</span></span>`).join('')}
                 </div>
               </div>
             ` : ''}
-            ${result.buildIntel.supplyChainSignals.length > 0 ? `
+            ${result.buildIntel.buildChain.deviations.length > 0 ? `
               <div style="margin-top:0.4rem;">
-                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Supply Chain Signals (${result.buildIntel.supplyChainSignals.length})</span>
+                <span style="font-size:0.55rem;color:var(--accent-orange);text-transform:uppercase;font-family:var(--font-mono);">Chain Deviations (${result.buildIntel.buildChain.deviations.length})</span>
                 <div style="margin-top:0.2rem;">
-                  ${result.buildIntel.supplyChainSignals.slice(0, 5).map(s => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;border-bottom:1px solid var(--border);"><span class="badge-${s.risk}" style="font-size:0.5rem;padding:0.05rem 0.3rem;border-radius:2px;margin-right:0.3rem;">${s.risk.toUpperCase()}</span>${escapeHtml(s.type)} <span style="color:var(--text-dark);">in ${escapeHtml(s.file)}</span></div>`).join('')}
-                  ${result.buildIntel.supplyChainSignals.length > 5 ? `<div style="font-size:0.55rem;color:var(--text-dark);margin-top:0.2rem;">+ ${result.buildIntel.supplyChainSignals.length - 5} more</div>` : ''}
+                  ${result.buildIntel.buildChain.deviations.slice(0, 3).map(d => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;border-bottom:1px solid var(--border);">${escapeHtml(d)}</div>`).join('')}
+                  ${result.buildIntel.buildChain.deviations.length > 3 ? `<div style="font-size:0.55rem;color:var(--text-dark);margin-top:0.2rem;">+ ${result.buildIntel.buildChain.deviations.length - 3} more</div>` : ''}
                 </div>
               </div>
             ` : ''}
-            ${result.buildIntel.ciChanges.length > 0 ? `
+            ${result.buildIntel.story.events.length > 0 ? `
               <div style="margin-top:0.4rem;">
-                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">CI/CD Changes</span>
+                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Build Story (${result.buildIntel.story.events.length} event${result.buildIntel.story.events.length !== 1 ? 's' : ''})</span>
                 <div style="margin-top:0.2rem;">
-                  ${result.buildIntel.ciChanges.map(c => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;"><span class="badge-${c.risk}" style="font-size:0.5rem;padding:0.05rem 0.3rem;border-radius:2px;margin-right:0.3rem;">${c.risk.toUpperCase()}</span>${escapeHtml(c.file)} <span style="color:var(--text-dark);">(${c.changeType})</span> — ${c.signals.join(', ')}</div>`).join('')}
-                </div>
-              </div>
-            ` : ''}
-            ${result.buildIntel.processIndicators.length > 0 ? `
-              <div style="margin-top:0.4rem;">
-                <span style="font-size:0.55rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);">Process Execution</span>
-                <div style="margin-top:0.2rem;">
-                  ${result.buildIntel.processIndicators.map(p => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;">${escapeHtml(p)}</div>`).join('')}
+                  ${result.buildIntel.story.events.slice(0, 4).map(e => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;border-bottom:1px solid var(--border);"><span class="badge-${e.severity === 'critical' ? 'critical' : e.severity === 'high' ? 'high' : e.severity === 'warning' ? 'warning' : 'low'}" style="font-size:0.5rem;padding:0.05rem 0.3rem;border-radius:2px;margin-right:0.3rem;">${e.severity.toUpperCase()}</span>${escapeHtml(e.label)}</div>`).join('')}
+                  ${result.buildIntel.story.events.length > 4 ? `<div style="font-size:0.55rem;color:var(--text-dark);margin-top:0.2rem;">+ ${result.buildIntel.story.events.length - 4} more</div>` : ''}
                 </div>
               </div>
             ` : ''}
@@ -1728,65 +1724,97 @@
           </div>
           <div class="report-metric-cell">
             <span class="report-metric-label">Risk Level</span>
-            <span class="report-metric-value summary-${result.buildIntel.risk === 'critical' ? 'critical' : result.buildIntel.risk === 'high' ? 'high' : 'low'}">${result.buildIntel.risk.toUpperCase()}</span>
+            <span class="report-metric-value summary-${result.buildIntel.risk === 'high' ? 'high' : 'low'}">${result.buildIntel.risk.toUpperCase()}</span>
           </div>
         </div>
-        <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.75rem;">${escapeHtml(result.buildIntel.summary)}</div>
-        ${result.buildIntel.buildTools.length > 0 ? `
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Tools</div>
-            <table class="report-findings-table">
-              <thead><tr><th>Tool</th><th>File</th><th>Detail</th><th>Risk</th></tr></thead>
-              <tbody>
-                ${result.buildIntel.buildTools.map(t => `<tr><td>${escapeHtml(t.tool)}</td><td>${escapeHtml(t.file)}</td><td>${escapeHtml(t.detail)}</td><td><span class="report-finding-severity-badge ${t.risk}">${t.risk.toUpperCase()}</span></td></tr>`).join('')}
-              </tbody>
-            </table>
+        <div style="font-size:0.6rem;color:var(--text-main);margin-bottom:0.75rem;">${escapeHtml(result.buildIntel.story.narrative)}</div>
+
+        <!-- Trust Dimensions -->
+        <div style="margin-bottom:1rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Trust Dimensions</div>
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:0.5rem;">
+            ${result.buildIntel.trust.dimensions.map(d => `
+              <div style="text-align:center;padding:0.5rem;border-radius:4px;border:1px solid var(--border);background:var(--bg-input);">
+                <div style="font-size:0.5rem;color:var(--text-dark);text-transform:uppercase;margin-bottom:0.2rem;">${d.name.replace(/_/g, ' ')}</div>
+                <div style="font-size:0.8rem;font-weight:700;color:${d.score >= 70 ? 'var(--accent-green)' : d.score >= 50 ? 'var(--accent-orange)' : 'var(--accent-red)'};">${d.score}</div>
+                <div style="font-size:0.45rem;color:var(--text-dark);">weight ${(d.weight * 100).toFixed(0)}%</div>
+              </div>
+            `).join('')}
           </div>
+        </div>
+
+        ${result.buildIntel.buildSurface.tools.length > 0 ? `
+        <div style="margin-bottom:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Surface — Tools (${result.buildIntel.buildSurface.tools.length})</div>
+          <table class="report-findings-table">
+            <thead><tr><th>Tool</th><th>File</th><th>Risk</th><th>Evidence</th></tr></thead>
+            <tbody>
+              ${result.buildIntel.buildSurface.tools.map(t => `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.file)}</td><td><span class="report-finding-severity-badge ${t.risk}">${t.risk.toUpperCase()}</span></td><td style="font-size:0.5rem;">${t.evidence.map(e => escapeHtml(e)).join('<br>')}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
         ` : ''}
-        ${result.buildIntel.buildScripts.length > 0 ? `
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Scripts (${result.buildIntel.buildScripts.length})</div>
-            <table class="report-findings-table">
-              <thead><tr><th>Script</th><th>Command</th><th>Detail</th><th>Risk</th></tr></thead>
-              <tbody>
-                ${result.buildIntel.buildScripts.map(s => `<tr><td>${escapeHtml(s.script)}</td><td><code style="font-size:0.55rem;background:var(--bg-input);padding:0.1rem 0.3rem;border-radius:3px;">${escapeHtml(s.command)}</code></td><td>${escapeHtml(s.detail)}</td><td><span class="report-finding-severity-badge ${s.risk}">${s.risk.toUpperCase()}</span></td></tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
+
+        ${result.buildIntel.buildSurface.scripts.length > 0 ? `
+        <div style="margin-bottom:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Surface — Scripts (${result.buildIntel.buildSurface.scripts.length})</div>
+          <table class="report-findings-table">
+            <thead><tr><th>Script</th><th>Command</th><th>Shell</th><th>Network</th><th>Risk</th></tr></thead>
+            <tbody>
+              ${result.buildIntel.buildSurface.scripts.map(s => `<tr><td>${escapeHtml(s.name)}</td><td><code style="font-size:0.5rem;">${escapeHtml(s.command)}</code></td><td>${s.containsShellExec ? '⚠ YES' : 'no'}</td><td>${s.containsNetwork ? '⚠ YES' : 'no'}</td><td><span class="report-finding-severity-badge ${s.risk}">${s.risk.toUpperCase()}</span></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
         ` : ''}
-        ${result.buildIntel.supplyChainSignals.length > 0 ? `
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Supply Chain Signals (${result.buildIntel.supplyChainSignals.length})</div>
-            <table class="report-findings-table">
-              <thead><tr><th>Type</th><th>File</th><th>Detail</th><th>Risk</th></tr></thead>
-              <tbody>
-                ${result.buildIntel.supplyChainSignals.map(s => `<tr><td>${escapeHtml(s.type)}</td><td>${escapeHtml(s.file)}</td><td>${escapeHtml(s.detail)}</td><td><span class="report-finding-severity-badge ${s.risk}">${s.risk.toUpperCase()}</span></td></tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
+
+        ${result.buildIntel.buildSurface.dependencies.length > 0 ? `
+        <div style="margin-bottom:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Surface — Dependencies (${result.buildIntel.buildSurface.dependencies.length})</div>
+          <table class="report-findings-table">
+            <thead><tr><th>Package</th><th>Version</th><th>Change</th><th>Risk</th></tr></thead>
+            <tbody>
+              ${result.buildIntel.buildSurface.dependencies.map(d => `<tr><td>${escapeHtml(d.name)}</td><td>${escapeHtml(d.version || '?')}</td><td>${d.changeType}</td><td><span class="report-finding-severity-badge ${d.risk}">${d.risk.toUpperCase()}</span></td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
         ` : ''}
-        ${result.buildIntel.ciChanges.length > 0 ? `
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">CI/CD Changes (${result.buildIntel.ciChanges.length})</div>
-            <table class="report-findings-table">
-              <thead><tr><th>File</th><th>Type</th><th>Signals</th><th>Risk</th></tr></thead>
-              <tbody>
-                ${result.buildIntel.ciChanges.map(c => `<tr><td>${escapeHtml(c.file)}</td><td>${c.changeType}</td><td style="font-size:0.55rem;">${c.signals.map(s => escapeHtml(s)).join('<br>')}</td><td><span class="report-finding-severity-badge ${c.risk}">${c.risk.toUpperCase()}</span></td></tr>`).join('')}
-              </tbody>
-            </table>
-          </div>
+
+        ${result.buildIntel.buildChain.steps.length > 0 ? `
+        <div style="margin-bottom:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Chain</div>
+          <div style="font-size:0.55rem;color:var(--text-main);margin-bottom:0.3rem;">Expected flow: ${result.buildIntel.buildChain.expectedFlow.join(' → ') || 'N/A'}</div>
+          ${result.buildIntel.buildChain.deviations.length > 0 ? `
+            <div style="font-size:0.55rem;color:var(--accent-orange);margin-bottom:0.3rem;">Deviations: ${result.buildIntel.buildChain.deviations.length}</div>
+            ${result.buildIntel.buildChain.deviations.map(d => `<div style="font-size:0.55rem;color:var(--text-main);padding:0.1rem 0;border-bottom:1px solid var(--border);">⚠ ${escapeHtml(d)}</div>`).join('')}
+          ` : '<div style="font-size:0.55rem;color:var(--accent-green);">No deviations from expected build chain</div>'}
+        </div>
         ` : ''}
-        ${result.buildIntel.processIndicators.length > 0 ? `
-          <div style="margin-bottom:0.75rem;">
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Process Execution Indicators</div>
-            <div style="font-size:0.55rem;color:var(--text-main);">${result.buildIntel.processIndicators.map(p => `<div style="padding:0.1rem 0;border-bottom:1px solid var(--border);">${escapeHtml(p)}</div>`).join('')}</div>
-          </div>
+
+        ${result.buildIntel.expectedGraph.newNodes.length > 0 || result.buildIntel.expectedGraph.removedNodes.length > 0 ? `
+        <div style="margin-bottom:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Expected Build Graph — Changes</div>
+          ${result.buildIntel.expectedGraph.newNodes.length > 0 ? `<div style="font-size:0.55rem;color:var(--text-main);">+ ${result.buildIntel.expectedGraph.newNodes.length} new node(s): ${result.buildIntel.expectedGraph.newNodes.slice(0, 5).map(n => escapeHtml(n)).join(', ')}${result.buildIntel.expectedGraph.newNodes.length > 5 ? '...' : ''}</div>` : ''}
+          ${result.buildIntel.expectedGraph.removedNodes.length > 0 ? `<div style="font-size:0.55rem;color:var(--text-main);">- ${result.buildIntel.expectedGraph.removedNodes.length} removed node(s): ${result.buildIntel.expectedGraph.removedNodes.slice(0, 5).map(n => escapeHtml(n)).join(', ')}${result.buildIntel.expectedGraph.removedNodes.length > 5 ? '...' : ''}</div>` : ''}
+        </div>
         ` : ''}
-        ${result.buildIntel.networkIndicators.length > 0 ? `
-          <div>
-            <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Network Indicators</div>
-            <div style="font-size:0.55rem;color:var(--text-main);">${result.buildIntel.networkIndicators.map(n => `<div style="padding:0.1rem 0;border-bottom:1px solid var(--border);">${escapeHtml(n)}</div>`).join('')}</div>
-          </div>
+
+        ${result.buildIntel.story.events.length > 0 ? `
+        <div>
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Build Story (${result.buildIntel.story.events.length} event${result.buildIntel.story.events.length !== 1 ? 's' : ''})</div>
+          <table class="report-findings-table">
+            <thead><tr><th>Severity</th><th>Event</th><th>File</th><th>Detail</th></tr></thead>
+            <tbody>
+              ${result.buildIntel.story.events.map(e => `<tr><td><span class="report-finding-severity-badge ${e.severity === 'critical' ? 'critical' : e.severity === 'high' ? 'high' : e.severity === 'warning' ? 'medium' : 'low'}">${e.severity.toUpperCase()}</span></td><td>${escapeHtml(e.label)}</td><td>${escapeHtml(e.file)}</td><td style="font-size:0.5rem;">${escapeHtml(e.detail)}</td></tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${result.buildIntel.evidenceGraph.nodes.length > 0 ? `
+        <div style="margin-top:0.75rem;">
+          <div style="font-size:0.6rem;color:var(--text-dark);text-transform:uppercase;font-family:var(--font-mono);margin-bottom:0.3rem;">Evidence Graph (${result.buildIntel.evidenceGraph.nodes.length} nodes, ${result.buildIntel.evidenceGraph.edges.length} edges)</div>
+          <div style="font-size:0.55rem;color:var(--text-main);">Confidence-weighted evidence chain from diff analysis. Nodes represent observed changes; edges represent causal relationships between build components.</div>
+        </div>
         ` : ''}
       </div>
       ` : ''}
