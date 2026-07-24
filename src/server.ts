@@ -589,7 +589,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       // Return cached result if nothing changed
       if (db.hasScanHash(prNumber, scanHash)) {
         const row = db.getLatestScanResult(prNumber)
-        if (row) {
+        if (row && row.buildIntelJson) {
           const prFiles = db.getPRFiles(prNumber)
           let findings: unknown[]
           try { findings = JSON.parse(row.findingsJson) } catch { findings = [] }
