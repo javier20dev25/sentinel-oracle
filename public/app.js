@@ -450,6 +450,8 @@
 
   // PRs
   let _prevPRKeys = ''
+  const _autoScannedPRs = new Set()
+  const _autoAnalyzedPRs = new Set()
 
   async function loadPRs() {
     if (!authenticated) return;
@@ -569,6 +571,10 @@
                 if (!numEl) continue
                 var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
                 if (isNaN(num)) continue
+                if (_autoScannedPRs.has(num)) continue
+                _autoScannedPRs.add(num)
+                var scanPanel = document.getElementById('scan-panel-' + num)
+                if (scanPanel && scanPanel.querySelector('.build-intel-section')) continue
                 try {
                   await api('/api/prs/' + num + '/scan-result')
                   scanPR(num, { disabled: false, textContent: 'Re-scan' })
@@ -585,6 +591,8 @@
                 if (!numEl) continue
                 var num = parseInt(numEl.textContent.replace('PR-', ''), 10)
                 if (isNaN(num)) continue
+                if (_autoAnalyzedPRs.has(num)) continue
+                _autoAnalyzedPRs.add(num)
                 var btn = card.querySelector('.ai-btn')
                 if (btn) {
                   try {
@@ -4019,26 +4027,26 @@ sentinel-oracle/
 
   loadAudit();
   panelsLoaded['audit-section'] = true
-  setInterval(loadPRs, 15000);
-  setInterval(loadAudit, 30000);
-  setInterval(loadMetrics, 60000);
+  setInterval(loadPRs, 30000);
+  setInterval(loadAudit, 60000);
+  setInterval(loadMetrics, 120000);
   setInterval(function () {
     if (currentPanel === 'soc-section') loadSOC()
-  }, 30000);
+  }, 60000);
   setInterval(function () {
     if (currentPanel === 'inbox-section') loadInbox()
-  }, 30000);
+  }, 60000);
   setInterval(function () {
     if (currentPanel === 'queue-section') loadQueue()
-  }, 30000);
+  }, 60000);
 
   // Refresh countdown
-  var _refreshCountdown = 15
+  var _refreshCountdown = 30
   setInterval(function () {
     var el = document.getElementById('refresh-countdown')
     if (el) {
       _refreshCountdown--
-      if (_refreshCountdown <= 0) _refreshCountdown = 15
+      if (_refreshCountdown <= 0) _refreshCountdown = 30
       el.textContent = 'REFRESH IN ' + _refreshCountdown + 'S'
     }
   }, 1000)

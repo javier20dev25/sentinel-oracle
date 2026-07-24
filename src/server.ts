@@ -624,6 +624,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const t0 = Date.now()
       const result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha)
       const scanDuration = Date.now() - t0
+      db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) buildIntel=${!!result.buildIntel} in ${scanDuration}ms`)
       // Persist scan result
       db.saveScanResult(prNumber, scanHash, result)
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) in ${scanDuration}ms`)
@@ -1801,6 +1802,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           const pending = db.getPendingPRs()
           for (const pr of pending) {
             try {
+              const existing = db.getLatestScanResult(pr.prNumber)
+              if (existing) continue
               const files = await client.getPRFiles(pr.prNumber)
               if (files.length === 0) continue
               db.storePRFiles(pr.prNumber, files)
@@ -1817,6 +1820,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           const pending = db.getPendingPRs()
           for (const pr of pending) {
             try {
+              const existingAnalysis = db.getLatestAnalysisResult(pr.prNumber)
+              if (existingAnalysis) continue
               const files = await client.getPRFiles(pr.prNumber)
               if (files.length === 0) continue
               const scanHash = computeScanHash(files, pr.sha)
