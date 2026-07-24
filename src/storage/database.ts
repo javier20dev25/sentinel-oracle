@@ -84,6 +84,7 @@ export interface ScanResultRow {
   findingsJson: string
   scannedAt: number
   intelJson?: string
+  buildIntelJson?: string
 }
 
 export interface SavedExplanationRow {
@@ -299,6 +300,7 @@ export class DatabaseStore {
             CREATE INDEX IF NOT EXISTS idx_scan_results_pr ON scan_results(pr_number);
         `)
         this.runMigration("ALTER TABLE scan_results ADD COLUMN intel_json TEXT DEFAULT ''")
+        this.runMigration("ALTER TABLE scan_results ADD COLUMN build_intel_json TEXT DEFAULT ''")
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS ai_analysis (
                 pr_number INTEGER NOT NULL,
@@ -901,18 +903,18 @@ export class DatabaseStore {
         return { total, highRisk, expiringSoon, expired }
     }
 
-    saveScanResult(prNumber: number, scanHash: string, result: { riskScore: number; critical: number; high: number; medium: number; low: number; findings: unknown[]; intel?: unknown }): void {
+    saveScanResult(prNumber: number, scanHash: string, result: { riskScore: number; critical: number; high: number; medium: number; low: number; findings: unknown[]; intel?: unknown; buildIntel?: unknown }): void {
         this.db.prepare(`
-            INSERT OR REPLACE INTO scan_results (pr_number, scan_hash, risk_score, critical, high, medium, low, findings_json, intel_json, scanned_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(prNumber, scanHash, result.riskScore, result.critical, result.high, result.medium, result.low, JSON.stringify(result.findings), result.intel ? JSON.stringify(result.intel) : '', Date.now())
+            INSERT OR REPLACE INTO scan_results (pr_number, scan_hash, risk_score, critical, high, medium, low, findings_json, intel_json, build_intel_json, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(prNumber, scanHash, result.riskScore, result.critical, result.high, result.medium, result.low, JSON.stringify(result.findings), result.intel ? JSON.stringify(result.intel) : '', result.buildIntel ? JSON.stringify(result.buildIntel) : '', Date.now())
     }
 
     getLatestScanResult(prNumber: number): ScanResultRow | undefined {
         const rows = this.db.prepare(`
             SELECT pr_number as prNumber, scan_hash as scanHash, risk_score as riskScore,
                    critical, high, medium, low, findings_json as findingsJson, scanned_at as scannedAt,
-                   intel_json as intelJson
+                   intel_json as intelJson, build_intel_json as buildIntelJson
             FROM scan_results WHERE pr_number = ? ORDER BY scanned_at DESC LIMIT 1
         `).all(prNumber) as ScanResultRow[]
         return rows.length > 0 ? rows[0] : undefined
@@ -927,7 +929,7 @@ export class DatabaseStore {
         return this.db.prepare(`
             SELECT pr_number as prNumber, scan_hash as scanHash, risk_score as riskScore,
                    critical, high, medium, low, findings_json as findingsJson, scanned_at as scannedAt,
-                   intel_json as intelJson
+                   intel_json as intelJson, build_intel_json as buildIntelJson
             FROM scan_results ORDER BY scanned_at DESC
         `).all() as ScanResultRow[]
     }

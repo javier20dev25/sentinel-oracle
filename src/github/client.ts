@@ -138,7 +138,7 @@ export class GitHubClient {
         return await this._request(url, method, reqHeaders, body, pathOrUrl)
       } catch (err: any) {
         lastErr = err
-        if (err.message && (err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET'))) {
+        if (err.message && (err.message.includes('ENOTFOUND') || err.message.includes('ETIMEDOUT') || err.message.includes('ECONNRESET') || err.message.includes('socket hang up'))) {
           continue
         }
         throw err

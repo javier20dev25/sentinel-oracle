@@ -544,6 +544,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       try { findings = JSON.parse(row.findingsJson) } catch { findings = [] }
       let intel: unknown
       try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
+      let buildIntel: unknown
+      try { buildIntel = row.buildIntelJson ? JSON.parse(row.buildIntelJson) : undefined } catch {}
       res.json({
         riskScore: row.riskScore,
         scanHash: row.scanHash,
@@ -553,6 +555,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         low: row.low,
         findings,
         intel: intel || undefined,
+        buildIntel: buildIntel || undefined,
         scannedAt: row.scannedAt,
         files: prFiles,
         prNumber,
@@ -592,6 +595,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           try { findings = JSON.parse(row.findingsJson) } catch { findings = [] }
           let intel: unknown
           try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
+          let buildIntel: unknown
+          try { buildIntel = row.buildIntelJson ? JSON.parse(row.buildIntelJson) : undefined } catch {}
           db.log('pr_scanned', prNumber, `Scan cache HIT — returning cached result (risk ${row.riskScore})`)
           return res.json({
             riskScore: row.riskScore,
@@ -602,6 +607,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
             low: row.low,
             findings,
             intel: intel || undefined,
+            buildIntel: buildIntel || undefined,
             scannedAt: row.scannedAt,
             files: prFiles,
             prNumber,
