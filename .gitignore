@@ -6,10 +6,12 @@ coverage/
 *.sqlite-wal
 *.sqlite-shm
 *.log
+*.db
 config.local.json
 *.pem
 *.key
 .sentinel-oracle/
+check_db.js
 
 start-server.bat
 start-server.cmd

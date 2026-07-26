@@ -50,6 +50,8 @@ Full architecture, API reference, and operational guide are in the `docs/` direc
 | [docs/api.md](docs/api.md) | Complete API reference with request/response examples |
 | [docs/guide.md](docs/guide.md) | Operational guide: installation, configuration, CLI reference, troubleshooting, AI setup |
 | [docs/security-dna.md](docs/security-dna.md) | Security DNA aggregator: design, data flow, validation results |
+| [docs/security-audit.md](docs/security-audit.md) | Security audit report and findings |
+| [docs/attack-vectors.md](docs/attack-vectors.md) | Attack vector analysis and threat modeling |
 
 ---
 
@@ -154,6 +156,7 @@ Sentinel Oracle includes a multi-layered security scanner that analyzes PR diffs
 | CI Integrity | Step redistribution, cache camouflage, fingerprint churn, synthetic telemetry, evasion signals, campaign detection |
 | Trust Drift | New collaborators, GitHub Apps, secrets, runners, environments, branch protection removals, permission escalations |
 | Security DNA | Capability fingerprint aggregator (14 dimensions) |
+| **Build Intelligence** | **Build surface, build chain, expected graph, trust engine, evidence graph, build story** |
 
 ### Auto Scan
 
@@ -313,6 +316,75 @@ Validated against 5 real open-source repositories (Kubernetes, Next.js, Home Ass
 
 ---
 
+## Build Intelligence
+
+Build Intelligence predicts what a PR would introduce to the build pipeline. Unlike static SAST rules, it analyzes the structural impact: tools, scripts, dependencies, and build chain changes — and predicts trust degradation.
+
+### Architecture (6 Stages)
+
+```
+PR Diff ──→ Build Surface ──→ Build Chain ──→ Expected Build Graph ──→ Trust Engine ──→ Evidence Graph ──→ Build Story
+```
+
+| Stage | Purpose |
+|-------|---------|
+| **Build Surface** | Detects tools, scripts, and dependencies from diff. Classifies shell exec, network access, file access per script. |
+| **Build Chain** | Maps install→build→test→deploy stages. Detects deviations (e.g., preinstall with curl\|bash). |
+| **Expected Build Graph** | Predicts what the build graph would look like after merge. New nodes, removed nodes, modified edges. |
+| **Trust Engine** | 7-dimension weighted scoring (0-100 per dimension). |
+| **Evidence Graph** | SHA-256 linked evidence chain from diff analysis. |
+| **Build Story** | Narrative summary of what this PR would cause in the build pipeline. |
+
+### Trust Engine Dimensions
+
+| Dimension | Weight | What it measures |
+|-----------|--------|------------------|
+| toolchain_identity | 18% | Recognized vs unknown build tools |
+| input_identity | 18% | Source origin of build inputs |
+| artifact_integrity | 15% | Hash/signature verification of outputs |
+| behavior | 15% | Expected vs actual build behavior |
+| network | 12% | Network access patterns during build |
+| graph | 12% | Build graph structural integrity |
+| trend | 10% | Historical trust trajectory |
+
+### What it Detects
+
+- **Preinstall/postinstall hooks** with shell execution or network access
+- **Suspicious build scripts** (obfuscated code, base64 payloads, eval patterns)
+- **Dependency changes** (new packages from untrusted sources, GitHub refs)
+- **CI workflow modifications** (new steps, changed runners, permission escalations)
+- **Build chain deviations** (unexpected stages, out-of-order execution)
+- **Trust boundary crossings** (req→exec, input→eval, req→db patterns)
+
+### Output
+
+| Field | Description |
+|-------|-------------|
+| verdict | `CLEAN` / `REVIEW` / `CRITICAL` |
+| trustScore | 0-100 overall trust score |
+| risk | `low` / `medium` / `high` |
+| buildSurface | Tools, scripts, dependencies with risk classification |
+| buildChain | Expected flow, detected deviations |
+| expectedGraph | New/removed/modified nodes |
+| trust | 7-dimension breakdown with scores and weights |
+| story | Narrative, events timeline, risk change |
+| evidenceGraph | Nodes and edges from diff evidence |
+
+---
+
+## Scan History
+
+The Scan History panel provides visual analytics over all scanned PRs:
+
+- **Trend Chart**: Risk score over time with area fill
+- **Severity Distribution**: Bar chart of critical/high/medium/low findings
+- **Per-PR Table**: Sortable list with risk scores, finding counts, scan timestamps
+- **Filterable**: By severity level, time range
+
+Data is computed from the `scan_results` table and cached for performance.
+
+---
+
 ## Test Classification
 
 Tests are organized by intention:
@@ -342,6 +414,14 @@ Tests are organized by intention:
 - [GitHub App Setup](#github-app-setup)
 - [API Endpoints](#api-endpoints)
 - [Database Schema](#database-schema)
+- [Security Scanner](#security-scanner)
+  - [Intel Modules](#intel-modules)
+  - [Build Intelligence](#build-intelligence)
+  - [Scan History](#scan-history)
+- [AI PR Intelligence](#ai-pr-intelligence)
+- [CI Integrity Engine](#ci-integrity-engine)
+- [Trust Drift Detection](#trust-drift-detection)
+- [Security DNA](#security-dna)
 - [Network Architecture](#network-architecture)
 - [Tailscale Integration](#tailscale-integration)
 - [Deployment](#deployment)
@@ -354,6 +434,7 @@ Tests are organized by intention:
 - [Verification Checklist](#verification-checklist)
 - [Environment and File Reference](#environment-and-file-reference)
 - [Troubleshooting](#troubleshooting)
+- [Community](#community)
 - [License](#license)
 
 ---
