@@ -42,7 +42,7 @@ if (args[0] === 'scan') {
     console.error('Scan failed:', err.message)
     process.exit(1)
   })
-  return
+  process.exit(0)
 }
 
 // Default: start the server
