@@ -49,9 +49,16 @@ Full architecture, API reference, and operational guide are in the `docs/` direc
 | [docs/architecture.md](docs/architecture.md) | System architecture, module dependency graph, data flow, database schema |
 | [docs/api.md](docs/api.md) | Complete API reference with request/response examples |
 | [docs/guide.md](docs/guide.md) | Operational guide: installation, configuration, CLI reference, troubleshooting, AI setup |
+| [docs/github-app-setup.md](docs/github-app-setup.md) | GitHub App registration, installation, and configuration |
 | [docs/security-dna.md](docs/security-dna.md) | Security DNA aggregator: design, data flow, validation results |
 | [docs/security-audit.md](docs/security-audit.md) | Security audit report and findings |
 | [docs/attack-vectors.md](docs/attack-vectors.md) | Attack vector analysis and threat modeling |
+| [docs/workflow-intelligence.md](docs/workflow-intelligence.md) | CI workflow intelligence engine, detection modules, telemetry |
+| [docs/sarif-integration.md](docs/sarif-integration.md) | SARIF report generation and export |
+| [docs/ai-agent-integration.md](docs/ai-agent-integration.md) | AI agent skills for coding assistants |
+| [docs/crypto-audit.md](docs/crypto-audit.md) | Cryptographic audit: key rotation, integrity, keychain |
+| [docs/inventory-drift.md](docs/inventory-drift.md) | Token inventory drift detection |
+| [docs/tailscale-integration.md](docs/tailscale-integration.md) | Tailscale client configuration and version detection |
 
 ---
 
@@ -385,6 +392,149 @@ Data is computed from the `scan_results` table and cached for performance.
 
 ---
 
+## Security Operations Center (SOC)
+
+The SOC panel provides a unified view of security findings across all scanned PRs.
+
+### Features
+
+- **Average Risk Score**: Computed across all scanned PRs
+- **Open Findings**: Total unresolved security findings
+- **Critical Findings**: Findings requiring immediate attention
+- **Pending PRs**: PRs awaiting review or authorization
+
+### Security Inbox
+
+Security Inbox groups unresolved findings by severity level. Each finding links to its source PR and shows the file path and line number. Analysts can resolve or assign findings individually.
+
+### Analyst Queue
+
+PRs are listed in a priority queue sorted by risk score. Each entry shows:
+- Risk score badge (color-coded)
+- Author, title, and file count
+- Scan timestamp
+- Quick action buttons (scan, view details, resolve)
+
+---
+
+## Token Inventory
+
+Sentinel Oracle maintains a full inventory of tokens used by the repository: GitHub PATs, GitHub App installation tokens, OAuth tokens, and secrets found during file scanning.
+
+### Token Types
+
+| Type | Description |
+|------|-------------|
+| `github_pat` | Personal access tokens discovered via GitHub API |
+| `github_app` | GitHub App installation tokens |
+| `github_oauth` | OAuth tokens from integrations |
+| `found_secret` | Secrets found during SAST scans (never stored raw) |
+| `generic` | Other token types |
+
+### Risk Assessment
+
+Each token is scored based on:
+- **Scope breadth**: Wide scope = higher risk
+- **Age**: Tokens not rotated in 90+ days
+- **Expiry status**: Expired tokens tracked separately
+- **Fingerprint**: SHA-256 hash (raw token is never stored)
+
+### Drift Detection
+
+Token drift detection monitors for:
+- New tokens not previously seen
+- Tokens that changed scopes
+- Tokens that were revoked or expired
+- Tokens nearing expiry (within 30 days)
+
+`GET /api/inventory/tokens/drift` returns a drift report. The `inventory.html` page shows drift status with per-token risk badges and last-seen timestamps.
+
+---
+
+## AI Skills (Agent Toolkit)
+
+Sentinel Oracle includes an AI skills system designed for coding assistants (Cursor, Copilot, Claude Code, Codex, etc.) to query scan results programmatically.
+
+### Available Skills
+
+| Skill | Purpose | Endpoint |
+|-------|---------|----------|
+| `scan_results` | Query scan results by PR, status, or risk level | `GET /api/skills/scan-results` |
+| `scan_pr_files` | Get file-level scan details for a PR | `GET /api/skills/scan-pr-files/:prNumber` |
+| `scan_history` | Historical scan data with trend analysis | `GET /api/skills/scan-history` |
+| `security_dna` | Security DNA snapshot for a repository | `GET /api/skills/security-dna` |
+| `scan_stats` | Aggregate statistics across all scans | `GET /api/skills/scan-stats` |
+
+### Agent Integration
+
+Skills return structured JSON optimized for LLM context windows. Each response includes:
+- Summary of findings with severity breakdown
+- Top actionable items
+- Historical context (trends, regressions)
+
+---
+
+## CI Policy Engine
+
+The CI policy engine allows defining organizational rules for CI/CD integrity.
+
+### Policy File Format
+
+`sentinel.policy.yml` defines per-check and global rules:
+
+```yaml
+global:
+  maxStepRedistribution: 3
+  maxCacheCamouflage: 2
+  notifyOnAnomaly: true
+
+checks:
+  "build / test":
+    maxRedistribution: 5
+    requireBaseline: true
+    trustedOnly: true
+```
+
+### Enforcement Modes
+
+- **Monitor** (default): Logs violations but does not block merges
+- **Enforce**: Fails the scan if policy thresholds are exceeded
+
+`GET /api/policy` reads the current policy. `POST /api/policy` updates it.
+
+---
+
+## Dashboard Security
+
+### Password Protection
+
+An optional dashboard password adds a second authentication layer. When enabled, users must enter the password before accessing the dashboard.
+
+- Password is stored as a SHA-256 hash (never plaintext)
+- Strength indicator in real-time during password setup
+- Forgot password flow available via `POST /api/config/password/reset`
+
+### First-Time Enrollment
+
+On first visit, a WebAuthn enrollment token is created with a 120-second TTL. The phone must scan the QR code within this window to register a passkey. Once registered, all future authorizations use the standard QR → biometric flow.
+
+### Direct Auth Mode
+
+For environments without a phone, `POST /api/auth/direct` provides a browser-only WebAuthn flow using a platform authenticator (fingerprint or Face ID on the workstation itself).
+
+### Onboarding Checklist
+
+The setup wizard (`/setup`) tracks configuration progress:
+1. GitHub token configured
+2. Repository owner and name set
+3. Scan enabled
+4. Auto-scan enabled
+5. AI enabled
+
+Progress is persisted and shown on the main dashboard until all items are complete.
+
+---
+
 ## Test Classification
 
 Tests are organized by intention:
@@ -402,26 +552,39 @@ Tests are organized by intention:
 
 ## Table of Contents
 
-- [Problem Statement](#problem-statement)
-- [Architecture](#architecture)
-- [Authorization Flow](#authorization-flow)
-- [Cryptographic Protocol](#cryptographic-protocol)
-- [Threat Model](#threat-model)
-- [Installation](#installation)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Configuration Reference](#configuration-reference)
-- [GitHub App Setup](#github-app-setup)
-- [API Endpoints](#api-endpoints)
-- [Database Schema](#database-schema)
+- [Misión / Visión](#misión--visión)
+- [Quick Start (Global CLI)](#quick-start-global-cli)
+- [CLI Reference](#cli-reference)
 - [Security Scanner](#security-scanner)
   - [Intel Modules](#intel-modules)
   - [Build Intelligence](#build-intelligence)
   - [Scan History](#scan-history)
 - [AI PR Intelligence](#ai-pr-intelligence)
+  - [AI Skills](#ai-skills-agent-toolkit)
 - [CI Integrity Engine](#ci-integrity-engine)
+  - [CI Policy Engine](#ci-policy-engine)
 - [Trust Drift Detection](#trust-drift-detection)
 - [Security DNA](#security-dna)
+- [Security Operations Center (SOC)](#security-operations-center-soc)
+  - [Security Inbox](#security-inbox)
+  - [Analyst Queue](#analyst-queue)
+- [Token Inventory](#token-inventory)
+- [Dashboard Security](#dashboard-security)
+  - [Password Protection](#password-protection)
+  - [Onboarding Checklist](#onboarding-checklist)
+- [Problem Statement](#problem-statement)
+- [Architecture](#architecture)
+- [Authorization Flow](#authorization-flow)
+- [Cryptographic Protocol](#cryptographic-protocol)
+- [CSRF Protection](#csrf-protection)
+- [WebAuthn Re-assertion](#webauthn-re-assertion)
+- [Threat Model](#threat-model)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Configuration Reference](#configuration-reference)
+- [GitHub App Setup](#github-app-setup)
+- [API Endpoints](#api-endpoints)
+- [Database Schema](#database-schema)
 - [Network Architecture](#network-architecture)
 - [Tailscale Integration](#tailscale-integration)
 - [Deployment](#deployment)
@@ -820,6 +983,13 @@ export ORACLE_MASTER_SECRET="$(openssl rand -hex 32)"
 | `githubInstallationId` | string | `""` | GitHub App installation ID |
 | `githubPrivateKeyPath` | string | `""` | Path to GitHub App private key PEM file |
 | `githubWebhookSecret` | string | `""` | Secret for verifying GitHub webhook payloads |
+| `aiEnabled` | boolean | `false` | Enable AI-powered PR analysis |
+| `aiModel` | string | `"auto"` | AI model selection: `auto`, `ollama:qwen2.5:1.5b`, `gguf:...` |
+| `autoScan` | boolean | `false` | Auto-scan all PRs on queue refresh |
+| `autoAnalyze` | boolean | `false` | Auto-run AI analysis after scan |
+| `securityInbox` | boolean | `false` | Enable Security Inbox in SOC panel |
+| `analystQueue` | boolean | `false` | Enable Analyst Queue in SOC panel |
+| `scanEnabled` | boolean | `false` | Master toggle for the security scanner |
 
 ---
 
@@ -882,7 +1052,61 @@ See [docs/github-app-setup.md](docs/github-app-setup.md) for complete setup inst
 | GET | `/api/ai/status` | None | AI backend status, health, model info |
 | GET | `/api/ai/models` | None | List detected AI models (Ollama + GGUF) |
 | POST | `/api/prs/:number/ai-analyze` | Cookie | Run AI PR intelligence analysis |
+| POST | `/api/prs/:number/ai-scan-analyze` | Cookie | Combined scan + AI analysis |
+| POST | `/api/prs/:number/ai-explain` | Cookie | Generate natural language explanation of findings |
+| POST | `/api/prs/:number/ai-scan-explain` | Cookie | Combined scan + explain in one call |
+| POST | `/api/prs/:number/ai-explain/save` | Cookie | Save AI explanation as SARIF-compatible report |
+| GET | `/api/prs/:number/ai-explain/saved` | Cookie | Retrieve saved explanation for a PR |
+| POST | `/api/prs/:number/blacklist` | Cookie+CSRF | Add PR to blacklist (skips scanning) |
+| DELETE | `/api/prs/:number/blacklist` | Cookie+CSRF | Remove PR from blacklist |
+| GET | `/api/prs/:number/scan-log` | Cookie | Scan processing log with timestamps |
+| POST | `/api/prs/:number/diff` | Cookie | Raw GitHub diff with optional base commit |
+| GET | `/api/workflow/telemetry` | Cookie | CI workflow telemetry (durations, failures, flakiness) |
+| POST | `/api/workflow/telemetry` | Cookie | Ingest new workflow telemetry step |
+| POST | `/api/workflow/telemetry/steps` | Cookie | Ingest multiple workflow steps at once |
+| GET | `/api/workflow/baselines` | Cookie | Computed workflow baselines for all checks |
+| GET | `/api/prs/:number/workflow-intel` | Cookie | Workflow intelligence report for a specific PR |
+| GET | `/api/prs/:number/ci-integrity` | Cookie | CI integrity score and detection results |
+| GET | `/api/policy` | Cookie | Read current CI policy configuration |
+| POST | `/api/policy` | Cookie | Update CI policy (z-score thresholds, rules, notifications) |
+| GET | `/api/dna` | Cookie | Security DNA snapshot (14-dimension capability fingerprint) |
+| POST | `/api/dna/compare` | Cookie | Compare current DNA against previous snapshots |
+| POST | `/api/dna/fingerprint/:prNumber` | Cookie | Generate DNA fingerprint for a specific PR |
+| POST | `/api/ai/compare` | Cookie | Compare AI analysis across two PRs |
+| POST | `/api/ai/batch` | Cookie | Batch-analyze multiple PRs simultaneously |
+| GET | `/api/inventory/tokens` | Cookie | Full token inventory (PATs, apps, found secrets) |
+| POST | `/api/inventory/tokens/scan` | Cookie | Scan repository for leaked tokens |
+| GET | `/api/inventory/tokens/stats` | Cookie | Token risk statistics (expired, near-expiry, scopes) |
+| POST | `/api/inventory/tokens/:id/refresh` | Cookie | Re-verify a specific token's validity |
+| DELETE | `/api/inventory/tokens/:id` | Cookie | Remove a token from inventory |
+| GET | `/api/inventory/tokens/drift` | Cookie | Token drift detection (changed scopes, new tokens, revoked tokens) |
+| GET | `/api/inventory/drift` | Cookie | Full inventory drift report |
+| POST | `/api/inventory/diff` | Cookie | Diff two inventory snapshots |
+| GET | `/api/soc/incidents` | Cookie | Security incidents requiring attention |
+| POST | `/api/soc/incidents/:id/resolve` | Cookie | Resolve a security incident |
+| POST | `/api/soc/incidents/:id/assign` | Cookie | Assign an incident to an analyst |
+| GET | `/api/analytics/export` | Cookie | Export analytics data (JSON or CSV format) |
+| GET | `/api/queue/stats` | Cookie | Analyst queue statistics (backlog, throughput, SLA) |
+| GET | `/api/blacklist` | Cookie | List all blacklisted PRs |
+| GET | `/api/config/settings` | Cookie | Current server settings |
+| POST | `/api/config/settings` | Cookie | Update server settings (scan, autoScan, AI, etc.) |
+| GET | `/api/config/password` | Cookie | Password status (enabled/disabled) |
+| POST | `/api/config/password` | Cookie | Set or change dashboard password |
+| POST | `/api/config/password/reset` | Cookie | Reset forgot password |
+| GET | `/api/config/github-status` | Cookie | GitHub connection status (owner, repo, token type) |
+| POST | `/api/config/github` | Cookie | Update GitHub configuration (owner, repo, token) |
+| POST | `/api/config/webhook` | Cookie | Update webhook configuration |
+| POST | `/api/config/lockdown` | Cookie+CSRF+RA | Toggle lockdown (no re-assert required for unlock) |
+| POST | `/api/admin/orphan-scans` | Cookie | Cleanup orphan scan results |
+| POST | `/api/admin/backfill-history` | Cookie | Backfill historical PR data for charts |
+| GET | `/api/admin/backfill-status` | Cookie | Backfill progress (current/total/done) |
+| POST | `/api/setup/begin` | None | Start first-time setup (creates initial session) |
+| POST | `/api/setup/complete` | None | Complete setup (save owner, repo, token, settings) |
+| POST | `/api/prs/:number/scan` | Cookie | Trigger SAST scan on a specific PR |
 | GET | `/api/prs/:number/scan-result` | Cookie | Cached SAST scan result for a PR |
+| POST | `/api/github/sync-app-token` | Cookie | Sync GitHub App token (force refresh) |
+| GET | `/api/github/token-info` | Cookie | Current GitHub token info (type, scopes, expiry) |
+| GET | `/api/installer/sentinel-telemetry` | None | Installer telemetry data |
 
 **Auth key:** Cookie = `sentinel_session` cookie. CSRF = `X-CSRF-Token` header. RA = `reAssertToken` in request body.
 
@@ -1135,6 +1359,44 @@ SQLite database at `{dataDir}/oracle.db`. Three tables:
 |--------|------|-------------|
 | key | TEXT | Unique config key |
 | value | TEXT | Config value |
+
+### scan_results
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| pr_number | INTEGER | PR number |
+| sha | TEXT | Commit SHA |
+| risk_score | INTEGER | 0-100 risk score |
+| findings_count | INTEGER | Total findings |
+| critical_count | INTEGER | Critical findings |
+| high_count | INTEGER | High findings |
+| medium_count | INTEGER | Medium findings |
+| low_count | INTEGER | Low findings |
+| scan_json | TEXT | Full scan result (JSON) |
+| build_intel_json | TEXT | Build Intelligence result (JSON) |
+| scanned_at | INTEGER | Unix ms scan timestamp |
+
+### ai_analysis
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| pr_number | INTEGER | PR number |
+| sha | TEXT | Commit SHA |
+| analysis_json | TEXT | Full AI analysis result (JSON) |
+| review_priority | TEXT | low / medium / high / critical |
+| injection_detected | INTEGER | 0 or 1, prompt injection flag |
+| analyzed_at | INTEGER | Unix ms analysis timestamp |
+
+### capability_snapshots
+
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER | Auto-increment primary key |
+| sha | TEXT | Commit SHA at time of snapshot |
+| snapshot_json | TEXT | 14-dimension capability fingerprint (JSON) |
+| created_at | INTEGER | Unix ms snapshot timestamp |
 
 ---
 
