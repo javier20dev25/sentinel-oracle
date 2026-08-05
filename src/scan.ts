@@ -43,7 +43,10 @@ export async function runScan(): Promise<void> {
       const files = await client.getPRFiles(pr.number)
       const result = await scanPRFiles(files, pr.number, config.githubOwner, config.githubRepo, pr.sha)
       scannedCount++
-      console.log(`    Risk: ${result.riskScore} (${result.findings.length} findings, ${Object.keys(result.intel || {}).length} intel modules)`)
+      console.log(`    State: ${result.state} — Risk: ${result.riskScore} (${result.findings.length} findings, ${Object.keys(result.intel || {}).length} intel modules)`)
+      if (result.stateReasons.length > 0) {
+        for (const r of result.stateReasons.slice(0, 8)) console.log(`      - ${r}`)
+      }
     } catch (err: any) {
       errorCount++
       console.error(`    ERROR: ${err.message}`)

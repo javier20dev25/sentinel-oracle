@@ -1,4 +1,5 @@
 import type { PRFile } from '../rules'
+import { runRules, type Finding } from '../rules'
 import type { IntelReport, IntelRisk } from './types'
 import { analyzeDependencies } from './dependencies'
 import { analyzeEndpoints } from './endpoints'
@@ -10,13 +11,20 @@ import { analyzeTrustBoundaries } from './trust'
 import { analyzeCrypto } from './crypto'
 import { analyzeAuth } from './auth'
 import { analyzeInfrastructure } from './infrastructure'
-import { analyzeDependencyDelta } from './deep-dependency'
+import {
+  analyzeDependencyDelta,
+  analyzeDependencyTarball,
+  tarballToPRFiles,
+  lifecycleToFindings,
+  deltaToFindings,
+  unverifiableVersionFinding,
+} from './deep-dependency'
 import { analyzeWorkflowIntelligence } from './workflow-intelligence'
 import { analyzeTrustDrift } from './trust-drift'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
 export { analyzeWorkflowIntelligence }
-export { analyzeDependencyDelta }
+export { analyzeDependencyDelta, analyzeDependencyTarball }
 
 function buildSecurityDelta(report: IntelReport) {
   const deps = report.dependencies
@@ -81,7 +89,7 @@ function buildSecurityDelta(report: IntelReport) {
   }
 }
 
-export async function runIntelAnalysis(files: PRFile[]): Promise<IntelReport> {
+export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: boolean }): Promise<IntelReport> {
   const report: IntelReport = {}
 
   const deps = analyzeDependencies(files)
@@ -117,8 +125,34 @@ export async function runIntelAnalysis(files: PRFile[]): Promise<IntelReport> {
   const trustDrift = analyzeTrustDrift(files)
   if (trustDrift.risk !== 'low') report.trustDrift = trustDrift
 
-  // Dependency Delta (EXPERIMENTAL): tarball diff — no semantic analysis yet
-  if (deps && deps.updated.length > 0) {
+  // Tarball scan: verify ADDED dependencies by downloading and scanning the
+  // actual published tarball (ChainDrop vector). Gated by SENTINEL_TARBALL_SCAN.
+  const tarballScan = opts?.tarballScan ?? process.env.SENTINEL_TARBALL_SCAN !== '0'
+  const tarballFindings: Finding[] = []
+
+  if (deps && tarballScan) {
+    for (const add of deps.added.slice(0, MAX_TARBALL_SCANS)) {
+      const scan = await analyzeDependencyTarball({
+        name: add.name,
+        version: add.version,
+        registry: inferRegistry(add.name),
+      })
+      if (!scan) continue
+      if (!report.dependencyDelta && scan.delta) report.dependencyDelta = scan.delta
+      if (scan.resolvedVersion === null) {
+        tarballFindings.push(unverifiableVersionFinding(add.name, add.version))
+      } else {
+        tarballFindings.push(...lifecycleToFindings(scan.lifecycleScripts, add.name, scan.resolvedVersion))
+        if (scan.delta) tarballFindings.push(...deltaToFindings(scan.delta))
+      }
+      const prFiles = tarballToPRFiles(scan, add.name)
+      if (prFiles.length > 0) tarballFindings.push(...runRules(prFiles))
+    }
+  }
+
+  // Dependency Delta (tarball diff for UPDATED deps). Skip when an added-dep
+  // scan already produced a delta to bound network work.
+  if (deps && !report.dependencyDelta && deps.updated.length > 0 && tarballScan) {
     for (const upd of deps.updated.slice(0, 3)) { // max 3 for performance
       const delta = await analyzeDependencyDelta({
         name: upd.name,
@@ -133,11 +167,15 @@ export async function runIntelAnalysis(files: PRFile[]): Promise<IntelReport> {
     }
   }
 
+  if (tarballFindings.length > 0) report.dependencyTarballFindings = tarballFindings
+
   // Build SecurityDelta summary
   report.securityDelta = buildSecurityDelta(report)
 
   return report
 }
+
+const MAX_TARBALL_SCANS = 2
 
 function inferRegistry(name: string): string {
   if (/^@/.test(name)) return 'npm'

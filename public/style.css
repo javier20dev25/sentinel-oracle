@@ -1241,6 +1241,60 @@ button:disabled, .btn:disabled {
   margin-top: 1rem;
 }
 
+/* PR Scan verdict banners (REVIEW / BLOCK) */
+.scan-state-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.85rem 1rem;
+  margin-top: 1rem;
+  border-radius: 4px;
+  border: 1px solid;
+}
+
+.scan-state-banner.banner-review {
+  background: rgba(255, 160, 60, 0.08);
+  border-color: rgba(255, 160, 60, 0.5);
+}
+
+.scan-state-banner.banner-block {
+  background: rgba(255, 60, 60, 0.08);
+  border-color: rgba(255, 60, 60, 0.5);
+}
+
+.scan-state-banner .state-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.scan-state-banner.banner-review .state-label { color: var(--accent-orange); }
+.scan-state-banner.banner-block .state-label { color: var(--accent-red); }
+
+.scan-state-banner .state-desc {
+  font-size: 0.66rem;
+  color: var(--text-dark);
+  line-height: 1.35;
+}
+
+.scan-state-reasons {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.state-reason-item {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--text-main);
+  padding: 0.3rem 0.5rem;
+  border-left: 2px solid var(--border-color);
+  background: var(--bg-input);
+}
+
 .clean-status-label {
   font-size: 0.72rem;
   font-weight: 700;

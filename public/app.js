@@ -877,6 +877,14 @@
       lastScanResult = result;
       const severityClass = result.critical > 0 || result.high > 0 ? 'scan-critical' : result.medium > 0 ? 'scan-warning' : 'scan-clean';
       const severityLabel = result.critical > 0 ? 'CRITICAL' : result.high > 0 ? 'HIGH' : result.medium > 0 ? 'MEDIUM' : 'LOW';
+      const stateBanner = result.state === 'BLOCK'
+        ? `<div class="scan-state-banner banner-block"><span class="state-label">MERGE BLOCKED</span><span class="state-desc">Evidence indicates a critical issue — do not authorize this merge.</span></div>`
+        : result.state === 'REVIEW'
+        ? `<div class="scan-state-banner banner-review"><span class="state-label">REVIEW REQUIRED</span><span class="state-desc">Evidence is insufficient to declare this PR safe. Manual review of the changes below is required before merging.</span></div>`
+        : '';
+      const stateReasonsHtml = (result.state === 'REVIEW' || result.state === 'BLOCK') && (result.stateReasons || []).length > 0
+        ? `<div class="scan-state-reasons">${result.stateReasons.map(r => `<div class="state-reason-item">${escapeHtml(r)}</div>`).join('')}</div>`
+        : '';
       // Cache intel data for checks drawer
       if (result.intel) _intelData[prNumber] = result.intel
       scanPanel.innerHTML = `
@@ -895,13 +903,14 @@
             </div>
           </div>
         </div>
+        ${stateBanner}
+        ${stateReasonsHtml}
         <div style="text-align:right;margin-bottom:0.75rem;">
           <button class="scan-report-open-btn" data-pr="${prNumber}">FULL REPORT</button>
         </div>
         ${result.findings.length > 0 ? `
           <div class="scan-findings-container">
-            ${result.findings.map(f => {
-              const filename = f.file ? f.file.split('/').pop() : 'source.js';
+            ${result.findings.map(f => {              const filename = f.file ? f.file.split('/').pop() : 'source.js';
               return `
                 <div class="scan-finding-card severity-${f.severity}">
                   <div class="finding-card-header">
@@ -935,12 +944,12 @@
               `;
             }).join('')}
           </div>
-        ` : `
+        ` : result.state === 'PASS' ? `
           <div class="scan-clean-card">
             <span class="clean-status-label">// Cryptographically Clean</span>
             <p>Static analyzer reports 0 policy breaches or anomalies for commit payload.</p>
           </div>
-        `}
+        ` : ''}
         ${result.buildIntel ? `
           <div class="build-intel-section" style="margin-top:1rem;border:1px solid var(--border);border-radius:6px;padding:0.75rem;background:var(--bg-card);">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;">

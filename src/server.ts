@@ -21,6 +21,7 @@ import {
 import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
+import { verifyScanAttestation } from './crypto/attestation'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
 import { analyzePR as aiAnalyzePR, analyzeScanResults, explainPR, explainScanFindings } from './ai/analyzer'
 import { detectAIBackend, detectAllModels, checkModelHealth } from './ai/detector'
@@ -546,6 +547,11 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
       let buildIntel: unknown
       try { buildIntel = row.buildIntelJson ? JSON.parse(row.buildIntelJson) : undefined } catch {}
+      let stateReasons: string[]
+      try { stateReasons = row.stateReasonsJson ? JSON.parse(row.stateReasonsJson) : [] } catch { stateReasons = [] }
+      let attestation: unknown
+      try { attestation = row.attestationJson ? JSON.parse(row.attestationJson) : undefined } catch {}
+      const attestationVerified = attestation ? verifyScanAttestation(attestation).valid : null
       res.json({
         riskScore: row.riskScore,
         scanHash: row.scanHash,
@@ -556,6 +562,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         findings,
         intel: intel || undefined,
         buildIntel: buildIntel || undefined,
+        state: row.state || 'PASS',
+        stateReasons,
+        attestation: attestation || undefined,
+        attestationVerified,
         scannedAt: row.scannedAt,
         files: prFiles,
         prNumber,
@@ -569,6 +579,28 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       })
     } catch (err) {
       res.status(500).json({ error: 'Failed to get scan result' })
+    }
+  })
+
+  // ----- Scan attestation (independent verification) -----
+  // Verifies the HMAC signature of a persisted scan result. The verifier does
+  // NOT trust any scanner-identity claim in the payload — only the signature.
+  app.get('/api/prs/:number/attestation', requireAuth(), apiRateLimiter(20, 60000), async (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.number as string, 10)
+      const row = db.getLatestScanResult(prNumber)
+      if (!row || !row.attestationJson) {
+        return res.status(404).json({ error: 'No attestation found for this PR. Run a scan first.' })
+      }
+      let attestation: unknown
+      try { attestation = JSON.parse(row.attestationJson) } catch {
+        return res.status(500).json({ error: 'Stored attestation is corrupt' })
+      }
+      const result = verifyScanAttestation(attestation, { maxAgeMs: 7 * 24 * 60 * 60 * 1000 })
+      res.json({ prNumber, attestation, verified: result.valid, reason: result.reason || null })
+    } catch (err) {
+      db.log('error', null, `Attestation verify: ${err instanceof Error ? err.message : err}`)
+      res.status(500).json({ error: 'Failed to verify attestation' })
     }
   })
 
@@ -597,6 +629,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           try { intel = row.intelJson ? JSON.parse(row.intelJson) : undefined } catch {}
           let buildIntel: unknown
           try { buildIntel = row.buildIntelJson ? JSON.parse(row.buildIntelJson) : undefined } catch {}
+          let stateReasons: string[]
+          try { stateReasons = row.stateReasonsJson ? JSON.parse(row.stateReasonsJson) : [] } catch { stateReasons = [] }
+          let attestation: unknown
+          try { attestation = row.attestationJson ? JSON.parse(row.attestationJson) : undefined } catch {}
           db.log('pr_scanned', prNumber, `Scan cache HIT — returning cached result (risk ${row.riskScore})`)
           return res.json({
             riskScore: row.riskScore,
@@ -608,6 +644,9 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
             findings,
             intel: intel || undefined,
             buildIntel: buildIntel || undefined,
+            state: row.state || 'PASS',
+            stateReasons,
+            attestation: attestation || undefined,
             scannedAt: row.scannedAt,
             files: prFiles,
             prNumber,
@@ -622,7 +661,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         }
       }
       const t0 = Date.now()
-      const result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha)
+      const result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha, scanHash)
       const scanDuration = Date.now() - t0
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) buildIntel=${!!result.buildIntel} in ${scanDuration}ms`)
       // Persist scan result

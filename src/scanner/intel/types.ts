@@ -1,5 +1,7 @@
 export type IntelRisk = 'low' | 'medium' | 'high' | 'critical'
 
+import type { Finding } from '../rules'
+
 export interface IntelItem {
   label: string
   detail: string
@@ -282,4 +284,6 @@ export interface IntelReport {
   securityDelta?: SecurityDelta
   trustDrift?: TrustDriftIntel
   campaignDelta?: CampaignDelta
+  /** Typed findings from scanning the tarball of an added/updated dependency. */
+  dependencyTarballFindings?: Finding[]
 }
