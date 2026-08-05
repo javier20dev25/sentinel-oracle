@@ -147,21 +147,40 @@ function scanFiles(files: Map<string, string>) {
   return { domains: [...domains], networkCalls, capabilities: [...capabilities], scripts, binaries }
 }
 
-async function download(url: string, maxBytes = 5 * 1024 * 1024, budget?: TarballBudget): Promise<Buffer | null> {
+/**
+ * Result of a tarball fetch. `ok:false` distinguishes a hard budget stop (the
+ * body was never consumed) from HTTP/size/network failures so callers never
+ * misreport a budget skip as "version not published".
+ */
+export type DownloadResult =
+  | { ok: true; buffer: Buffer; bytes: number; ms: number }
+  | { ok: false; reason: 'http' | 'too_large' | 'budget' | 'error' }
+
+async function download(url: string, maxBytes = 5 * 1024 * 1024, budget?: TarballBudget): Promise<DownloadResult> {
+  const t0 = performance.now()
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
     const res = await fetch(url, { signal: controller.signal })
     clearTimeout(timeout)
-    if (!res.ok) return null
+    if (!res.ok) return { ok: false, reason: 'http' }
     const len = parseInt(res.headers.get('content-length') || '0', 10)
-    if (len > maxBytes) return null
-    const buf = Buffer.from(await res.arrayBuffer())
-    if (buf.length > maxBytes) return null
-    budget?.accountBytes(buf.length)
-    return buf
+    if (len > maxBytes) return { ok: false, reason: 'too_large' }
+    // Hard byte gate: reserve from Content-Length BEFORE reading the body. If
+    // the reservation would overshoot the remaining budget, the body is never
+    // consumed — spent+reserved can never exceed maxBytes even under
+    // concurrency. Header-less responses fall back to soft accounting.
+    const reservation = budget ? budget.reserve(len) : null
+    if (budget && !reservation) return { ok: false, reason: 'budget' }
+    const buffer = Buffer.from(await res.arrayBuffer())
+    if (buffer.length > maxBytes) {
+      reservation?.cancel()
+      return { ok: false, reason: 'too_large' }
+    }
+    budget?.recordDownload(buffer.length, performance.now() - t0, reservation)
+    return { ok: true, buffer, bytes: buffer.length, ms: performance.now() - t0 }
   } catch {
-    return null
+    return { ok: false, reason: 'error' }
   }
 }
 
@@ -176,8 +195,11 @@ export async function analyzeDependencyDelta(dep: DepInfo, budget?: TarballBudge
   const toUrl = urlFn(dep.name, dep.toVersion)
   if (!fromUrl || !toUrl) return undefined
 
-  const [fromBuf, toBuf] = await Promise.all([download(fromUrl, undefined, budget), download(toUrl, undefined, budget)])
-  if (!fromBuf || !toBuf) return undefined
+  const [fromRes, toRes] = await Promise.all([download(fromUrl, undefined, budget), download(toUrl, undefined, budget)])
+  if (!fromRes.ok || !toRes.ok) return undefined
+
+  const fromBuf = fromRes.buffer
+  const toBuf = toRes.buffer
 
   const fromFiles = extractTarballContent(fromBuf)
   const toFiles = extractTarballContent(toBuf)
@@ -307,6 +329,8 @@ export async function resolveVersion(name: string, version: string, registry = '
 export interface TarballScanResult {
   /** Resolved published version, or null when the requested version is not published. */
   resolvedVersion: string | null
+  /** Why the tarball was not analyzed, when it was not. */
+  skipped?: 'not_published' | 'budget' | 'network'
   delta?: DependencyDelta
   files: Map<string, string>
   lifecycleScripts: { script: string; command: string; dangerous: boolean }[]
@@ -337,15 +361,19 @@ export async function analyzeDependencyTarball(dep: { name: string; version: str
 
   const resolved = await resolveVersion(dep.name, dep.version, registry)
   if (!resolved) {
-    return { resolvedVersion: null, files: new Map(), lifecycleScripts: [] }
+    return { resolvedVersion: null, skipped: 'not_published', files: new Map(), lifecycleScripts: [] }
   }
 
   const url = urlFn(dep.name, resolved)
   if (!url) return undefined
 
-  const buf = await download(url, undefined, budget)
-  if (!buf) return { resolvedVersion: null, files: new Map(), lifecycleScripts: [] }
+  const res = await download(url, undefined, budget)
+  if (!res.ok) {
+    const skipped = res.reason === 'budget' ? 'budget' : 'network'
+    return { resolvedVersion: resolved, skipped, files: new Map(), lifecycleScripts: [] }
+  }
 
+  const buf = res.buffer
   const files = extractTarballContent(buf)
   const scan = scanFiles(files)
 

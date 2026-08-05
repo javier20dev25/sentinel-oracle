@@ -59,23 +59,64 @@ Hermetic test suites set this variable; it is also available as an option on
 
 ### Budget (not a fixed cap)
 
-Registry work is bounded by a `TarballBudget` (`src/scanner/intel/tarball-budget.ts`)
-with four dimensions, each env-overridable:
+The tarball phase analyzes dependencies **until it consumes the configured
+resource budget** — it is not a fixed "scan N packages" cap. If the budget runs
+out, scanning stops **explicitly** and the result reports that the scan was
+truncated, so callers never mistake a truncated scan for full coverage.
+
+Registry work is bounded by a `TarballBudget` (`src/scanner/intel/tarball-budget.ts`).
+The governing dimensions are **real resources — bytes and wall-clock time**:
 
 | Env | Dimension | Default |
 |-----|-----------|---------|
-| `SENTINEL_TARBALL_BUDGET_PACKAGES` | max packages scanned | 20 |
 | `SENTINEL_TARBALL_BUDGET_BYTES` | max total tarball bytes | 50 MB |
 | `SENTINEL_TARBALL_BUDGET_TIME` | max wall-clock ms | 60 s |
 | `SENTINEL_TARBALL_BUDGET_CONCURRENCY` | max parallel fetches | 2 |
+| `SENTINEL_TARBALL_BUDGET_PACKAGES` | **safety ceiling** for work items | 200 |
 
-`budget.map(...)` schedules added/updated deps with bounded concurrency and stops
-as soon as any dimension runs out, so a PR that adds 120 packages degrades
-gracefully (most-relevant first) instead of running an unbounded download burst.
-The package count is a hard stop; byte/time limits are soft under concurrency
-(in-flight downloads finish, no new ones start). Added and updated deps share the
-same budget within `runIntelAnalysis`, so an added-dep-heavy PR leaves little for
-updates.
+The package count is deliberately **not** a truncation dimension: it only
+guards the queue against a pathological manifest (e.g. 10k entries) and defaults
+high enough to never bind on a realistic PR. Truncation is driven by
+bytes/time, so "120 packages of 3 KB" all get scanned while "3 packages of
+200 MB" stop early.
+
+**Bytes are hard.** `download()` reserves the expected size (from the response's
+`Content-Length`) **before** reading the body. If the reservation would exceed
+the remaining budget, the body is never consumed — spent+reserved can never
+overshoot `maxBytes`, even with concurrent workers. Time is soft under
+concurrency: in-flight downloads finish, no new ones start.
+
+A hard byte stop is never misreported as a finding: when a tarball is skipped
+because the budget is exhausted, the scan result records `skipped: 'budget'`
+instead of the `Added dependency version not published` finding (that finding
+is reserved for versions the registry genuinely lacks).
+
+Added and updated deps each run with their own budget (a resource-scoped batch);
+their telemetry is merged into one report.
+
+### Scan telemetry
+
+Every tarball phase exposes a `tarballScanTelemetry` block on the intel report
+(same shape that feeds dashboards):
+
+```json
+{
+  "scanId": "…",
+  "packagesRequested": 38,
+  "packagesScanned": 24,
+  "cacheHits": 0,
+  "cacheMisses": 24,
+  "downloadMs": 4123,
+  "analysisMs": 832,
+  "bytesDownloaded": 18432902,
+  "reasonTruncated": "BYTE_BUDGET"
+}
+```
+
+`reasonTruncated` is `null` when everything requested was analyzed, otherwise
+`BYTE_BUDGET` | `TIME_BUDGET` | `SAFETY_CEILING`. `cacheHits`/`cacheMisses` are
+the hooks for the global intelligence cache (Fase 2) — currently `cacheMisses`
+equals `packagesScanned`.
 
 ## Source layout
 
@@ -114,3 +155,11 @@ fourth product.
 - depublished-version detection
 - scan disabled via env → no tarball findings
 - updated-dep two-tarball diff still works
+- budget e2e: safety ceiling stops the queue without truncating a started scan
+- budget e2e: byte budget too small → headers fetched, **body never read**,
+  `reasonTruncated: BYTE_BUDGET`, zero findings (never misreported as unpublished)
+- budget e2e: exactly one tarball fits, the next is refused and nothing overshoots
+- budget e2e: no fixed cap — 3 packages all scan under a larger budget,
+  `reasonTruncated: null`
+- unit: `reserve`/`settle` accounting, refusal overflow, concurrent map can never
+  overshoot `maxBytes`, time-out truncation, and telemetry shape

@@ -21,7 +21,7 @@ import {
 } from './deep-dependency'
 import { analyzeWorkflowIntelligence } from './workflow-intelligence'
 import { analyzeTrustDrift } from './trust-drift'
-import { TarballBudget } from './tarball-budget'
+import { TarballBudget, mergeTelemetry, type ScanTelemetry } from './tarball-budget'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
 export { analyzeWorkflowIntelligence }
@@ -132,6 +132,7 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
   // instead of a fixed cap, so a PR that adds 120 packages degrades gracefully.
   const tarballScan = opts?.tarballScan ?? process.env.SENTINEL_TARBALL_SCAN !== '0'
   const tarballFindings: Finding[] = []
+  let tarballTelemetry: ScanTelemetry | null = null
 
   if (deps && tarballScan) {
     const budget = new TarballBudget()
@@ -142,23 +143,24 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
         registry: inferRegistry(add.name),
       }, budget),
     )
+    tarballTelemetry = budget.telemetry()
     for (const { item, value: scan } of added) {
       if (!scan) continue
       if (!report.dependencyDelta && scan.delta) report.dependencyDelta = scan.delta
-      if (scan.resolvedVersion === null) {
+      if (scan.skipped === 'not_published') {
         tarballFindings.push(unverifiableVersionFinding(item.name, item.version))
-      } else {
-        tarballFindings.push(...lifecycleToFindings(scan.lifecycleScripts, item.name, scan.resolvedVersion))
+      } else if (scan.skipped !== 'budget' && scan.skipped !== 'network') {
+        tarballFindings.push(...lifecycleToFindings(scan.lifecycleScripts, item.name, scan.resolvedVersion ?? ''))
         if (scan.delta) tarballFindings.push(...deltaToFindings(scan.delta))
+        const prFiles = tarballToPRFiles(scan, item.name)
+        if (prFiles.length > 0) tarballFindings.push(...runRules(prFiles))
       }
-      const prFiles = tarballToPRFiles(scan, item.name)
-      if (prFiles.length > 0) tarballFindings.push(...runRules(prFiles))
     }
   }
 
   // Dependency Delta (tarball diff for UPDATED deps). Skip when an added-dep
-  // scan already produced a delta to bound network work. Shares the same
-  // budget, so an added-dep-heavy PR may leave little for updates.
+  // scan already produced a delta to bound network work. Each phase has its own
+  // budget (a resource-scoped batch), and telemetry is merged for reporting.
   if (deps && !report.dependencyDelta && deps.updated.length > 0 && tarballScan) {
     const budget = new TarballBudget()
     const updated = await budget.map(deps.updated, upd =>
@@ -169,6 +171,7 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
         registry: inferRegistry(upd.name),
       }, budget),
     )
+    tarballTelemetry = tarballTelemetry ? mergeTelemetry(tarballTelemetry, budget.telemetry()) : budget.telemetry()
     for (const { value: delta } of updated) {
       if (delta) {
         report.dependencyDelta = delta
@@ -178,6 +181,7 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
   }
 
   if (tarballFindings.length > 0) report.dependencyTarballFindings = tarballFindings
+  if (tarballTelemetry) report.tarballScanTelemetry = tarballTelemetry
 
   // Build SecurityDelta summary
   report.securityDelta = buildSecurityDelta(report)

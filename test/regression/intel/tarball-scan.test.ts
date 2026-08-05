@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { gzipSync } from 'node:zlib'
 import { scanPRFiles } from '../../../src/scanner/index'
 import { analyzeDependencyTarball } from '../../../src/scanner/intel/deep-dependency'
+import { TarballBudget } from '../../../src/scanner/intel/tarball-budget'
 import type { PRFile } from '../../../src/scanner/rules'
 
 /**
@@ -72,7 +73,14 @@ function makeFile(overrides: Partial<PRFile> & { filename: string }): PRFile {
   return { status: 'modified', additions: 10, deletions: 0, patch: '', contents_url: '', ...overrides }
 }
 
-/** fetch mock: tarball URLs always win over metadata, then longest key first. */
+/**
+ * fetch mock: tarball URLs always win over metadata, then longest key first.
+ * Tarball responses declare Content-Length and the body is piped through a
+ * counting TransformStream so `bodyReads` tracks exactly how many bytes were
+ * consumed — a hard budget skip never reads the body.
+ */
+let bodyReads = 0
+
 function mockRegistry(entries: Record<string, { json?: unknown; tarball?: Buffer }>): ReturnType<typeof vi.fn> {
   const byLen = (a: string, b: string) => b.length - a.length
   const tarballKeys = Object.keys(entries).filter(k => entries[k].tarball).sort(byLen)
@@ -80,7 +88,19 @@ function mockRegistry(entries: Record<string, { json?: unknown; tarball?: Buffer
   return vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     for (const key of tarballKeys) {
-      if (url.includes(key)) return new Response(entries[key].tarball!, { status: 200, headers: { 'content-type': 'application/octet-stream' } })
+      if (url.includes(key)) {
+        const buf = entries[key].tarball!
+        const source = new ReadableStream<Uint8Array>({
+          start(c) { c.enqueue(new Uint8Array(buf)); c.close() },
+        })
+        const counted = new TransformStream<Uint8Array, Uint8Array>({
+          transform(chunk, c) { bodyReads += chunk.byteLength; c.enqueue(chunk) },
+        })
+        return new Response(source.pipeThrough(counted), {
+          status: 200,
+          headers: { 'content-type': 'application/octet-stream', 'content-length': String(buf.length) },
+        })
+      }
     }
     for (const key of jsonKeys) {
       if (url.includes(key)) return new Response(JSON.stringify(entries[key].json), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -104,6 +124,7 @@ function tarballCalls(): string[] {
 
 beforeEach(() => {
   vi.stubEnv('SENTINEL_TARBALL_SCAN', '1')
+  bodyReads = 0
 })
 
 afterEach(() => {
@@ -190,7 +211,7 @@ describe('tarball scan: added dependency (ChainDrop)', () => {
     expect(result.intel!.dependencyDelta).toBeUndefined()
   })
 
-  it('stops scanning after the package budget instead of a fixed cap', async () => {
+  it('stops after the package safety ceiling (queue guard, not truncation)', async () => {
     vi.stubEnv('SENTINEL_TARBALL_BUDGET_PACKAGES', '1')
     setupRegistry({
       'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
@@ -203,17 +224,21 @@ describe('tarball scan: added dependency (ChainDrop)', () => {
       makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"' }),
     ])
 
-    // First dep consumed the single package slot; budget-b was never scanned.
+    // Safety ceiling 1 → only budget-a started; its body was fully read.
     const tarballs = tarballCalls()
     expect(tarballs).toHaveLength(1)
     expect(tarballs[0]).toContain('budget-a-1.0.0.tgz')
+    expect(bodyReads).toBe(maliciousKeyvTar.length)
     expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
     expect(result.findings.some(f => f.description?.includes('budget-b'))).toBe(false)
+    expect(result.intel!.tarballScanTelemetry!.reasonTruncated).toBe('SAFETY_CEILING')
+    expect(result.intel!.tarballScanTelemetry!.packagesRequested).toBe(2)
+    expect(result.intel!.tarballScanTelemetry!.packagesScanned).toBe(1)
   })
 
-  it('stops scanning after the byte budget is exhausted', async () => {
+  it('hard byte budget: a reservation that cannot fit never reads the body', async () => {
     vi.stubEnv('SENTINEL_TARBALL_BUDGET_BYTES', '1')
-    vi.stubEnv('SENTINEL_TARBALL_BUDGET_CONCURRENCY', '1') // sequential: bytes counted before the next start
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_CONCURRENCY', '1')
     setupRegistry({
       'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
       'registry.npmjs.org/budget-a': { json: { versions: { '1.0.0': {} } } },
@@ -225,13 +250,43 @@ describe('tarball scan: added dependency (ChainDrop)', () => {
       makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"' }),
     ])
 
-    // Tiny byte budget: budget-a was scanned (bytes accounted after download),
-    // then the budget was spent and budget-b was never scanned.
-    const tarballs = tarballCalls()
-    expect(tarballs).toHaveLength(1)
-    expect(tarballs[0]).toContain('budget-a-1.0.0.tgz')
+    // Byte budget 1 < every tarball: both fetches return headers but the body
+    // is never consumed, no findings, no delta, and the skip is reported.
+    expect(bodyReads).toBe(0)
+    expect(result.intel!.dependencyDelta).toBeUndefined()
+    expect(result.findings.length).toBe(0)
+    const t = result.intel!.tarballScanTelemetry!
+    expect(t.reasonTruncated).toBe('BYTE_BUDGET')
+    expect(t.packagesRequested).toBe(2)
+    expect(t.packagesScanned).toBe(0)
+    expect(t.bytesDownloaded).toBe(0)
+  })
+
+  it('hard byte budget: exactly one tarball fits, the next is refused', async () => {
+    const one = maliciousKeyvTar.length
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_BYTES', String(one + 1))
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_CONCURRENCY', '1')
+    setupRegistry({
+      'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-a': { json: { versions: { '1.0.0': {} } } },
+      'budget-b/-/budget-b-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-b': { json: { versions: { '1.0.0': {} } } },
+    })
+
+    const result = await scanPRFiles([
+      makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"' }),
+    ])
+
+    // First tarball consumed the whole budget; budget-b's reservation of the
+    // same size cannot fit, so its body is never read and spent never exceeds.
+    expect(bodyReads).toBe(one)
     expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
     expect(result.findings.some(f => f.description?.includes('budget-b'))).toBe(false)
+    const t = result.intel!.tarballScanTelemetry!
+    expect(t.reasonTruncated).toBe('BYTE_BUDGET')
+    expect(t.packagesRequested).toBe(2)
+    expect(t.packagesScanned).toBe(1)
+    expect(t.bytesDownloaded).toBe(one)
   })
 
   it('scans more dependencies when the budget allows (no fixed cap)', async () => {
@@ -255,6 +310,78 @@ describe('tarball scan: added dependency (ChainDrop)', () => {
     expect(tarballs.some(u => u.includes('budget-b-1.0.0.tgz'))).toBe(true)
     expect(tarballs.some(u => u.includes('budget-c-1.0.0.tgz'))).toBe(true)
     expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
+    // All requested were scanned → nothing truncated.
+    expect(result.intel!.tarballScanTelemetry!.reasonTruncated).toBeNull()
+    expect(result.intel!.tarballScanTelemetry!.packagesScanned).toBe(3)
+  })
+})
+
+describe('tarball budget: reserve/settle semantics', () => {
+  it('reserve consumes remainingBytes; settle accounts spent', () => {
+    const b = new TarballBudget({ maxBytes: 1000, maxTimeMs: 10_000, safetyCeiling: 100 })
+    expect(b.remainingBytes()).toBe(1000)
+    const r = b.reserve(100)
+    expect(r).not.toBeNull()
+    expect(b.remainingBytes()).toBe(900)
+    r!.settle(100)
+    expect(b.spent.bytes).toBe(100)
+    expect(b.remainingBytes()).toBe(900)
+  })
+
+  it('no reservation overflow: larger-than-remaining reservations are refused', () => {
+    const b = new TarballBudget({ maxBytes: 1000, maxTimeMs: 10_000, safetyCeiling: 100 })
+    expect(b.reserve(600)).not.toBeNull()
+    expect(b.reserve(600)).toBeNull()
+    expect(b.remainingBytes()).toBe(400)
+    expect(b.reasonTruncated).toBe('BYTE_BUDGET')
+  })
+
+  it('concurrent reservation: parallel workers can never overshoot maxBytes', async () => {
+    const b = new TarballBudget({ maxBytes: 100, maxTimeMs: 10_000, maxConcurrency: 2, safetyCeiling: 100 })
+    const results = await b.map([1, 2, 3, 4], (n) => {
+      const r = b.reserve(40)
+      if (!r) return 'skip'
+      r.settle(40)
+      return 'ok'
+    })
+    expect(results.filter(r => r.value === 'ok')).toHaveLength(2)
+    expect(results.filter(r => r.value === 'skip')).toHaveLength(2)
+    expect(b.spent.bytes).toBeLessThanOrEqual(100)
+    expect(b.remainingBytes()).toBe(20)
+    expect(b.reasonTruncated).toBe('BYTE_BUDGET')
+  })
+
+  it('timeout truncation: map stops starting work when time runs out', async () => {
+    const b = new TarballBudget({ maxBytes: 1000, maxTimeMs: 0, safetyCeiling: 100 })
+    const results = await b.map([1, 2, 3], async () => 'ok')
+    expect(results).toHaveLength(0)
+    expect(b.reasonTruncated).toBe('TIME_BUDGET')
+    expect(b.telemetry().packagesScanned).toBe(0)
+  })
+
+  it('budget exhausted: after bytes are spent remaining() is false and reserve is refused', () => {
+    const b = new TarballBudget({ maxBytes: 100, maxTimeMs: 10_000, safetyCeiling: 100 })
+    const r = b.reserve(100)
+    r!.settle(100)
+    expect(b.remaining()).toBe(false)
+    expect(b.reserve(1)).toBeNull()
+    expect(b.reasonTruncated).toBe('BYTE_BUDGET')
+  })
+
+  it('observability values: telemetry reports scanned/download/analysis/bytes', async () => {
+    const b = new TarballBudget({ maxBytes: 1000, maxTimeMs: 10_000, maxConcurrency: 1, safetyCeiling: 100 })
+    const r = b.reserve(50)
+    b.recordDownload(50, 10, r)
+    b.recordWorker(25)
+    const t = b.telemetry()
+    expect(t.scanId).toBeTruthy()
+    expect(t.packagesScanned).toBe(1)
+    expect(t.downloadMs).toBe(10)
+    expect(t.analysisMs).toBe(15)
+    expect(t.bytesDownloaded).toBe(50)
+    expect(t.cacheMisses).toBe(1)
+    expect(t.cacheHits).toBe(0)
+    expect(t.reasonTruncated).toBeNull()
   })
 })
 

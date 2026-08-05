@@ -1,6 +1,7 @@
 export type IntelRisk = 'low' | 'medium' | 'high' | 'critical'
 
 import type { Finding } from '../rules'
+import type { ScanTelemetry } from './tarball-budget'
 
 export interface IntelItem {
   label: string
@@ -286,4 +287,6 @@ export interface IntelReport {
   campaignDelta?: CampaignDelta
   /** Typed findings from scanning the tarball of an added/updated dependency. */
   dependencyTarballFindings?: Finding[]
+  /** Resource/telemetry report for the tarball phase (budget usage, truncation). */
+  tarballScanTelemetry?: ScanTelemetry
 }
