@@ -10,6 +10,7 @@
 import { gunzipSync } from 'node:zlib'
 import type { DependencyDelta, IntelRisk } from './types'
 import type { Finding, PRFile } from '../rules'
+import type { TarballBudget } from './tarball-budget'
 
 interface DepInfo {
   name: string
@@ -146,7 +147,7 @@ function scanFiles(files: Map<string, string>) {
   return { domains: [...domains], networkCalls, capabilities: [...capabilities], scripts, binaries }
 }
 
-async function download(url: string, maxBytes = 5 * 1024 * 1024): Promise<Buffer | null> {
+async function download(url: string, maxBytes = 5 * 1024 * 1024, budget?: TarballBudget): Promise<Buffer | null> {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 15000)
@@ -156,13 +157,15 @@ async function download(url: string, maxBytes = 5 * 1024 * 1024): Promise<Buffer
     const len = parseInt(res.headers.get('content-length') || '0', 10)
     if (len > maxBytes) return null
     const buf = Buffer.from(await res.arrayBuffer())
-    return buf.length > maxBytes ? null : buf
+    if (buf.length > maxBytes) return null
+    budget?.accountBytes(buf.length)
+    return buf
   } catch {
     return null
   }
 }
 
-export async function analyzeDependencyDelta(dep: DepInfo): Promise<DependencyDelta | undefined> {
+export async function analyzeDependencyDelta(dep: DepInfo, budget?: TarballBudget): Promise<DependencyDelta | undefined> {
   if (!dep.fromVersion || !dep.toVersion || dep.fromVersion === dep.toVersion) return undefined
 
   const registry = dep.registry || 'npm'
@@ -173,7 +176,7 @@ export async function analyzeDependencyDelta(dep: DepInfo): Promise<DependencyDe
   const toUrl = urlFn(dep.name, dep.toVersion)
   if (!fromUrl || !toUrl) return undefined
 
-  const [fromBuf, toBuf] = await Promise.all([download(fromUrl), download(toUrl)])
+  const [fromBuf, toBuf] = await Promise.all([download(fromUrl, undefined, budget), download(toUrl, undefined, budget)])
   if (!fromBuf || !toBuf) return undefined
 
   const fromFiles = extractTarballContent(fromBuf)
@@ -327,7 +330,7 @@ function dangerousScript(script: string, command: string): boolean {
  * in it is "new" relative to an empty baseline, so the delta's new* fields are
  * the full signal set. Returns undefined only when the registry is unknown.
  */
-export async function analyzeDependencyTarball(dep: { name: string; version: string; registry?: string }): Promise<TarballScanResult | undefined> {
+export async function analyzeDependencyTarball(dep: { name: string; version: string; registry?: string }, budget?: TarballBudget): Promise<TarballScanResult | undefined> {
   const registry = dep.registry || 'npm'
   const urlFn = REGISTRY_URLS[registry]
   if (!urlFn) return undefined
@@ -340,7 +343,7 @@ export async function analyzeDependencyTarball(dep: { name: string; version: str
   const url = urlFn(dep.name, resolved)
   if (!url) return undefined
 
-  const buf = await download(url)
+  const buf = await download(url, undefined, budget)
   if (!buf) return { resolvedVersion: null, files: new Map(), lifecycleScripts: [] }
 
   const files = extractTarballContent(buf)

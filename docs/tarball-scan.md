@@ -57,6 +57,26 @@ SENTINEL_TARBALL_SCAN=0
 Hermetic test suites set this variable; it is also available as an option on
 `runIntelAnalysis(files, { tarballScan: boolean })`.
 
+### Budget (not a fixed cap)
+
+Registry work is bounded by a `TarballBudget` (`src/scanner/intel/tarball-budget.ts`)
+with four dimensions, each env-overridable:
+
+| Env | Dimension | Default |
+|-----|-----------|---------|
+| `SENTINEL_TARBALL_BUDGET_PACKAGES` | max packages scanned | 20 |
+| `SENTINEL_TARBALL_BUDGET_BYTES` | max total tarball bytes | 50 MB |
+| `SENTINEL_TARBALL_BUDGET_TIME` | max wall-clock ms | 60 s |
+| `SENTINEL_TARBALL_BUDGET_CONCURRENCY` | max parallel fetches | 2 |
+
+`budget.map(...)` schedules added/updated deps with bounded concurrency and stops
+as soon as any dimension runs out, so a PR that adds 120 packages degrades
+gracefully (most-relevant first) instead of running an unbounded download burst.
+The package count is a hard stop; byte/time limits are soft under concurrency
+(in-flight downloads finish, no new ones start). Added and updated deps share the
+same budget within `runIntelAnalysis`, so an added-dep-heavy PR leaves little for
+updates.
+
 ## Source layout
 
 - `src/scanner/intel/deep-dependency.ts` — tar/gzip parsing, registry resolution,

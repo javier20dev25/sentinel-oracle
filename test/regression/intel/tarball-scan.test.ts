@@ -96,6 +96,12 @@ function setupRegistry(entries: Record<string, { json?: unknown; tarball?: Buffe
   vi.stubGlobal('fetch', fetchMock)
 }
 
+function tarballCalls(): string[] {
+  return fetchMock.mock.calls
+    .map(c => String(c[0]))
+    .filter(u => u.includes('.tgz'))
+}
+
 beforeEach(() => {
   vi.stubEnv('SENTINEL_TARBALL_SCAN', '1')
 })
@@ -182,6 +188,73 @@ describe('tarball scan: added dependency (ChainDrop)', () => {
 
     expect(result.findings.some(f => f.file && f.file.includes('node_modules/'))).toBe(false)
     expect(result.intel!.dependencyDelta).toBeUndefined()
+  })
+
+  it('stops scanning after the package budget instead of a fixed cap', async () => {
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_PACKAGES', '1')
+    setupRegistry({
+      'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-a': { json: { versions: { '1.0.0': {} } } },
+      'budget-b/-/budget-b-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-b': { json: { versions: { '1.0.0': {} } } },
+    })
+
+    const result = await scanPRFiles([
+      makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"' }),
+    ])
+
+    // First dep consumed the single package slot; budget-b was never scanned.
+    const tarballs = tarballCalls()
+    expect(tarballs).toHaveLength(1)
+    expect(tarballs[0]).toContain('budget-a-1.0.0.tgz')
+    expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
+    expect(result.findings.some(f => f.description?.includes('budget-b'))).toBe(false)
+  })
+
+  it('stops scanning after the byte budget is exhausted', async () => {
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_BYTES', '1')
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_CONCURRENCY', '1') // sequential: bytes counted before the next start
+    setupRegistry({
+      'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-a': { json: { versions: { '1.0.0': {} } } },
+      'budget-b/-/budget-b-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-b': { json: { versions: { '1.0.0': {} } } },
+    })
+
+    const result = await scanPRFiles([
+      makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"' }),
+    ])
+
+    // Tiny byte budget: budget-a was scanned (bytes accounted after download),
+    // then the budget was spent and budget-b was never scanned.
+    const tarballs = tarballCalls()
+    expect(tarballs).toHaveLength(1)
+    expect(tarballs[0]).toContain('budget-a-1.0.0.tgz')
+    expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
+    expect(result.findings.some(f => f.description?.includes('budget-b'))).toBe(false)
+  })
+
+  it('scans more dependencies when the budget allows (no fixed cap)', async () => {
+    vi.stubEnv('SENTINEL_TARBALL_BUDGET_PACKAGES', '3')
+    setupRegistry({
+      'budget-a/-/budget-a-1.0.0.tgz': { tarball: maliciousKeyvTar },
+      'registry.npmjs.org/budget-a': { json: { versions: { '1.0.0': {} } } },
+      'budget-b/-/budget-b-1.0.0.tgz': { tarball: gzipSync(createTarBuffer([{ name: 'package/index.js', content: 'const ok = 1;' }])) },
+      'registry.npmjs.org/budget-b': { json: { versions: { '1.0.0': {} } } },
+      'budget-c/-/budget-c-1.0.0.tgz': { tarball: gzipSync(createTarBuffer([{ name: 'package/index.js', content: 'const ok = 2;' }])) },
+      'registry.npmjs.org/budget-c': { json: { versions: { '1.0.0': {} } } },
+    })
+
+    const result = await scanPRFiles([
+      makeFile({ filename: 'package.json', patch: '+"budget-a": "1.0.0"\n+"budget-b": "1.0.0"\n+"budget-c": "1.0.0"' }),
+    ])
+
+    const tarballs = tarballCalls()
+    expect(tarballs).toHaveLength(3)
+    expect(tarballs.some(u => u.includes('budget-a-1.0.0.tgz'))).toBe(true)
+    expect(tarballs.some(u => u.includes('budget-b-1.0.0.tgz'))).toBe(true)
+    expect(tarballs.some(u => u.includes('budget-c-1.0.0.tgz'))).toBe(true)
+    expect(result.intel!.dependencyDelta!.packageName).toBe('budget-a')
   })
 })
 
