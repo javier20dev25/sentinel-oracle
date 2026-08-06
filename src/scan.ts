@@ -2,6 +2,7 @@ import { loadConfig } from './config'
 import { GitHubClient } from './github/client'
 import type { GitHubAppConfig } from './github/auth'
 import { scanPRFiles } from './scanner/index'
+import { configureCloudLookup } from './scanner/intel/cloud-lookup'
 import { initHmacKey } from './crypto/signing'
 
 function resolveCredentials(config: ReturnType<typeof loadConfig>): string | GitHubAppConfig {
@@ -28,6 +29,7 @@ export async function runScan(): Promise<void> {
     throw new Error('Repository not configured. Set githubOwner and githubRepo.')
   }
 
+  configureCloudLookup(config.cloudApiUrl, config.cloudApiToken)
   initHmacKey(config.hmacSeed)
   const client = new GitHubClient(resolveCredentials(config), config.githubOwner, config.githubRepo, config.githubStatusContext)
 

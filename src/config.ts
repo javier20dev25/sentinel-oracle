@@ -37,6 +37,8 @@ export interface Config {
   securityInbox: boolean
   analystQueue: boolean
   aiModel: string
+  cloudApiUrl: string
+  cloudApiToken: string
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -221,6 +223,8 @@ export function loadConfig(): Config {
     securityInbox: true,
     analystQueue: true,
     aiModel: '',
+    cloudApiUrl: process.env.SENTINEL_CLOUD_URL ?? '',
+    cloudApiToken: process.env.SENTINEL_CLOUD_API_TOKEN ?? '',
   }
 
   try {

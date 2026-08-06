@@ -25,6 +25,9 @@ import { TarballBudget, mergeTelemetry, type ScanTelemetry } from './tarball-bud
 import { getContentIntelStore, type ContentIntelStore } from './content-intel/store'
 import { stateFromRisk } from './content-intel/state'
 import type { ContentIntelEvidence } from './content-intel/record'
+import { getScannerVersion } from './content-intel/scanner-version'
+import { enrichContentIntel, hasCloudConnection } from './cloud-lookup'
+import { debug } from '../../logger'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
 export { analyzeWorkflowIntelligence }
@@ -199,6 +202,16 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
             verified: true,
             repoKey: opts?.repoKey,
           })
+          if (contentIntelStore && hasCloudConnection() && scan.contentId) {
+            void enrichContentIntel(contentIntelStore, scan.contentId, {
+              repoKey: opts?.repoKey,
+              scannerVersion: getScannerVersion(),
+            })
+              .then(outcome => {
+                if (outcome) debug(`[cloud] ${scan.contentId} enrichment: ${outcome}`)
+              })
+              .catch(() => {})
+          }
         }
       }
     }
