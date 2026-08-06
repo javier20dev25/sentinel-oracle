@@ -11,6 +11,11 @@ import { gunzipSync } from 'node:zlib'
 import type { DependencyDelta, IntelRisk } from './types'
 import type { Finding, PRFile } from '../rules'
 import type { TarballBudget } from './tarball-budget'
+import { normalizeIntegrity, verifyBufferAgainstIntegrity } from './content-intel/identity'
+import { isCacheHit } from './content-intel/record'
+import type { ContentIntelEvidence } from './content-intel/record'
+import type { ContentIntelStore } from './content-intel/store'
+import { CONTENT_INTEL_SCANNER_VERSION } from './content-intel/scanner-version'
 
 interface DepInfo {
   name: string
@@ -244,7 +249,7 @@ export async function analyzeDependencyDelta(dep: DepInfo, budget?: TarballBudge
 // Single-tarball scan for ADDED dependencies (ChainDrop vector)
 // ---------------------------------------------------------------------------
 
-const versionCache = new Map<string, string | null>()
+const versionCache = new Map<string, { resolved: string | null; integrity?: string }>()
 const METADATA_MAX_BYTES = 20 * 1024 * 1024
 
 async function fetchJson(url: string, maxBytes = METADATA_MAX_BYTES): Promise<unknown | null> {
@@ -289,14 +294,26 @@ function compareSemver(a: string, b: string): number {
  * tell whether the exact target is actually published. An added dependency
  * whose requested version is NOT in the registry is a supply-chain signal
  * (the ChainDrop worm published then depublished its malicious versions).
+ * Also captures `dist.integrity` (SRI sha512) of the resolved version — the
+ * content identity used by the intelligence cache, obtainable WITHOUT
+ * downloading the tarball.
  */
-export async function resolveVersion(name: string, version: string, registry = 'npm'): Promise<string | null> {
-  if (registry !== 'npm') return isExactSemver(version) ? version : null
+interface ResolvedVersion {
+  resolved: string | null
+  integrity?: string
+}
+
+async function resolveVersionWithIntegrity(name: string, version: string, registry = 'npm'): Promise<ResolvedVersion> {
+  if (registry !== 'npm') {
+    const exact = isExactSemver(version) ? version : null
+    return { resolved: exact }
+  }
   const cacheKey = `${name}@${version}`
-  if (versionCache.has(cacheKey)) return versionCache.get(cacheKey) ?? null
+  const cachedHit = versionCache.get(cacheKey)
+  if (cachedHit) return cachedHit
 
   const metaUrl = `https://registry.npmjs.org/${encodeURIComponent(name)}`
-  const meta = await fetchJson(metaUrl) as { versions?: Record<string, unknown> } | null
+  const meta = await fetchJson(metaUrl) as { versions?: Record<string, { dist?: { integrity?: string } }> } | null
   const versions = meta?.versions ? Object.keys(meta.versions) : []
 
   let resolved: string | null = null
@@ -322,8 +339,19 @@ export async function resolveVersion(name: string, version: string, registry = '
     resolved = candidates.length > 0 ? candidates[candidates.length - 1] : null
   }
 
-  versionCache.set(cacheKey, resolved)
-  return resolved
+  let integrity: string | undefined
+  if (resolved && meta?.versions) {
+    const entry = meta.versions[resolved]
+    if (entry?.dist?.integrity) integrity = String(entry.dist.integrity)
+  }
+
+  const out: ResolvedVersion = { resolved, integrity }
+  versionCache.set(cacheKey, out)
+  return out
+}
+
+export async function resolveVersion(name: string, version: string, registry = 'npm'): Promise<string | null> {
+  return (await resolveVersionWithIntegrity(name, version, registry)).resolved
 }
 
 export interface TarballScanResult {
@@ -331,9 +359,23 @@ export interface TarballScanResult {
   resolvedVersion: string | null
   /** Why the tarball was not analyzed, when it was not. */
   skipped?: 'not_published' | 'budget' | 'network'
+  /** Content identity (sha512) derived from the registry SRI, when available. */
+  contentId?: string
+  /** true when the verdict came from the content-intelligence cache (no download/analysis ran). */
+  fromCache?: boolean
+  /** Downloaded bytes matched the registry SRI sha512 before the verdict was recorded. */
+  integrityVerified?: boolean
+  /** Findings replayed from the cache on a hit (identical to the original scan). */
+  cachedFindings?: Finding[]
   delta?: DependencyDelta
   files: Map<string, string>
   lifecycleScripts: { script: string; command: string; dangerous: boolean }[]
+}
+
+/** Context for the content-intelligence cache. `store: null` disables it. */
+export interface TarballScanContext {
+  store?: ContentIntelStore | null
+  repoKey?: string
 }
 
 const LIFECYCLE_NAMES = new Set([
@@ -353,15 +395,44 @@ function dangerousScript(script: string, command: string): boolean {
  * Scan a single dependency tarball (for a dependency the PR adds). Everything
  * in it is "new" relative to an empty baseline, so the delta's new* fields are
  * the full signal set. Returns undefined only when the registry is unknown.
+ *
+ * When the registry exposes `dist.integrity`, the content is looked up in the
+ * intelligence cache BEFORE any download: a valid, integrity-verified verdict is
+ * replayed from the record (cachedFindings) and the download is skipped. After a
+ * fresh scan the downloaded bytes are verified against the SRI so only
+ * integrity-confirmed verdicts are ever cached.
  */
-export async function analyzeDependencyTarball(dep: { name: string; version: string; registry?: string }, budget?: TarballBudget): Promise<TarballScanResult | undefined> {
+export async function analyzeDependencyTarball(
+  dep: { name: string; version: string; registry?: string },
+  budget?: TarballBudget,
+  ctx?: TarballScanContext,
+): Promise<TarballScanResult | undefined> {
   const registry = dep.registry || 'npm'
   const urlFn = REGISTRY_URLS[registry]
   if (!urlFn) return undefined
 
-  const resolved = await resolveVersion(dep.name, dep.version, registry)
+  const { resolved, integrity } = await resolveVersionWithIntegrity(dep.name, dep.version, registry)
   if (!resolved) {
     return { resolvedVersion: null, skipped: 'not_published', files: new Map(), lifecycleScripts: [] }
+  }
+
+  const contentId = integrity ? normalizeIntegrity(integrity) : null
+
+  if (contentId && ctx?.store) {
+    const rec = ctx.store.lookup(contentId)
+    if (isCacheHit(rec, CONTENT_INTEL_SCANNER_VERSION)) {
+      budget?.recordCacheHit()
+      ctx.store.touch(contentId, ctx.repoKey)
+      return {
+        resolvedVersion: resolved,
+        fromCache: true,
+        contentId,
+        cachedFindings: rec!.evidence.findings,
+        delta: deltaFromEvidence(rec!.evidence, dep.name, resolved),
+        lifecycleScripts: rec!.evidence.lifecycleScripts,
+        files: new Map(),
+      }
+    }
   }
 
   const url = urlFn(dep.name, resolved)
@@ -397,7 +468,32 @@ export async function analyzeDependencyTarball(dep: { name: string; version: str
     summary: `${files.size} files, ${scan.domains.length} domains, ${scan.scripts.length} install scripts`,
   }
 
-  return { resolvedVersion: resolved, delta, files, lifecycleScripts: extractLifecycleScripts(files) }
+  return {
+    resolvedVersion: resolved,
+    contentId: contentId ?? undefined,
+    integrityVerified: contentId ? verifyBufferAgainstIntegrity(buf, integrity) : undefined,
+    delta,
+    files,
+    lifecycleScripts: extractLifecycleScripts(files),
+  }
+}
+
+/** Rebuild a DependencyDelta from cached evidence (identical to the original scan's delta). */
+function deltaFromEvidence(e: ContentIntelEvidence, pkgName: string, resolved: string): DependencyDelta {
+  return {
+    packageName: pkgName,
+    fromVersion: '',
+    toVersion: resolved,
+    filesChanged: e.filesChanged,
+    newDomains: e.newDomains,
+    newNetworkCalls: e.newNetworkCalls,
+    newDependencies: [],
+    newCapabilities: e.newCapabilities,
+    newScripts: e.newScripts,
+    newBinaries: e.newBinaries,
+    risk: e.risk,
+    summary: e.summary,
+  }
 }
 
 function extractLifecycleScripts(files: Map<string, string>): TarballScanResult['lifecycleScripts'] {

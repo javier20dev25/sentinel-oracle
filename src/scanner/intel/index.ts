@@ -22,6 +22,9 @@ import {
 import { analyzeWorkflowIntelligence } from './workflow-intelligence'
 import { analyzeTrustDrift } from './trust-drift'
 import { TarballBudget, mergeTelemetry, type ScanTelemetry } from './tarball-budget'
+import { getContentIntelStore, type ContentIntelStore } from './content-intel/store'
+import { stateFromRisk } from './content-intel/state'
+import type { ContentIntelEvidence } from './content-intel/record'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
 export { analyzeWorkflowIntelligence }
@@ -90,7 +93,17 @@ function buildSecurityDelta(report: IntelReport) {
   }
 }
 
-export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: boolean }): Promise<IntelReport> {
+export interface IntelAnalysisOptions {
+  tarballScan?: boolean
+  /** Repository context for the seen-in-repos counter (e.g. "owner/repo"). */
+  repoKey?: string
+  /** Inject a content-intel store (tests). Defaults to the persistent SQLite store. */
+  contentIntelStore?: ContentIntelStore | null
+}
+
+export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOptions): Promise<IntelReport> {
+  const contentIntelStore: ContentIntelStore | null =
+    opts?.contentIntelStore !== undefined ? opts.contentIntelStore : getContentIntelStore()
   const report: IntelReport = {}
 
   const deps = analyzeDependencies(files)
@@ -141,7 +154,7 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
         name: add.name,
         version: add.version,
         registry: inferRegistry(add.name),
-      }, budget),
+      }, budget, { store: contentIntelStore, repoKey: opts?.repoKey }),
     )
     tarballTelemetry = budget.telemetry()
     for (const { item, value: scan } of added) {
@@ -150,10 +163,43 @@ export async function runIntelAnalysis(files: PRFile[], opts?: { tarballScan?: b
       if (scan.skipped === 'not_published') {
         tarballFindings.push(unverifiableVersionFinding(item.name, item.version))
       } else if (scan.skipped !== 'budget' && scan.skipped !== 'network') {
-        tarballFindings.push(...lifecycleToFindings(scan.lifecycleScripts, item.name, scan.resolvedVersion ?? ''))
-        if (scan.delta) tarballFindings.push(...deltaToFindings(scan.delta))
+        if (scan.fromCache) {
+          if (scan.cachedFindings) tarballFindings.push(...scan.cachedFindings)
+          continue
+        }
+        const findings: Finding[] = []
+        findings.push(...lifecycleToFindings(scan.lifecycleScripts, item.name, scan.resolvedVersion ?? ''))
+        if (scan.delta) findings.push(...deltaToFindings(scan.delta))
         const prFiles = tarballToPRFiles(scan, item.name)
-        if (prFiles.length > 0) tarballFindings.push(...runRules(prFiles))
+        if (prFiles.length > 0) findings.push(...runRules(prFiles))
+        tarballFindings.push(...findings)
+        if (scan.contentId && scan.integrityVerified === false) {
+          tarballFindings.push({
+            severity: 'medium',
+            category: 'supply_chain',
+            title: 'Dependency tarball integrity mismatch',
+            description: `${item.name}@${scan.resolvedVersion} downloaded bytes do not match the registry SRI (sha512) — possible tampering or registry integrity failure. The verdict was NOT cached.`,
+            file: 'package.json',
+          })
+        }
+        if (scan.contentId && scan.integrityVerified === true && scan.delta) {
+          const evidence: ContentIntelEvidence = {
+            risk: scan.delta.risk,
+            filesChanged: scan.delta.filesChanged,
+            newDomains: scan.delta.newDomains,
+            newNetworkCalls: scan.delta.newNetworkCalls,
+            newCapabilities: scan.delta.newCapabilities,
+            newScripts: scan.delta.newScripts,
+            newBinaries: scan.delta.newBinaries,
+            lifecycleScripts: scan.lifecycleScripts,
+            summary: scan.delta.summary,
+            findings,
+          }
+          contentIntelStore?.record(scan.contentId, stateFromRisk(scan.delta.risk), evidence, {
+            verified: true,
+            repoKey: opts?.repoKey,
+          })
+        }
       }
     }
   }

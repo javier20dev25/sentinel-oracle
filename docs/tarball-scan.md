@@ -115,16 +115,57 @@ Every tarball phase exposes a `tarballScanTelemetry` block on the intel report
 
 `reasonTruncated` is `null` when everything requested was analyzed, otherwise
 `BYTE_BUDGET` | `TIME_BUDGET` | `SAFETY_CEILING`. `cacheHits`/`cacheMisses` are
-the hooks for the global intelligence cache (Fase 2) — currently `cacheMisses`
-equals `packagesScanned`.
+the observability hooks of the content-intelligence cache (below): on a hit the
+bytes and time are zero and no download happens; `cacheMisses` counts every item
+the cache could not answer.
+
+## Content-intelligence cache (identity-based)
+
+Re-scanning the same tarball on every PR wastes registry bandwidth and adds
+latency to the gate. The cache keys on **what the artifact actually is** — the
+sha512 of its bytes — never on `name@version`:
+
+- **Content identity** is derived from npm's own `dist.integrity` SRI
+  (`sha512-<base64>` in registry metadata, normalized to the canonical
+  `sha512:<hex>` content id). No SRI → no identity → the cache is a silent
+  no-op and the tarball is scanned as before.
+- **Verdict record** (`ContentIntelRecord`) holds the state
+  (`KNOWN_SAFE | SUSPICIOUS | MALICIOUS | REVOKED`), seen-in-repos history, the
+  evidence, the **`scannerVersion`** that produced it, and an HMAC-SHA256
+  signature. A tampered or stale row fails signature verification on read and is
+  treated as a miss — a corrupted cache can never flip a verdict.
+- **Cache hit** (a verified, decisive, non-stale verdict for the same content id
+  under the current scanner version) replays the recorded findings verbatim and
+  skips the download entirely. A hit `touch`es the record so the seen-in-repos
+  counter stays accurate.
+- **Integrity gate before caching**: a fresh scan only records its verdict when
+  the downloaded bytes actually match the registry SRI. A mismatch raises a
+  `medium` `Dependency tarball integrity mismatch` finding and **never** caches —
+  that is the signal of a registry integrity failure or a tampered download.
+- **Revalidation**: a `scannerVersion` bump (scanner/rules upgrade), age past the
+  TTL (7 days), a pending state, or an unverified row all force a re-scan. A
+  `REVOKED` record (depublished package, future intelligence feed) never counts
+  as a hit until re-verified.
+
+The store is a seam: the Oracle ships a persistent SQLite implementation
+(`content-intel.db`, HMAC key in `.content_intel_key`) created lazily in
+`~/.sentinel-oracle`, and the multi-tenant Cloud store implements the same
+`ContentIntelStore` interface. Disable with `SENTINEL_CONTENT_INTEL=0`; override
+the database directory with `SENTINEL_CONTENT_INTEL_DB_DIR`.
 
 ## Source layout
 
 - `src/scanner/intel/deep-dependency.ts` — tar/gzip parsing, registry resolution,
   `analyzeDependencyTarball` (added deps), `analyzeDependencyDelta` (updated deps),
-  `tarballToPRFiles`, `lifecycleToFindings`, `deltaToFindings`.
-- `src/scanner/intel/index.ts` — `runIntelAnalysis` wiring + env gate.
+  `tarballToPRFiles`, `lifecycleToFindings`, `deltaToFindings`. Also owns the
+  cache lookup **before** the download and the SRI verification after it.
+- `src/scanner/intel/index.ts` — `runIntelAnalysis` wiring + env gate + cache
+  record/replay of findings.
 - `src/scanner/index.ts` — merges `dependencyTarballFindings` into the signed result.
+- `src/scanner/intel/content-intel/` — the cache: `identity.ts` (SRI/sha512),
+  `state.ts` (state machine), `record.ts` (signed `ContentIntelRecord`),
+  `store.ts` (interface + in-memory + SQLite), `scanner-version.ts` (payload
+  version gate).
 
 ## Why not a dedicated standalone scanner?
 
@@ -163,3 +204,20 @@ fourth product.
   `reasonTruncated: null`
 - unit: `reserve`/`settle` accounting, refusal overflow, concurrent map can never
   overshoot `maxBytes`, time-out truncation, and telemetry shape
+
+`test/regression/intel/content-intel.test.ts` (network mocked, in-memory store):
+
+- identity: canonical content id from bytes, SRI `sha512-<base64>` normalization,
+  malformed-integrity rejection, byte-verification against the SRI
+- state machine: `UNKNOWN → SCANNING → verdict → REVOKED`, revalidation
+  transitions, invalid-transition errors, risk ⇄ verdict mapping
+- signed records: sign/verify roundtrip, tamper detection (including the
+  signature field itself), seen-in-repos touching, revalidation on version/age,
+  cache-hit preconditions, revoke
+- store: verdict transition on re-record, tampered rows never read back
+- e2e: first scan misses + records a verdict; second scan **hits** with identical
+  findings, `cacheHits: 1`, `bytesDownloaded: 0`, zero network reads
+- e2e: different repo increments the seen-in-repos counter
+- e2e: integrity mismatch raises the finding and is **never** cached (still
+  re-downloaded)
+- e2e: registry without `dist.integrity` → cache is a no-op (identity unavailable)

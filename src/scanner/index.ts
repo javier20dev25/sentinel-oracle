@@ -21,7 +21,9 @@ export interface ScanResult {
 
 export async function scanPRFiles(files: PRFile[], prNumber?: number, owner?: string, repo?: string, sha?: string, scanHash?: string): Promise<ScanResult> {
   const findings = runRules(files, prNumber, owner, repo, sha)
-  const intel = await runIntelAnalysis(files)
+  const intel = await runIntelAnalysis(files, {
+    repoKey: owner && repo ? `${owner}/${repo}` : undefined,
+  })
   const buildIntel = analyzeBuildIntelligence(files)
 
   // Fold tarball-scan findings into the signed result: they change the counts,
