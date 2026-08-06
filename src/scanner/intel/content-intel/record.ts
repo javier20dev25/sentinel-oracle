@@ -107,7 +107,17 @@ export function applyVerdict(
 ): ContentIntelRecord {
   const event = verdictEventForState(opts.state)
   if (!event) throw new ContentIntelTransitionGuard(opts.state)
-  const target = existing ? nextState(existing.state, event) : nextState('UNKNOWN', event)
+  let target: ContentIntelState
+  if (!existing) {
+    target = nextState('UNKNOWN', event)
+  } else if (isDecisiveState(existing.state)) {
+    // Re-verdict: a decisive record may be re-affirmed (TTL refresh) or
+    // corrected in place by a fresh analysis — the rescan ceremony is not
+    // needed to re-confirm what the analysis already decided.
+    target = opts.state
+  } else {
+    target = nextState(existing.state, event)
+  }
   const now = opts.now ?? Date.now()
   const fresh: ContentIntelRecord = {
     contentId: opts.contentId,
@@ -130,10 +140,10 @@ export function applyVerdict(
 }
 
 /** A decisive verdict that is usable without re-downloading. */
-export function needsRevalidation(rec: ContentIntelRecord, currentScannerVersion: string, maxAgeMs?: number, now?: number): boolean {
+export function needsRevalidation(rec: ContentIntelRecord, currentScannerVersion: string, maxAgeMs?: number, now: number = Date.now()): boolean {
   if (!isDecisiveState(rec.state)) return true
   if (rec.scannerVersion !== currentScannerVersion) return true
-  if (maxAgeMs && now !== undefined && now - rec.stateSince > maxAgeMs) return true
+  if (maxAgeMs && now - rec.stateSince > maxAgeMs) return true
   return false
 }
 
