@@ -55,6 +55,16 @@ function cloudSettings(opts?: { baseUrl?: string; token?: string }): { baseUrl: 
   return { baseUrl, token }
 }
 
+/**
+ * Resolved Cloud connection settings under the same precedence used by the
+ * lookup client: explicit opts > configured (config.json via configureCloudLookup)
+ * > SENTINEL_CLOUD_URL / SENTINEL_CLOUD_API_TOKEN env vars. Shared by the
+ * contribution client so both directions of the N3 contract read one config.
+ */
+export function resolveCloudSettings(opts?: { baseUrl?: string; token?: string }): { baseUrl: string; token: string } {
+  return cloudSettings(opts)
+}
+
 /** True when both a Cloud URL and an API token are configured. */
 export function hasCloudConnection(opts?: { baseUrl?: string; token?: string }): boolean {
   const { baseUrl, token } = cloudSettings(opts)

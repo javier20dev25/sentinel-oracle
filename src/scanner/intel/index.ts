@@ -27,6 +27,7 @@ import { stateFromRisk } from './content-intel/state'
 import type { ContentIntelEvidence } from './content-intel/record'
 import { getScannerVersion } from './content-intel/scanner-version'
 import { enrichContentIntel, hasCloudConnection } from './cloud-lookup'
+import { contributeScanEvidence } from './cloud-contribute'
 import { debug } from '../../logger'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
@@ -212,6 +213,11 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
               })
               .catch(() => {})
           }
+          void contributeScanEvidence(scan, findings, { scannerVersion: getScannerVersion() })
+            .then(outcome => {
+              if (outcome) debug(`[cloud] ${scan.contentId} contribution: ${outcome}`)
+            })
+            .catch(() => {})
         }
       }
     }

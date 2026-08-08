@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     include: [
       'test/regression/intel/cloud-lookup.test.ts',
+      'test/regression/intel/cloud-contribute.test.ts',
+      'test/regression/intel/contribute-builder.test.ts',
       'test/regression/intel/enrich.test.ts',
       'test/regression/intel/enrich-throws.test.ts',
       'test/regression/intel/lookup-security.test.ts',
