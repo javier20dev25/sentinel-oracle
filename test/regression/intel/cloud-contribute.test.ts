@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import path from 'path'
+import { createHash } from 'node:crypto'
 import type { Finding } from '../../../src/scanner/rules'
 import type { TarballScanResult } from '../../../src/scanner/intel/deep-dependency'
 import { contributeEvidence, contributeScanEvidence, CONTRIBUTE_ENDPOINT, buildContributePayload, MAX_429_RETRIES } from '../../../src/scanner/intel/cloud-contribute'
@@ -193,6 +194,54 @@ describe('contributeScanEvidence wiring', () => {
   it('returns a status string for logging and never throws', async () => {
     stubFetch(async () => jsonResponse(200, okBody))
     expect(await contributeScanEvidence(scan, findings, { baseUrl: BASE, token: TOKEN })).toBe('submitted')
+  })
+
+  it('posts the N3.2 payload with signals and identity on a fresh scan', async () => {
+    let posted: Record<string, unknown> | null = null
+    stubFetch(async (url, init) => {
+      posted = JSON.parse(String(init?.body))
+      return jsonResponse(200, okBody)
+    })
+    await contributeScanEvidence(scan, findings, { baseUrl: BASE, token: TOKEN })
+    expect(posted?.identity).toEqual({
+      ecosystem: 'npm',
+      package: 'evildep',
+      version: '1.0.0',
+      packageHash: 'sha512:' + 'a'.repeat(128),
+    })
+    expect(posted).toHaveProperty('evidence.signals')
+    const signals = (posted?.evidence as { signals?: string[] }).signals
+    expect(signals).toEqual(['network', 'child_process'])
+    const ev = posted?.evidence as { manifestHash?: string; alerts?: unknown[]; deltas?: unknown[] }
+    expect(ev?.manifestHash).toMatch(/^[0-9a-f]{24}$/)
+    expect(ev?.manifestHash).toBe(
+      createHash('sha256')
+        .update(JSON.stringify({ alerts: ev?.alerts ?? [], deltas: ev?.deltas ?? [] }))
+        .digest('hex')
+        .slice(0, 24),
+    )
+  })
+
+  it('omits signals when the delta carries none; identity still reflects the manifest name', async () => {
+    let posted: Record<string, unknown> | null = null
+    stubFetch(async (url, init) => {
+      posted = JSON.parse(String(init?.body))
+      return jsonResponse(200, okBody)
+    })
+    const clean: TarballScanResult = {
+      ...scan,
+      contentId: undefined,
+      delta: {
+        ...scan.delta!,
+        newCapabilities: [],
+        newDomains: [],
+        newScripts: [],
+        newBinaries: [],
+      },
+    }
+    await contributeScanEvidence(clean, [], { baseUrl: BASE, token: TOKEN })
+    expect((posted?.evidence as { signals?: string[] }).signals).toBeUndefined()
+    expect(posted?.identity).toEqual({ ecosystem: 'npm', package: 'evildep', version: '1.0.0' })
   })
 
   it('reports rejection statuses for logging', async () => {

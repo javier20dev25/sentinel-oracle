@@ -36,6 +36,43 @@ export const MAX_429_RETRIES = 2
 export const MAX_RETRY_DELAY_MS = 60_000
 const DEFAULT_TIMEOUT_MS = 3000
 
+/**
+ * Closed enum of normalized dependency signals (N3.2). Each value is the
+ * canonical name for an observable the Oracle's tarball scanner already emits
+ * (capabilities, domains, install scripts, binaries, lifecycle hooks, typed
+ * findings). `signals` is OPTIONAL on the evidence and only sent when non-empty.
+ */
+export const CONTRIBUTE_SIGNALS = [
+  'install_script',
+  'network',
+  'credential_access',
+  'child_process',
+  'runtime_execution',
+  'obfuscation',
+  'encoded_payload',
+  'filesystem',
+  'binary',
+  'download',
+  'config_tampering',
+  'suspicious_url',
+] as const
+export type ContributeSignal = (typeof CONTRIBUTE_SIGNALS)[number]
+export const MAX_SIGNALS = 32
+const SIGNAL_SET = new Set<string>(CONTRIBUTE_SIGNALS)
+
+/**
+ * Dependency identity for the top-level N3.2 `identity` field. `packageHash` is
+ * the sha512 hex of the TARBALL bytes (the registry `dist.integrity` / local
+ * content-intel cache id — `sha512:<hex>`), NOT the manifest contentId used in
+ * the contribute payload. Only present when the registry exposed a stable SRI.
+ */
+export interface ContributeIdentity {
+  ecosystem: 'npm'
+  package: string
+  version?: string
+  packageHash?: string
+}
+
 export type ContributeState = 'KNOWN_SAFE' | 'SUSPICIOUS' | 'MALICIOUS'
 export type ContributeSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'WARNING' | 'INFO'
 
@@ -54,11 +91,15 @@ export interface ContributePayload {
   contentId: string
   state: ContributeState
   scannerVersion: string
+  /** N3.2 dependency identity; only present when the package.json name is a non-empty string. */
+  identity?: ContributeIdentity
   evidence: {
     risk: IntelRisk
     manifestHash: string
     alerts: ContributeItem[]
     deltas: ContributeItem[]
+    /** N3.2 normalized signals; only present when non-empty. */
+    signals?: ContributeSignal[]
   }
 }
 
@@ -69,6 +110,8 @@ export interface BuildContributePayloadOptions {
   alerts: ContributeItem[]
   deltas: ContributeItem[]
   scannerVersion?: string
+  signals?: readonly string[]
+  identity?: ContributeIdentity
 }
 
 /** Drop a UTF-8 string to a whole-character prefix that fits in maxBytes. */
@@ -102,7 +145,9 @@ function contractStateFromRisk(risk: IntelRisk): ContributeState {
 /**
  * Build the exact N3 request body. The contract's derived values are computed
  * from the FINAL (capped) arrays and the capped manifest, so what the client
- * sends always matches what the Cloud can recompute server-side.
+ * sends always matches what the Cloud can recompute server-side. `signals` and
+ * `identity` are OPTIONAL additive N3.2 fields: neither participates in
+ * manifestHash (which stays sha256(JSON.stringify({alerts, deltas}))[:24]).
  */
 export function buildContributePayload(opts: BuildContributePayloadOptions): ContributePayload {
   const manifest = truncateUtf8(opts.manifest, MAX_MANIFEST_BYTES)
@@ -114,13 +159,18 @@ export function buildContributePayload(opts: BuildContributePayloadOptions): Con
     .update(JSON.stringify({ alerts, deltas }))
     .digest('hex')
     .slice(0, 24)
-  return {
+  const evidence: ContributePayload['evidence'] = { risk: opts.risk, manifestHash, alerts, deltas }
+  const signals = opts.signals ? normalizeSignals(opts.signals) : []
+  if (signals.length > 0) evidence.signals = signals
+  const payload: ContributePayload = {
     manifest,
     contentId,
     state: opts.state,
     scannerVersion,
-    evidence: { risk: opts.risk, manifestHash, alerts, deltas },
+    evidence,
   }
+  if (opts.identity) payload.identity = opts.identity
+  return payload
 }
 
 const FINDING_SEVERITY_TO_CONTRACT: Record<Finding['severity'], ContributeSeverity> = {
@@ -162,16 +212,121 @@ const CAPABILITY_SEVERITY: Record<string, ContributeSeverity> = {
 }
 
 /**
+ * Normalize an arbitrary signal list into the closed N3.2 enum: drop unknown
+ * values, dedupe, emit in the enum's canonical (stable) order, cap at 32.
+ */
+export function normalizeSignals(signals: readonly string[]): ContributeSignal[] {
+  const present = new Set<ContributeSignal>()
+  for (const s of signals) {
+    if (SIGNAL_SET.has(s)) present.add(s as ContributeSignal)
+  }
+  return CONTRIBUTE_SIGNALS.filter(s => present.has(s)).slice(0, MAX_SIGNALS)
+}
+
+const MAX_PACKAGE_CHARS = 128
+
+/**
+ * Extract the N3.2 dependency identity from the tarball's package.json.
+ * Returns undefined when the manifest is missing, malformed, or carries no
+ * non-empty `name` (the contract only admits an identity when the package name
+ * is present and ≤128 chars; ecosystem is fixed lowercase 'npm'). `packageHash`
+ * is the sha512 hex of the tarball bytes when a stable SRI exists (`scan.contentId`).
+ */
+export function identityFromManifest(manifest: string | null | undefined, packageHash?: string): ContributeIdentity | undefined {
+  if (typeof manifest !== 'string' || manifest.length === 0) return undefined
+  try {
+    const pkg = JSON.parse(manifest) as { name?: unknown; version?: unknown }
+    if (typeof pkg?.name !== 'string') return undefined
+    const name = pkg.name.trim()
+    if (!name || name.length > MAX_PACKAGE_CHARS) return undefined
+    const identity: ContributeIdentity = { ecosystem: 'npm', package: name }
+    if (typeof pkg.version === 'string' && pkg.version.trim()) identity.version = pkg.version.trim()
+    if (packageHash) identity.packageHash = packageHash
+    return identity
+  } catch {
+    return undefined
+  }
+}
+
+/** Download primitives inside a lifecycle command (ChainDrop install vector). */
+const DOWNLOAD_RE = /\b(curl|wget|iwr)\b|invoke-webrequest/i
+/** Clear-cut execution primitives inside a lifecycle command (mirrors dangerousScript's execution half). */
+const EXECUTION_RE = /\bbash\b|\bsh\s+-c\b|\bpowershell\b|\bcmd\s+\/?c\b|node\s+[\w./'-]+\.(mjs|js|cjs|ts)/i
+
+/**
+ * Map the Oracle tarball scanner's raw signals onto the closed N3.2 enum.
+ * Conservative by design: only clear-cut signals are mapped, everything
+ * ambiguous is deliberately omitted (e.g. the Crypto capability, which is not
+ * obfuscation/encoding; and no `suspicious_url`/`config_tampering`, which the
+ * tarball scanner cannot classify today). The result is deduplicated, ordered
+ * by the enum's declaration order, and capped at MAX_SIGNALS.
+ */
+export function signalSetFromScan(
+  delta: DependencyDelta | undefined,
+  lifecycleScripts: readonly { script: string; command: string; dangerous: boolean }[],
+  findings: readonly Finding[],
+): ContributeSignal[] {
+  const signals = new Set<ContributeSignal>()
+  if (delta) {
+    for (const cap of delta.newCapabilities) {
+      switch (cap) {
+        case 'Shell':
+          signals.add('child_process')
+          break
+        case 'Dynamic Code':
+          signals.add('runtime_execution')
+          break
+        case 'Network':
+          signals.add('network')
+          break
+        case 'Filesystem':
+          signals.add('filesystem')
+          break
+      }
+    }
+    if (delta.newDomains.length > 0) signals.add('network')
+    if (delta.newScripts.length > 0) signals.add('install_script')
+    if (delta.newBinaries.length > 0) signals.add('binary')
+  }
+  for (const hook of lifecycleScripts) {
+    signals.add('install_script')
+    if (!hook.dangerous) continue
+    const command = hook.command.toLowerCase()
+    if (DOWNLOAD_RE.test(command)) signals.add('download')
+    if (EXECUTION_RE.test(command)) signals.add('runtime_execution')
+  }
+  for (const f of findings) {
+    if (f.category === 'secret') signals.add('credential_access')
+    const title = f.title.toLowerCase()
+    if (title.includes('base64-decoded')) signals.add('encoded_payload')
+    if (title.includes('obfuscat') || title.includes('hex-encoded')) signals.add('obfuscation')
+    if (title.includes('outbound network request')) signals.add('network')
+    if (title.includes('os command execution')) signals.add('child_process')
+    if (title.includes('file system access')) signals.add('filesystem')
+    if (
+      title.includes('unsafe eval') ||
+      title.includes('dynamic function') ||
+      title.includes('settimeout with string') ||
+      title.includes('dynamic require')
+    ) {
+      signals.add('runtime_execution')
+    }
+  }
+  return normalizeSignals([...signals])
+}
+
+/**
  * Serialize a fresh tarball scan into the N3 contribution inputs. Returns null
  * when there is nothing to contribute (no delta, or the tarball carried no
  * package.json manifest). Alerts are the typed scan findings; deltas are the
  * version-delta signal set (new capabilities/domains/scripts/binaries) plus a
- * files-changed note when the delta is otherwise clean.
+ * files-changed note when the delta is otherwise clean. N3.2 `signals` and
+ * `identity` are attached only when present.
  */
 export function serializeScanEvidence(
   scan: TarballScanResult,
   findings: Finding[],
-): { manifest: string; state: ContributeState; risk: IntelRisk; alerts: ContributeItem[]; deltas: ContributeItem[] } | null {
+): { manifest: string; state: ContributeState; risk: IntelRisk; alerts: ContributeItem[]; deltas: ContributeItem[]; signals?: ContributeSignal[]; identity?: ContributeIdentity } | null {
   if (!scan.delta) return null
   const manifest = scan.files.get('package.json')
   if (typeof manifest !== 'string' || manifest.length === 0) return null
@@ -228,12 +383,17 @@ export function serializeScanEvidence(
     })
   }
 
+  const signals = signalSetFromScan(scan.delta, scan.lifecycleScripts, findings)
+  const identity = identityFromManifest(manifest, scan.contentId)
+
   return {
     manifest,
     state: contractStateFromRisk(scan.delta.risk),
     risk: scan.delta.risk,
     alerts: findings.map(findingToContributeItem),
     deltas,
+    ...(signals.length > 0 ? { signals } : {}),
+    ...(identity ? { identity } : {}),
   }
 }
 
