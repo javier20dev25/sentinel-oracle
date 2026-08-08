@@ -16,6 +16,7 @@ import { isCacheHit } from './content-intel/record'
 import type { ContentIntelEvidence } from './content-intel/record'
 import type { ContentIntelStore } from './content-intel/store'
 import { CONTENT_INTEL_SCANNER_VERSION } from './content-intel/scanner-version'
+import { MAX_MANIFEST_BYTES } from './cloud-contribute'
 
 interface DepInfo {
   name: string
@@ -72,12 +73,17 @@ function parseTar(buf: Buffer): TarballFile[] {
 
     if (typeFlag === 0 || typeFlag === 48 || typeFlag === 49) {
       const fullName = prefix ? `${prefix}/${nameStr}` : nameStr
+      const name = fullName.replace(/^[^/]*\//, '')
       const contentSize = Math.ceil(fileSize / 512) * 512
       const contentBuf = buf.subarray(offset, Math.min(offset + fileSize, size))
-      const content = contentBuf.toString('utf-8').slice(0, 20000)
+      // The manifest feeds the contribution contentId; keep it up to the
+      // contract cap (262144) so Oracle's contentId matches the CLI's hash of
+      // the full package.json (N3 review, invariant 2).
+      const cap = name === 'package.json' ? MAX_MANIFEST_BYTES : 20000
+      const content = contentBuf.toString('utf-8').slice(0, cap)
 
       if (fullName) {
-        files.push({ name: fullName.replace(/^[^/]*\//, ''), content })
+        files.push({ name, content })
       }
     }
 
@@ -88,7 +94,7 @@ function parseTar(buf: Buffer): TarballFile[] {
   return files
 }
 
-function extractTarballContent(buffer: Buffer): Map<string, string> {
+export function extractTarballContent(buffer: Buffer): Map<string, string> {
   const files = new Map<string, string>()
   try {
     const decompressed = gunzipSync(buffer)

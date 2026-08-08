@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { gzipSync } from 'node:zlib'
 
 // We import the module and also access internals for direct testing
-import { analyzeDependencyDelta } from '../../../src/scanner/intel/deep-dependency'
+import { analyzeDependencyDelta, extractTarballContent } from '../../../src/scanner/intel/deep-dependency'
 import type { DependencyDelta } from '../../../src/scanner/intel/types'
 
 // Helper: create a tar buffer with given files
@@ -128,6 +128,19 @@ describe('deep-dependency: parseTar internal', () => {
     const result = extractTarballContentInternal(compressed)
     // gzip succeeds but tar is garbage — returns empty or partial
     expect(result).toBeDefined()
+  })
+
+  it('keeps package.json up to the manifest cap (262144) but caps other files at 20000', () => {
+    const longManifest = '{"name":"big","x":"' + 'a'.repeat(25000) + '"}'
+    const longOther = 'b'.repeat(25000)
+    const tar = createTarBuffer([
+      { name: 'package/package.json', content: longManifest },
+      { name: 'package/src/index.js', content: longOther },
+    ])
+    const compressed = gzipSync(tar)
+    const result = extractTarballContent(compressed)
+    expect(result.get('package.json')).toBe(longManifest)
+    expect(result.get('src/index.js')).toHaveLength(20000)
   })
 })
 
