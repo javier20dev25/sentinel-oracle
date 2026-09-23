@@ -12,7 +12,7 @@ export type CloudLookupOutcome =
   | { kind: 'hit'; verdict: 'KNOWN_SAFE' | 'SUSPICIOUS' | 'MALICIOUS'; confidence?: number; signature?: string; usable: true }
   | { kind: 'unusable'; reason?: string }
   | { kind: 'miss' }
-  | { kind: 'error'; message?: string }
+  | { kind: 'error'; message?: string; reason?: 'no_active_subscription' | string }
 
 export interface CloudLookupOptions {
   baseUrl?: string
@@ -32,6 +32,20 @@ export interface EnrichContentIntelOptions {
 const DEFAULT_TIMEOUT_MS = 3000
 const SIGNATURE_RE = /^[0-9a-f]{64}$/
 const VERDICTS = ['KNOWN_SAFE', 'SUSPICIOUS', 'MALICIOUS'] as const
+/** Cloud business-gate code for a token with no active subscription. */
+const NO_ACTIVE_SUBSCRIPTION = 'NO_ACTIVE_SUBSCRIPTION'
+
+async function denyCode(res: Response): Promise<string | undefined> {
+  try {
+    const body: unknown = await res.json()
+    if (typeof body === 'object' && body !== null && typeof (body as Record<string, unknown>).code === 'string') {
+      return (body as Record<string, unknown>).code as string
+    }
+  } catch {
+    // unparseable body — caller treats it as a plain denial
+  }
+  return undefined
+}
 
 let configuredSettings: { baseUrl?: string; token?: string } | null = null
 let cloudMotorFull = false
@@ -114,7 +128,16 @@ export async function lookupCloud(contentId: string, opts?: CloudLookupOptions):
       body: JSON.stringify(body),
       signal: controller.signal,
     })
-    if (res.status === 401 || res.status === 403) return { kind: 'error' }
+    if (res.status === 401 || res.status === 403) {
+      if ((await denyCode(res)) === NO_ACTIVE_SUBSCRIPTION) {
+        return {
+          kind: 'error',
+          reason: 'no_active_subscription',
+          message: 'No active subscription. Choose a plan to continue using Sentinel Cloud intelligence.',
+        }
+      }
+      return { kind: 'error' }
+    }
     if (!res.ok) return { kind: 'error' }
     const data: unknown = await res.json()
     if (!data || typeof data !== 'object') return { kind: 'error' }
@@ -170,7 +193,11 @@ export async function enrichContentIntel(
       timeoutMs: opts?.timeoutMs,
       scannerVersion: opts?.scannerVersion ?? getScannerVersion(),
     })
-    if (outcome.kind !== 'hit') return outcome.kind === 'miss' ? 'noop' : 'unavailable'
+    if (outcome.kind !== 'hit') {
+      if (outcome.kind === 'miss') return 'noop'
+      if (outcome.kind === 'error' && outcome.reason === 'no_active_subscription') return 'no-active-subscription'
+      return 'unavailable'
+    }
     if (outcome.verdict === 'KNOWN_SAFE') return 'noop'
     if (current.state === 'MALICIOUS' || current.state === 'SUSPICIOUS') return 'noop'
     if (current.state !== 'KNOWN_SAFE' && current.state !== 'UNKNOWN' && current.state !== 'SCANNING') return 'noop'

@@ -28,6 +28,10 @@ export interface CloudAccount {
   user: string | null
   plan: string | null
   planLabel: string | null
+  /** False = cuenta sin suscripción activa; null = legacy/desconocido. */
+  planActive: boolean | null
+  /** Landing/dashboard URL servida por el Cloud, si la expone. */
+  landingUrl: string | null
   linkedAt: string
 }
 
@@ -46,6 +50,8 @@ export interface CloudCapabilities {
   subjectId: string
   plan: string
   planLabel: string
+  planActive: boolean | null
+  landingUrl: string | null
   expiresAt: string
   issuedAt: string
   capabilities: Record<string, boolean>
@@ -87,6 +93,8 @@ export function loadCloudAccount(config: Config): CloudAccount | null {
       user: typeof data.user === 'string' ? data.user : null,
       plan: typeof data.plan === 'string' ? data.plan : null,
       planLabel: typeof data.planLabel === 'string' ? data.planLabel : null,
+      planActive: typeof data.planActive === 'boolean' ? data.planActive : null,
+      landingUrl: isString(data.landingUrl) ? data.landingUrl : null,
       linkedAt: typeof data.linkedAt === 'string' ? data.linkedAt : new Date().toISOString(),
     }
   } catch {
@@ -98,7 +106,7 @@ export function saveCloudAccount(
   config: Config,
   baseUrl: string,
   token: string,
-  account: Pick<CloudAccount, 'subjectId' | 'user' | 'plan' | 'planLabel'>,
+  account: Pick<CloudAccount, 'subjectId' | 'user' | 'plan' | 'planLabel' | 'planActive' | 'landingUrl'>,
 ): void {
   const tokenEnc = encrypt(token, config.encryptionKey)
   const file = accountFilePath(config)
@@ -113,6 +121,8 @@ export function saveCloudAccount(
         user: account.user,
         plan: account.plan,
         planLabel: account.planLabel,
+        planActive: account.planActive,
+        landingUrl: account.landingUrl,
         linkedAt: new Date().toISOString(),
       },
       null,
@@ -157,6 +167,28 @@ export function assertSecureCloudUrl(rawUrl: string): string {
   return rawUrl.replace(/\/+$/, '')
 }
 
+/**
+ * Resolve the URL the UI should open for "IR AL DASHBOARD / ELEGIR PLAN".
+ * Prefers the Cloud-provided landingUrl (e.g. `https://host/#pricing`) when it
+ * is safe to open — https, or loopback http for local development — otherwise
+ * falls back to the (already validated) Cloud base URL. Any unparseable value
+ * is dropped so the button never opens a malformed URL.
+ */
+export function resolveCloudLandingUrl(baseUrl: string, landingUrl?: string | null): string {
+  const cleanBase = baseUrl.replace(/\/+$/, '')
+  if (landingUrl) {
+    try {
+      const parsed = new URL(landingUrl)
+      if (parsed.protocol === 'https:' || isLoopbackHost(parsed.hostname)) {
+        return landingUrl.replace(/\/+$/, '')
+      }
+    } catch {
+      // malformed landing url — fall through to baseUrl
+    }
+  }
+  return cleanBase
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -175,11 +207,17 @@ function validateCapabilities(body: unknown): CloudCapabilities | null {
   if (!isString(body.expiresAt) || !isString(body.issuedAt)) return null
   if (body.user !== null && body.user !== undefined && !isString(body.user)) return null
   if (!isRecord(body.capabilities) || !isRecord(body.limits)) return null
+  // planActive/landingUrl are additive: a stale Cloud (or malformed payload)
+  // maps them to null instead of rejecting the capabilities response.
+  const planActive = typeof body.planActive === 'boolean' ? body.planActive : null
+  const landingUrl = isString(body.landingUrl) ? body.landingUrl : null
   return {
     user: typeof body.user === 'string' ? body.user : null,
     subjectId: body.subjectId,
     plan: body.plan,
     planLabel: body.planLabel,
+    planActive,
+    landingUrl,
     expiresAt: body.expiresAt,
     issuedAt: body.issuedAt,
     capabilities: body.capabilities as Record<string, boolean>,

@@ -35,6 +35,7 @@ import {
   fetchCloudUsage,
   hasStoredCloudAccount,
   loadCloudAccount,
+  resolveCloudLandingUrl,
   resolveOracleCloudConnection,
   saveCloudAccount,
 } from './cloud/account'
@@ -1662,12 +1663,17 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     const conn = resolveOracleCloudConnection(config)
     const stored = loadCloudAccount(config)
     const linked = hasStoredCloudAccount(config) && !!stored
+    let planActive: boolean | null = null
+    let landingUrl: string | null = null
+    let account: Record<string, unknown> | null = null
     const payload: Record<string, unknown> = {
       linked,
       configured: conn.viaConfigOrEnv,
       motorFull: config.cloudMotorFull,
       baseUrl: conn.baseUrl ? maskedCloudHost(conn.baseUrl) : '',
-      account: linked && stored ? { user: stored.user, subjectId: stored.subjectId, plan: stored.plan, planLabel: stored.planLabel } : null,
+      account: null,
+      planActive: null,
+      landingUrl: '',
       usage: null,
       connected: false,
       error: null,
@@ -1676,9 +1682,15 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const caps = await fetchCloudCapabilities(conn.baseUrl, conn.token)
       if (caps.ok) {
         payload.connected = true
-        if (!payload.account) {
-          payload.account = { user: caps.data.user, subjectId: caps.data.subjectId, plan: caps.data.plan, planLabel: caps.data.planLabel }
+        account = {
+          user: caps.data.user,
+          subjectId: caps.data.subjectId,
+          plan: caps.data.plan,
+          planLabel: caps.data.planLabel,
+          planActive: caps.data.planActive,
         }
+        planActive = caps.data.planActive
+        landingUrl = caps.data.landingUrl
       } else {
         payload.error = caps.error ?? 'Cloud connection could not be verified.'
       }
@@ -1687,6 +1699,22 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     } else if (!payload.linked) {
       payload.error = 'No hay cuenta de Sentinel Cloud vinculada.'
     }
+    // Live capabilities win; fall back to the stored (last-linked) profile
+    // when the Cloud is unreachable so the panel never loses plan context.
+    if (!account && stored) {
+      account = {
+        user: stored.user,
+        subjectId: stored.subjectId,
+        plan: stored.plan,
+        planLabel: stored.planLabel,
+        planActive: stored.planActive,
+      }
+      if (planActive === null) planActive = stored.planActive
+      if (!landingUrl) landingUrl = stored.landingUrl
+    }
+    payload.account = account
+    payload.planActive = planActive
+    payload.landingUrl = conn.baseUrl ? resolveCloudLandingUrl(conn.baseUrl, landingUrl) : ''
     return payload
   }
 
@@ -1847,13 +1875,22 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         user: caps.data.user,
         plan: caps.data.plan,
         planLabel: caps.data.planLabel,
+        planActive: caps.data.planActive,
+        landingUrl: caps.data.landingUrl,
       })
       applyConfiguredCloud(config)
       db.log('cloud_link', null, `Sentinel Cloud linked (${maskedCloudHost(safeUrl)}) — subjectId redacted`)
       const usage = await fetchCloudUsage(safeUrl, token.trim())
       res.json({
         success: true,
-        account: { user: caps.data.user, subjectId: caps.data.subjectId, plan: caps.data.plan, planLabel: caps.data.planLabel },
+        account: {
+          user: caps.data.user,
+          subjectId: caps.data.subjectId,
+          plan: caps.data.plan,
+          planLabel: caps.data.planLabel,
+          planActive: caps.data.planActive,
+        },
+        landingUrl: resolveCloudLandingUrl(safeUrl, caps.data.landingUrl),
         usage: usage.ok ? usage.data : null,
       })
     } catch (err) {

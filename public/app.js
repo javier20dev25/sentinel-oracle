@@ -3158,6 +3158,13 @@
         } else {
           html += '<div class="token-detail"><span class="token-label">Cuenta</span><span class="badge pending">VERIFICANDO</span></div>'
         }
+        if (cloud.planActive === false) {
+          html += '<div class="token-detail"><span class="token-label">Suscripción</span><span class="badge pending">SIN PLAN ACTIVO</span></div>'
+          html += '<p style="font-size:0.6rem;color:var(--accent-orange);line-height:1.5;margin:0.5rem 0">La cuenta vinculada no tiene una suscripción activa: el Motor Full no puede consumir pulsos y Sentinel Cloud rechazará los lookups y el matching. Elige un plan para reactivar la inteligencia.</p>'
+          if (cloud.landingUrl) html += '<button type="button" id="cloud-choose-plan-btn" class="auth-btn" style="margin-bottom:0.5rem">ELEGIR PLAN</button>'
+        } else if (cloud.planActive === true) {
+          html += '<div class="token-detail"><span class="token-label">Suscripción</span><span class="badge success">PLAN ACTIVO</span></div>'
+        }
         html += '<div style="margin-top:0.75rem;border-top:1px solid var(--border-color);padding-top:0.75rem">'
         html += '<div class="toggle-row">'
         html += '<div class="toggle-info"><div class="toggle-label">Motor Full</div><div class="toggle-desc">Participa en scans: consume pulsos de tu cuota mensual para lookup, contribución y matching contra Sentinel Cloud.</div></div>'
@@ -3177,6 +3184,7 @@
         }
         if (cloud.linked) {
           html += '<div style="margin-top:0.75rem;border-top:1px solid var(--border-color);padding-top:0.75rem;display:flex;gap:0.5rem">'
+          if (cloud.landingUrl) html += '<button type="button" id="cloud-dashboard-btn" class="btn-small">IR AL DASHBOARD</button>'
           html += '<button type="button" id="cloud-unlink-btn" class="btn-small">DESCONECTAR CUENTA</button>'
           html += '</div>'
         }
@@ -3223,6 +3231,18 @@
         }
       })
     }
+    function openCloudLanding() {
+      var url = cloud && cloud.landingUrl
+      if (!url) return
+      var parsed = null
+      try { parsed = new URL(url) } catch (e) { return }
+      if (parsed.protocol !== 'https:' && !/^(localhost|::1|127(\.\d{1,3}){3})$/.test(parsed.hostname)) return
+      window.open(url, '_blank', 'noopener')
+    }
+    var choosePlanBtn = document.getElementById('cloud-choose-plan-btn')
+    if (choosePlanBtn) choosePlanBtn.addEventListener('click', openCloudLanding)
+    var dashboardBtn = document.getElementById('cloud-dashboard-btn')
+    if (dashboardBtn) dashboardBtn.addEventListener('click', openCloudLanding)
   }
 
   function openCloudLinkModal() {

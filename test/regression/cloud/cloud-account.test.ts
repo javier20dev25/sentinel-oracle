@@ -21,9 +21,11 @@ import { loadConfig } from '../../../src/config'
 import {
   assertSecureCloudUrl,
   clearCloudAccount,
+  fetchCloudCapabilities,
   hasStoredCloudAccount,
   isLoopbackHost,
   loadCloudAccount,
+  resolveCloudLandingUrl,
   resolveOracleCloudConnection,
   saveCloudAccount,
 } from '../../../src/cloud/account'
@@ -128,5 +130,90 @@ describe('cloud/account: encrypted at-rest account store', () => {
     expect(conn.baseUrl).toBe('https://stored.example.com')
     expect(conn.token).toBe('stored-token')
     clearCloudAccount(config)
+  })
+
+  it('persists and reloads planActive and landingUrl', () => {
+    saveCloudAccount(config, 'https://cloud.example.com', 'tok', {
+      subjectId: 'sub-x',
+      user: 'dev@example.com',
+      plan: 'ENTERPRISE',
+      planLabel: 'Enterprise',
+      planActive: false,
+      landingUrl: 'https://cloud.example.com/#pricing',
+    })
+    const account = loadCloudAccount(config)
+    expect(account!.planActive).toBe(false)
+    expect(account!.landingUrl).toBe('https://cloud.example.com/#pricing')
+    expect(account!.plan).toBe('ENTERPRISE')
+  })
+
+  it('defaults planActive and landingUrl to null on legacy accounts', () => {
+    saveCloudAccount(config, 'https://cloud.example.com', 'tok', {
+      subjectId: 's', user: null, plan: 'free', planLabel: 'Free',
+    })
+    const account = loadCloudAccount(config)
+    expect(account!.planActive).toBeNull()
+    expect(account!.landingUrl).toBeNull()
+  })
+})
+
+describe('cloud/account: capabilities parsing', () => {
+  function capsResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  }
+
+  const fullCaps = {
+    user: 'dev@example.com',
+    subjectId: 'sub-1',
+    plan: 'ENTERPRISE',
+    planLabel: 'Enterprise',
+    planActive: false,
+    landingUrl: 'https://cloud.example.com/#pricing',
+    expiresAt: '2099-01-01T00:00:00Z',
+    issuedAt: '2026-01-01T00:00:00Z',
+    capabilities: { intelligence_query: true },
+    limits: { api_requests_per_month: 100000 },
+  }
+
+  it('parses planActive and landingUrl from the capabilities response', async () => {
+    const fetchMock = vi.fn(async () => capsResponse(fullCaps))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const caps = await fetchCloudCapabilities('https://cloud.example.com', 'tok')
+      expect(caps.ok).toBe(true)
+      if (caps.ok) {
+        expect(caps.data.planActive).toBe(false)
+        expect(caps.data.landingUrl).toBe('https://cloud.example.com/#pricing')
+        expect(caps.data.plan).toBe('ENTERPRISE')
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('maps missing or malformed planActive/landingUrl to null instead of rejecting', async () => {
+    const fetchMock = vi.fn(async () => capsResponse({ ...fullCaps, planActive: 'oops', landingUrl: 42 }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const caps = await fetchCloudCapabilities('https://cloud.example.com', 'tok')
+      expect(caps.ok).toBe(true)
+      if (caps.ok) {
+        expect(caps.data.planActive).toBeNull()
+        expect(caps.data.landingUrl).toBeNull()
+      }
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})
+
+describe('cloud/account: resolveCloudLandingUrl', () => {
+  it('prefers a safe landing URL and falls back to the base URL otherwise', () => {
+    expect(resolveCloudLandingUrl('https://cloud.example.com', 'https://cloud.example.com/#pricing')).toBe('https://cloud.example.com/#pricing')
+    expect(resolveCloudLandingUrl('https://cloud.example.com', 'http://evil.example.com/x')).toBe('https://cloud.example.com')
+    expect(resolveCloudLandingUrl('https://cloud.example.com', 'not a url')).toBe('https://cloud.example.com')
+    expect(resolveCloudLandingUrl('https://cloud.example.com', null)).toBe('https://cloud.example.com')
+    expect(resolveCloudLandingUrl('http://localhost:8787', 'http://localhost:8787/dash')).toBe('http://localhost:8787/dash')
+    expect(resolveCloudLandingUrl('https://cloud.example.com/', 'https://cloud.example.com/')).toBe('https://cloud.example.com')
   })
 })

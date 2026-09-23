@@ -140,6 +140,28 @@ describe('lookupCloud', () => {
     expect(outcome.kind).toBe('error')
   })
 
+  it('flags a 403 NO_ACTIVE_SUBSCRIPTION body so Motor Full degrades with an operator-visible reason', async () => {
+    stubFetch(async () => jsonResponse(403, { code: 'NO_ACTIVE_SUBSCRIPTION', error: 'No active subscription. Choose a plan to continue.' }))
+    const outcome = await lookupCloud('sha512:abc', { baseUrl: BASE, token: TOKEN })
+    expect(outcome).toMatchObject({
+      kind: 'error',
+      reason: 'no_active_subscription',
+      message: expect.stringContaining('No active subscription'),
+    })
+  })
+
+  it('keeps 401/403 bodies without the business code as plain errors', async () => {
+    stubFetch(async () => jsonResponse(401, { code: 'UNAUTHORIZED' }))
+    const outcome = await lookupCloud('sha512:abc', { baseUrl: BASE, token: TOKEN })
+    expect(outcome).toEqual({ kind: 'error' })
+  })
+
+  it('keeps an unparseable 403 body as a plain error', async () => {
+    stubFetch(async () => new Response('not json', { status: 403 }))
+    const outcome = await lookupCloud('sha512:abc', { baseUrl: BASE, token: TOKEN })
+    expect(outcome).toEqual({ kind: 'error' })
+  })
+
   it('treats a 5xx as an error', async () => {
     stubFetch(async () => jsonResponse(503, {}))
     const outcome = await lookupCloud('sha512:abc', { baseUrl: BASE, token: TOKEN })
