@@ -46,6 +46,7 @@ import { initHmacKey } from './crypto/signing'
 import { printBanner, printHealthSummary } from './startup'
 import { runSetupWizard } from './setup-wizard'
 import { configureCloudLookup } from './scanner/intel/cloud-lookup'
+import { applyConfiguredCloud } from './cloud/account'
 import * as https from 'https'
 
 function resolveCredentials(config: ReturnType<typeof loadConfig>): { tokenOrConfig: string | GitHubAppConfig; warnings: string[] } {
@@ -170,6 +171,7 @@ async function main() {
   console.warn = origWarn
 
   configureCloudLookup(config.cloudApiUrl, config.cloudApiToken)
+  applyConfiguredCloud(config)
   ensureCredentials(config)
   validatePermissions(config.dataDir)
 
@@ -228,6 +230,7 @@ async function main() {
         client = new GitHubClient(r.tokenOrConfig, reloaded.githubOwner, reloaded.githubRepo, reloaded.githubStatusContext)
         Object.assign(config, reloaded)
         configureCloudLookup(reloaded.cloudApiUrl, reloaded.cloudApiToken)
+        applyConfiguredCloud(reloaded)
         valid = await client.verifyToken()
       }
     }

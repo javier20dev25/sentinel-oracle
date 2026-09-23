@@ -27,6 +27,17 @@ import { analyzePR as aiAnalyzePR, analyzeScanResults, explainPR, explainScanFin
 import { detectAIBackend, detectAllModels, checkModelHealth } from './ai/detector'
 import { buildCapabilitySnapshot, buildDNAReport } from './scanner/intel/security-dna'
 import { TokenInventoryScanner } from './inventory/tokens'
+import {
+  applyConfiguredCloud,
+  assertSecureCloudUrl,
+  clearCloudAccount,
+  fetchCloudCapabilities,
+  fetchCloudUsage,
+  hasStoredCloudAccount,
+  loadCloudAccount,
+  resolveOracleCloudConnection,
+  saveCloudAccount,
+} from './cloud/account'
 
 function generateEnrollmentToken(): string {
   return crypto.randomBytes(16).toString('hex')
@@ -1639,6 +1650,46 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     requireAuth()(req, res, next)
   }
 
+  function maskedCloudHost(url: string): string {
+    try {
+      return new URL(url).hostname
+    } catch {
+      return ''
+    }
+  }
+
+  async function cloudStatusPayload() {
+    const conn = resolveOracleCloudConnection(config)
+    const stored = loadCloudAccount(config)
+    const linked = hasStoredCloudAccount(config) && !!stored
+    const payload: Record<string, unknown> = {
+      linked,
+      configured: conn.viaConfigOrEnv,
+      motorFull: config.cloudMotorFull,
+      baseUrl: conn.baseUrl ? maskedCloudHost(conn.baseUrl) : '',
+      account: linked && stored ? { user: stored.user, subjectId: stored.subjectId, plan: stored.plan, planLabel: stored.planLabel } : null,
+      usage: null,
+      connected: false,
+      error: null,
+    }
+    if (conn.baseUrl && conn.token) {
+      const caps = await fetchCloudCapabilities(conn.baseUrl, conn.token)
+      if (caps.ok) {
+        payload.connected = true
+        if (!payload.account) {
+          payload.account = { user: caps.data.user, subjectId: caps.data.subjectId, plan: caps.data.plan, planLabel: caps.data.planLabel }
+        }
+      } else {
+        payload.error = caps.error ?? 'Cloud connection could not be verified.'
+      }
+      const usage = await fetchCloudUsage(conn.baseUrl, conn.token)
+      if (usage.ok) payload.usage = usage.data
+    } else if (!payload.linked) {
+      payload.error = 'No hay cuenta de Sentinel Cloud vinculada.'
+    }
+    return payload
+  }
+
   app.get('/api/config/github-status', (_req, res) => {
     res.json({
       configured: !!config.githubAppId && !!config.githubOwner && !!config.githubRepo,
@@ -1764,6 +1815,82 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     } catch (err) {
       db.log('error', null, `Settings save: ${err instanceof Error ? err.message : err}`)
       res.status(500).json({ error: 'Failed to save settings' })
+    }
+  })
+
+  // ----- Sentinel Cloud (Pulse / Motor Full) -----
+  app.get('/api/cloud/status', requireAuth(), apiRateLimiter(10, 60000), async (_req, res) => {
+    try {
+      const payload = await cloudStatusPayload()
+      res.json(payload)
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Cloud status failed' })
+    }
+  })
+
+  app.post('/api/cloud/link', requireAuth(), requireCSRF(), authRateLimiter(5, 60000), async (req, res) => {
+    try {
+      const { baseUrl, token } = req.body
+      if (typeof baseUrl !== 'string' || baseUrl.length === 0) {
+        return res.status(400).json({ error: 'baseUrl is required' })
+      }
+      if (typeof token !== 'string' || token.length === 0) {
+        return res.status(400).json({ error: 'token is required' })
+      }
+      const safeUrl = assertSecureCloudUrl(baseUrl.trim())
+      const caps = await fetchCloudCapabilities(safeUrl, token.trim())
+      if (!caps.ok) {
+        return res.status(400).json({ error: caps.error ?? 'Could not verify the Sentinel Cloud token.' })
+      }
+      saveCloudAccount(config, safeUrl, token.trim(), {
+        subjectId: caps.data.subjectId,
+        user: caps.data.user,
+        plan: caps.data.plan,
+        planLabel: caps.data.planLabel,
+      })
+      applyConfiguredCloud(config)
+      db.log('cloud_link', null, `Sentinel Cloud linked (${maskedCloudHost(safeUrl)}) — subjectId redacted`)
+      const usage = await fetchCloudUsage(safeUrl, token.trim())
+      res.json({
+        success: true,
+        account: { user: caps.data.user, subjectId: caps.data.subjectId, plan: caps.data.plan, planLabel: caps.data.planLabel },
+        usage: usage.ok ? usage.data : null,
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to link Sentinel Cloud'
+      db.log('error', null, `Cloud link: ${message}`)
+      res.status(400).json({ error: message })
+    }
+  })
+
+  app.post('/api/cloud/unlink', requireAuth(), requireCSRF(), authRateLimiter(5, 60000), (_req, res) => {
+    try {
+      clearCloudAccount(config)
+      applyConfiguredCloud(config)
+      db.log('cloud_unlink', null, 'Sentinel Cloud account unlinked')
+      res.json({ success: true })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to unlink Sentinel Cloud'
+      db.log('error', null, `Cloud unlink: ${message}`)
+      res.status(500).json({ error: message })
+    }
+  })
+
+  app.post('/api/cloud/motor', configAuth, requireCSRF(), apiRateLimiter(10, 60000), (req, res) => {
+    try {
+      const { enabled } = req.body
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'enabled must be a boolean' })
+      }
+      config.cloudMotorFull = enabled
+      saveConfig({ cloudMotorFull: enabled })
+      applyConfiguredCloud(config)
+      db.log('config_settings', null, `Motor Full ${enabled ? 'ON' : 'OFF'}`)
+      res.json({ success: true, motorFull: enabled })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to set Motor Full'
+      db.log('error', null, `Motor Full save: ${message}`)
+      res.status(500).json({ error: message })
     }
   })
 

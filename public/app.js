@@ -3132,6 +3132,146 @@
     }
   }
 
+  // ----- Sentinel Cloud (Motor Full / pulses) -----
+  async function loadCloudPanel() {
+    if (!authenticated) return
+    const el = document.getElementById('cloud-display')
+    if (!el) return
+    try {
+      const cloud = await api('/api/cloud/status')
+      let html = ''
+      if (!cloud.configured && !cloud.linked) {
+        html += '<div style="padding:1rem;border:1px solid var(--border-color);background:rgba(211,47,47,0.02)">'
+        html += '<div style="font-family:var(--font-mono);font-size:0.7rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent-orange)">Inicia sesión en tu cuenta de Sentinel Cloud</div>'
+        html += '<p style="font-size:0.6rem;color:var(--text-dark);line-height:1.5;margin:0.5rem 0">El Oracle está en modo offline: no consume pulsos y no comparte ni consulta inteligencia con Sentinel Cloud. Vincula tu cuenta para activar el Motor Full y desbloquear lookups, contribuciones y matching contra la comunidad.</p>'
+        html += '<button type="button" id="cloud-open-link" class="auth-btn" style="margin-top:0.5rem">CONECTAR CON SENTINEL CLOUD</button>'
+        html += '</div>'
+      } else {
+        const badgeClass = cloud.connected ? 'success' : 'pending'
+        const badgeText = cloud.connected ? 'CONNECTED' : (cloud.configured ? 'CHECKING' : 'NOT CONNECTED')
+        html += '<div class="token-detail"><span class="token-label">Conexión</span><span class="badge ' + badgeClass + '">' + badgeText + '</span>'
+        if (cloud.baseUrl) html += '<code style="margin-left:0.5rem">' + escapeHtml(cloud.baseUrl) + '</code>'
+        html += '</div>'
+        if (cloud.account) {
+          html += '<div class="token-detail"><span class="token-label">Cuenta</span><span>' + escapeHtml(cloud.account.user || cloud.account.subjectId || '—') + '</span></div>'
+          html += '<div class="token-detail"><span class="token-label">Plan</span><span>' + escapeHtml(cloud.account.planLabel || cloud.account.plan || '—') + '</span></div>'
+        } else {
+          html += '<div class="token-detail"><span class="token-label">Cuenta</span><span class="badge pending">VERIFICANDO</span></div>'
+        }
+        html += '<div style="margin-top:0.75rem;border-top:1px solid var(--border-color);padding-top:0.75rem">'
+        html += '<div class="toggle-row">'
+        html += '<div class="toggle-info"><div class="toggle-label">Motor Full</div><div class="toggle-desc">Participa en scans: consume pulsos de tu cuota mensual para lookup, contribución y matching contra Sentinel Cloud.</div></div>'
+        html += '<label class="toggle-switch"><input type="checkbox" id="cloud-motor-toggle" ' + (cloud.motorFull ? 'checked' : '') + '><span class="toggle-slider"></span></label>'
+        html += '</div>'
+        html += '<div class="token-detail"><span class="token-label">Estado de Motor Full</span><span class="badge ' + (cloud.motorFull ? 'success' : '') + '">' + (cloud.motorFull ? 'ON' : 'OFF') + '</span></div>'
+        html += '</div>'
+        if (cloud.usage) {
+          const used = cloud.usage.used, limit = cloud.usage.limit, remaining = cloud.usage.remaining
+          const pct = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
+          html += '<div style="margin-top:0.75rem;border-top:1px solid var(--border-color);padding-top:0.75rem">'
+          html += '<div class="token-detail"><span class="token-label">Pulsos</span><span class="badge ' + (remaining > 0 ? 'success' : 'error') + '">' + remaining + ' restantes</span><span style="margin-left:0.5rem;font-size:0.6rem;color:var(--text-dark)">' + used + ' usados de ' + limit + '</span></div>'
+          html += '<div style="height:6px;background:var(--border-color);margin-top:0.4rem"><div style="width:' + pct + '%;height:6px;background:' + (remaining > 0 ? 'var(--accent-green)' : 'var(--accent-red)') + '"></div></div>'
+          if (cloud.usage.period) html += '<div style="font-size:0.55rem;color:var(--text-dark);margin-top:0.3rem">Período: ' + escapeHtml(cloud.usage.period) + '</div>'
+          if (remaining <= 0) html += '<div style="font-size:0.6rem;color:var(--accent-orange);margin-top:0.3rem">Pulsos agotados — renueva tu suscripción en el dashboard de Sentinel Cloud o espera al reset mensual.</div>'
+          html += '</div>'
+        }
+        if (cloud.linked) {
+          html += '<div style="margin-top:0.75rem;border-top:1px solid var(--border-color);padding-top:0.75rem;display:flex;gap:0.5rem">'
+          html += '<button type="button" id="cloud-unlink-btn" class="btn-small">DESCONECTAR CUENTA</button>'
+          html += '</div>'
+        }
+        if (cloud.error) {
+          html += '<div class="status" style="margin-top:0.5rem;color:var(--accent-orange)">' + escapeHtml(cloud.error) + '</div>'
+        }
+      }
+      el.innerHTML = html
+      wireCloudPanelEvents(el, cloud)
+    } catch (err) {
+      el.innerHTML = '<p class="empty">Error cargando Sentinel Cloud: ' + escapeHtml(err.message) + '</p>'
+    }
+  }
+
+  function wireCloudPanelEvents(el, cloud) {
+    var linkBtn = document.getElementById('cloud-open-link')
+    if (linkBtn) {
+      linkBtn.addEventListener('click', openCloudLinkModal)
+    }
+    var unlinkBtn = document.getElementById('cloud-unlink-btn')
+    if (unlinkBtn) {
+      unlinkBtn.addEventListener('click', async function () {
+        if (!confirm('¿Desconectar la cuenta de Sentinel Cloud del Oracle? El token encriptado se eliminará.')) return
+        try {
+          await api('/api/cloud/unlink', { method: 'POST', body: JSON.stringify({}) })
+          await loadCloudPanel()
+        } catch (err) {
+          alert('Error al desconectar: ' + err.message)
+        }
+      })
+    }
+    var motor = document.getElementById('cloud-motor-toggle')
+    if (motor) {
+      motor.addEventListener('change', async function () {
+        motor.disabled = true
+        try {
+          const r = await api('/api/cloud/motor', { method: 'POST', body: JSON.stringify({ enabled: motor.checked }) })
+          if (r.success) await loadCloudPanel()
+        } catch (err) {
+          motor.checked = !motor.checked
+          alert('Error actualizando Motor Full: ' + err.message)
+        } finally {
+          motor.disabled = false
+        }
+      })
+    }
+  }
+
+  function openCloudLinkModal() {
+    var modal = document.getElementById('cloud-link-modal')
+    if (!modal) return
+    var statusEl = document.getElementById('cloud-link-status')
+    if (statusEl) statusEl.textContent = ''
+    var baseUrl = document.getElementById('cloud-base-url')
+    var token = document.getElementById('cloud-token')
+    if (baseUrl) baseUrl.value = ''
+    if (token) token.value = ''
+    modal.style.display = 'flex'
+    if (baseUrl) baseUrl.focus()
+  }
+
+  function closeCloudLinkModal() {
+    var modal = document.getElementById('cloud-link-modal')
+    if (modal) modal.style.display = 'none'
+  }
+
+  function wireCloudLinkModal() {
+    var cancel = document.getElementById('cloud-link-cancel')
+    if (cancel) cancel.addEventListener('click', closeCloudLinkModal)
+    var confirm = document.getElementById('cloud-link-confirm')
+    if (confirm) {
+      confirm.addEventListener('click', async function () {
+        var statusEl = document.getElementById('cloud-link-status')
+        var baseUrl = document.getElementById('cloud-base-url')
+        var token = document.getElementById('cloud-token')
+        if (!baseUrl || !token) return
+        if (!baseUrl.value.trim() || !token.value.trim()) {
+          if (statusEl) { statusEl.textContent = 'URL y token son requeridos.'; statusEl.className = 'status' }
+          return
+        }
+        confirm.disabled = true
+        if (statusEl) { statusEl.textContent = 'Verificando conexión con Sentinel Cloud...'; statusEl.className = 'status' }
+        try {
+          await api('/api/cloud/link', { method: 'POST', body: JSON.stringify({ baseUrl: baseUrl.value.trim(), token: token.value.trim() }) })
+          closeCloudLinkModal()
+          await loadCloudPanel()
+        } catch (err) {
+          if (statusEl) { statusEl.textContent = err.message; statusEl.className = 'status' }
+        } finally {
+          confirm.disabled = false
+        }
+      })
+    }
+  }
+
   // Onboarding Checklist
   async function loadSetupChecklist() {
     const el = document.getElementById('onboarding-checklist')
@@ -3861,6 +4001,7 @@ sentinel-oracle/
           case 'help-section': loadHelp(); break
           case 'scans-section': loadScans(); break
           case 'blacklist-section': loadBlacklist(); break
+          case 'cloud-section': loadCloudPanel(); break
         }
       }
     }
@@ -4048,6 +4189,10 @@ sentinel-oracle/
   setInterval(function () {
     if (currentPanel === 'queue-section') loadQueue()
   }, 60000);
+  setInterval(function () {
+    if (currentPanel === 'cloud-section') loadCloudPanel()
+  }, 60000);
+  wireCloudLinkModal();
 
   // Refresh countdown
   var _refreshCountdown = 30

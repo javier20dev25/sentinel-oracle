@@ -18,6 +18,7 @@ import {
   lifecycleToFindings,
   deltaToFindings,
   unverifiableVersionFinding,
+  type TarballScanResult,
 } from './deep-dependency'
 import { analyzeWorkflowIntelligence } from './workflow-intelligence'
 import { analyzeTrustDrift } from './trust-drift'
@@ -26,8 +27,11 @@ import { getContentIntelStore, type ContentIntelStore } from './content-intel/st
 import { stateFromRisk } from './content-intel/state'
 import type { ContentIntelEvidence } from './content-intel/record'
 import { getScannerVersion } from './content-intel/scanner-version'
-import { enrichContentIntel, hasCloudConnection } from './cloud-lookup'
+import { enrichContentIntel, hasCloudConnection, isCloudMotorFullEnabled } from './cloud-lookup'
 import { contributeScanEvidence } from './cloud-contribute'
+import { matchCloud, annotateFromMatch } from './cloud-match'
+import type { MatchOutcome } from './cloud-match'
+import type { DependencyMatchAnnotation } from './types'
 import { debug } from '../../logger'
 
 export type { IntelReport, IntelRisk, IntelItem } from './types'
@@ -151,6 +155,13 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
   const tarballFindings: Finding[] = []
   let tarballTelemetry: ScanTelemetry | null = null
 
+  // N3.3D match phase: one bounded, concurrent request per freshly
+  // integrity-verified dependency. Promises start here (right after each scan)
+  // and are merged with allSettled before the report returns, so the whole
+  // phase adds at most one per-request timeout to the scan — never serial
+  // latency per dependency. Fail-open: a failed match is simply omitted.
+  const matchJobs: Promise<{ outcome: MatchOutcome; scan: TarballScanResult }>[] = []
+
   if (deps && tarballScan) {
     const budget = new TarballBudget()
     const added = await budget.map(deps.added, add =>
@@ -203,7 +214,7 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
             verified: true,
             repoKey: opts?.repoKey,
           })
-          if (contentIntelStore && hasCloudConnection() && scan.contentId) {
+          if (contentIntelStore && hasCloudConnection() && isCloudMotorFullEnabled() && scan.contentId) {
             void enrichContentIntel(contentIntelStore, scan.contentId, {
               repoKey: opts?.repoKey,
               scannerVersion: getScannerVersion(),
@@ -213,11 +224,17 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
               })
               .catch(() => {})
           }
-          void contributeScanEvidence(scan, findings, { scannerVersion: getScannerVersion() })
-            .then(outcome => {
-              if (outcome) debug(`[cloud] ${scan.contentId} contribution: ${outcome}`)
-            })
-            .catch(() => {})
+          if (isCloudMotorFullEnabled()) {
+            void contributeScanEvidence(scan, findings, { scannerVersion: getScannerVersion() })
+              .then(outcome => {
+                if (outcome) debug(`[cloud] ${scan.contentId} contribution: ${outcome}`)
+              })
+              .catch(() => {})
+            // N3.3D: ask the Cloud for SHARED intelligence about this dependency.
+            // Read-only and fail-open (matchCloud never throws); the annotation is
+            // fused into the report and never feeds scoring. Gated by Motor Full.
+            matchJobs.push(matchCloud(scan, findings, { scannerVersion: getScannerVersion() }).then(outcome => ({ outcome, scan })))
+          }
         }
       }
     }
@@ -247,6 +264,21 @@ export async function runIntelAnalysis(files: PRFile[], opts?: IntelAnalysisOpti
 
   if (tarballFindings.length > 0) report.dependencyTarballFindings = tarballFindings
   if (tarballTelemetry) report.tarballScanTelemetry = tarballTelemetry
+
+  // N3.3D merge: settle all match promises (concurrent, bounded by each one's
+  // per-request timeout) and fuse the successful annotations into the report.
+  // allSettled + matchCloud-never-throws makes the whole phase fail-open.
+  if (matchJobs.length > 0) {
+    const settled = await Promise.allSettled(matchJobs)
+    const annotations: DependencyMatchAnnotation[] = []
+    for (const s of settled) {
+      if (s.status !== 'fulfilled') continue
+      const { outcome, scan } = s.value
+      if (outcome.kind !== 'match') continue
+      annotations.push(annotateFromMatch(outcome.result, scan))
+    }
+    if (annotations.length > 0) report.dependencyMatchIntel = annotations
+  }
 
   // Build SecurityDelta summary
   report.securityDelta = buildSecurityDelta(report)

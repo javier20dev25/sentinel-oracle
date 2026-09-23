@@ -34,6 +34,7 @@ const SIGNATURE_RE = /^[0-9a-f]{64}$/
 const VERDICTS = ['KNOWN_SAFE', 'SUSPICIOUS', 'MALICIOUS'] as const
 
 let configuredSettings: { baseUrl?: string; token?: string } | null = null
+let cloudMotorFull = false
 
 /**
  * Point the cloud lookup client at a Cloud deployment from loaded config
@@ -44,6 +45,20 @@ let configuredSettings: { baseUrl?: string; token?: string } | null = null
  */
 export function configureCloudLookup(baseUrl?: string, token?: string): void {
   configuredSettings = baseUrl && token ? { baseUrl, token } : null
+}
+
+/**
+ * Motor Full gate: when OFF, the Oracle never calls the Cloud inside scans
+ * (no lookup/contribute/match => no pulses consumed). When ON, the linked
+ * (or env/config) Cloud connection participates in scans. Set from config at
+ * server startup/reload and at scan time, mirroring configureCloudLookup.
+ */
+export function setCloudMotorFull(enabled: boolean): void {
+  cloudMotorFull = enabled
+}
+
+export function isCloudMotorFullEnabled(): boolean {
+  return cloudMotorFull
 }
 
 /** Resolved Cloud settings: explicit opts > configured (config.json) > env. */

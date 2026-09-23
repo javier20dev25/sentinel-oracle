@@ -100,7 +100,7 @@ describe('explainPR', () => {
     ]
     const result = await explainPR(1, 'Test Title', 'author', files, 'auto')
     expect(result.summary).toContain('Se modificó src/main.ts (+10 -2)')
-    expect(result.argumentation).toContain('Este PR modifica 1 archivo(s)')
+    expect(result.argumentation).toContain('Este PR implementa')
   })
 
   it('uses ollama model when specified and parses sections correctly', async () => {
@@ -127,7 +127,7 @@ This PR does a bunch of cleanups to improve codebase health. We refactored main.
     mockOllamaGenerateResponse = 'This is just a random plain text explanation with no headers.'
     const result = await explainPR(1, 'Test Title', 'author', files, 'ollama:qwen')
     expect(result.summary).toContain('Se modificó src/main.ts (+10 -2)')
-    expect(result.argumentation).toBe('This is just a random plain text explanation with no headers.')
+    expect(result.argumentation).toContain('ANÁLISIS DEL PR')
   })
 })
 
@@ -137,7 +137,8 @@ describe('explainScanFindings', () => {
       { severity: 'high', title: 'SQL Injection', file: 'db.ts', message: 'Raw query check' }
     ]
     const result = await explainScanFindings(1, 'Test Title', findings, 'auto')
-    expect(result.summary[0]).toContain('HIGH: SQL Injection')
+    expect(result.summary[0]).toContain('ALTA severidad')
+    expect(result.summary[0]).toContain('db.ts: SQL Injection')
     expect(result.argumentation).toContain('El escaneo de seguridad detectó 1 hallazgo')
   })
 

@@ -5,11 +5,13 @@ export default defineConfig({
     include: [
       'test/regression/intel/cloud-lookup.test.ts',
       'test/regression/intel/cloud-contribute.test.ts',
+      'test/regression/intel/cloud-match.test.ts',
       'test/regression/intel/contribute-builder.test.ts',
       'test/regression/intel/enrich.test.ts',
       'test/regression/intel/enrich-throws.test.ts',
       'test/regression/intel/lookup-security.test.ts',
       'test/regression/cloud-config.test.ts',
+      'test/regression/cloud/cloud-account.test.ts',
     ],
     testTimeout: 30000,
     env: { SENTINEL_TARBALL_SCAN: '0' },

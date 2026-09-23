@@ -39,6 +39,7 @@ export interface Config {
   aiModel: string
   cloudApiUrl: string
   cloudApiToken: string
+  cloudMotorFull: boolean
 }
 
 const CONFIG_PATH = path.join(os.homedir(), '.sentinel-oracle', 'config.json')
@@ -225,6 +226,7 @@ export function loadConfig(): Config {
     aiModel: '',
     cloudApiUrl: process.env.SENTINEL_CLOUD_URL ?? '',
     cloudApiToken: process.env.SENTINEL_CLOUD_API_TOKEN ?? '',
+    cloudMotorFull: false,
   }
 
   try {

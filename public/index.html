@@ -63,6 +63,10 @@
       <a class="nav-item" data-target="blacklist-section">Lista Negra</a>
     </div>
     <div class="nav-group">
+      <div class="nav-group-label">09 // SENTINEL CLOUD</div>
+      <a class="nav-item" data-target="cloud-section">Sentinel Cloud</a>
+    </div>
+    <div class="nav-group">
       <div class="nav-group-label">00 // REFERENCE</div>
       <a class="nav-item" data-target="about-section">About Sentinel</a>
       <a class="nav-item" data-target="help-section">Help & Guide</a>
@@ -363,6 +367,31 @@
       <p class="empty">No hay PRs en la lista negra.</p>
     </div>
   </section>
+
+  <!-- Sentinel Cloud Section -->
+  <section id="cloud-section" class="section panel" style="display:none">
+    <h2>Sentinel Cloud <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">Motor Full y suscripción de pulsos</span></h2>
+    <div id="cloud-display">
+      <p class="empty">Cargando conexión con Sentinel Cloud...</p>
+    </div>
+  </section>
+
+  <!-- Sentinel Cloud Link Modal -->
+  <div id="cloud-link-modal" class="modal" style="display:none;">
+    <div class="modal-content" style="max-width:440px">
+      <h3>Inicia sesión en tu cuenta de Sentinel Cloud</h3>
+      <p style="font-size:0.6rem;color:var(--text-dark);line-height:1.5;margin:0.4rem 0">Pega la URL de tu servidor Sentinel Cloud y un API token (obtenlo en el dashboard de tu cuenta Cloud). El token se guarda encriptado en este servidor y nunca se muestra de nuevo.</p>
+      <label for="cloud-base-url">Cloud URL</label>
+      <input type="text" id="cloud-base-url" placeholder="https://tu-cloud.example.com" spellcheck="false" autocomplete="off">
+      <label for="cloud-token">API Token</label>
+      <input type="password" id="cloud-token" placeholder="Pega tu token de API" autocomplete="off" spellcheck="false">
+      <div id="cloud-link-status" class="status"></div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.75rem">
+        <button type="button" id="cloud-link-cancel" class="btn-small" style="flex:1">Cancelar</button>
+        <button type="button" id="cloud-link-confirm" class="auth-btn" style="flex:1">Vincular cuenta</button>
+      </div>
+    </div>
+  </div>
 
   <!-- AI Report Modal -->
   <div id="ai-report-modal" class="modal scan-report-modal" style="display:none;">

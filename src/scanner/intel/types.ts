@@ -2,6 +2,51 @@ export type IntelRisk = 'low' | 'medium' | 'high' | 'critical'
 
 import type { Finding } from '../rules'
 import type { ScanTelemetry } from './tarball-budget'
+import type {
+  IntelMatchState,
+  IntelVerdict,
+  IntelMatchMissReason,
+  IntelRiskBand,
+  IntelMatchSharedEvidence,
+  MatchRecommendation,
+} from './cloud-match'
+
+/**
+ * N3.3D read-only annotation produced from a Cloud match for one dependency.
+ * Carries shared, de-identified intelligence plus a recommendation hint; it is
+ * NEVER an input to `buildSecurityDelta` / `determineScanVerdict`.
+ */
+export interface DependencyMatchAnnotation {
+  name: string
+  version: string
+  state: IntelMatchState
+  decisiveState: IntelVerdict | null
+  revoked: boolean
+  recommendation: MatchRecommendation
+  contentIdLevel: {
+    found: boolean
+    verified: boolean
+    usable: boolean
+    verdict: IntelVerdict | null
+    reason: IntelMatchMissReason | null
+    historyLength: number | null
+  }
+  identityLevel: {
+    packageIdentity: string
+    observations: number
+    distinctContributors: number
+    artifacts: number
+    corroborated: boolean
+    corroboratedState: IntelVerdict | null
+    knownSignals: string[]
+    maxRisk: IntelRiskBand | null
+    hasCurrentArtifact: boolean
+  } | null
+  knownSignals: string[]
+  newBehaviorSignals: string[]
+  sharedEvidence: IntelMatchSharedEvidence | null
+}
+
 
 export interface IntelItem {
   label: string
@@ -289,4 +334,11 @@ export interface IntelReport {
   dependencyTarballFindings?: Finding[]
   /** Resource/telemetry report for the tarball phase (budget usage, truncation). */
   tarballScanTelemetry?: ScanTelemetry
+  /**
+   * N3.3D shared-intelligence annotations from the Cloud match (read-only).
+   * Purely additive: NEVER consumed by scoring/verdict — it only surfaces what
+   * the Cloud already knows so the report can say "this artifact matches shared
+   * intelligence" without inventing a second risk engine.
+   */
+  dependencyMatchIntel?: DependencyMatchAnnotation[]
 }
