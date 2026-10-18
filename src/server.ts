@@ -39,6 +39,7 @@ import {
   resolveOracleCloudConnection,
   saveCloudAccount,
 } from './cloud/account'
+import { newOracleExecutionId, resolveOracleGroupScanContext, reserveOracleGroupScan, settleOracleGroupScan } from './cloud/group-local-scan'
 
 function generateEnrollmentToken(): string {
   return crypto.randomBytes(16).toString('hex')
@@ -620,7 +621,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     if (!config.scanEnabled) {
       return res.status(404).json({ error: 'PR scanning is not enabled. Set scanEnabled: true in config.json' })
     }
+    let groupScan: ReturnType<typeof resolveOracleGroupScanContext> = null
     try {
+      try { groupScan = resolveOracleGroupScanContext(config) }
+      catch (error) { return res.status(503).json({ error: error instanceof Error ? error.message : 'Group scan configuration is invalid', code: 'GROUP_SCAN_CONFIGURATION_INVALID' }) }
       const prNumber = parseInt(req.params.number as string, 10)
       const files = await client.getPRFiles(prNumber)
       if (files.length === 0) {
@@ -630,6 +634,15 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const pr = db.getPRByNumber(prNumber)
       const sha = pr ? pr.sha : ''
       const scanHash = computeScanHash(files, sha)
+      const executionId = newOracleExecutionId()
+      const startedAt = Date.now()
+      let groupReservation: Awaited<ReturnType<typeof reserveOracleGroupScan>> | null = null
+      if (groupScan) {
+        try { groupReservation = await reserveOracleGroupScan(groupScan, prNumber, sha, scanHash, `${config.githubOwner}/${config.githubRepo}`) }
+        catch (error) {
+          return res.status(503).json({ error: error instanceof Error ? error.message : 'Group scan authorization failed', code: 'GROUP_SCAN_NOT_AUTHORIZED', executionMode: 'GROUP_LOCAL' })
+        }
+      }
       // Return cached result if nothing changed
       if (db.hasScanHash(prNumber, scanHash)) {
         const row = db.getLatestScanResult(prNumber)
@@ -645,6 +658,17 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           try { stateReasons = row.stateReasonsJson ? JSON.parse(row.stateReasonsJson) : [] } catch { stateReasons = [] }
           let attestation: unknown
           try { attestation = row.attestationJson ? JSON.parse(row.attestationJson) : undefined } catch {}
+          let groupActivity: unknown
+          if (groupScan && groupReservation) {
+            try {
+              groupActivity = await settleOracleGroupScan(groupScan, groupReservation.reservationId, 'CACHED', {
+                executionId, commitSha: sha, pullRequest: prNumber, toolVersion: 'sentinel-oracle/1.0.2', durationMs: 0,
+                findings: { critical: row.critical, high: row.high, medium: row.medium, low: row.low },
+              })
+            } catch (error) {
+              return res.status(503).json({ error: error instanceof Error ? error.message : 'Group scan activity settlement failed', code: 'GROUP_SCAN_SETTLEMENT_FAILED', reservationId: groupReservation.reservationId, executionMode: 'GROUP_LOCAL' })
+            }
+          }
           db.log('pr_scanned', prNumber, `Scan cache HIT — returning cached result (risk ${row.riskScore})`)
           return res.json({
             riskScore: row.riskScore,
@@ -669,12 +693,38 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
             prAuthStatus: pr?.authStatus || 'pending',
             scanDuration: 0,
             cached: true,
+            executionMode: groupScan ? 'GROUP_LOCAL' : 'LOCAL_OFFLINE',
+            activityProvenance: groupScan ? 'CLIENT_REPORTED' : 'LOCAL_ONLY',
+            quota: groupScan ? (groupActivity as { state?: string } | undefined)?.state ?? 'UNKNOWN' : 'NOT_APPLICABLE',
           })
         }
       }
-      const t0 = Date.now()
-      const result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha, scanHash)
-      const scanDuration = Date.now() - t0
+      let result
+      try {
+        result = await scanPRFiles(files, prNumber, config.githubOwner, config.githubRepo, sha, scanHash)
+      } catch (error) {
+        if (groupScan && groupReservation) {
+          try {
+            await settleOracleGroupScan(groupScan, groupReservation.reservationId, 'FAILED', {
+              executionId, commitSha: sha, pullRequest: prNumber, toolVersion: 'sentinel-oracle/1.0.2', durationMs: Date.now() - startedAt,
+              findings: { critical: 0, high: 0, medium: 0, low: 0 },
+            })
+          } catch { /* expired reservations are released by Cloud's scheduled expiry */ }
+        }
+        throw error
+      }
+      const scanDuration = Date.now() - startedAt
+      let groupActivity: unknown
+      if (groupScan && groupReservation) {
+        try {
+          groupActivity = await settleOracleGroupScan(groupScan, groupReservation.reservationId, 'COMPLETED', {
+            executionId, commitSha: sha, pullRequest: prNumber, toolVersion: 'sentinel-oracle/1.0.2', durationMs: scanDuration,
+            findings: { critical: result.critical, high: result.high, medium: result.medium, low: result.low },
+          })
+        } catch (error) {
+          return res.status(503).json({ error: error instanceof Error ? error.message : 'Group scan activity settlement failed', code: 'GROUP_SCAN_SETTLEMENT_FAILED', reservationId: groupReservation.reservationId, executionMode: 'GROUP_LOCAL', scanCompletedLocally: true, activityProvenance: 'CLIENT_REPORTED' })
+        }
+      }
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) buildIntel=${!!result.buildIntel} in ${scanDuration}ms`)
       // Persist scan result
       db.saveScanResult(prNumber, scanHash, result)
@@ -711,6 +761,9 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         prAuthStatus: pr?.authStatus || 'pending',
         scanDuration,
         cached: false,
+        executionMode: groupScan ? 'GROUP_LOCAL' : 'LOCAL_OFFLINE',
+        activityProvenance: groupScan ? 'CLIENT_REPORTED' : 'LOCAL_ONLY',
+        quota: groupScan ? (groupActivity as { state?: string } | undefined)?.state ?? 'UNKNOWN' : 'NOT_APPLICABLE',
       })
     } catch (err) {
       db.log('error', null, `PR scan: ${err instanceof Error ? err.message : err}`)
@@ -1669,6 +1722,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
     const payload: Record<string, unknown> = {
       linked,
       configured: conn.viaConfigOrEnv,
+      scanMode: (process.env.SENTINEL_SCAN_MODE || 'local').toLowerCase(),
+      groupScanCredentialsConfigured: !!(process.env.SENTINEL_GROUP_KEY && process.env.SENTINEL_MEMBER_KEY && process.env.SENTINEL_GROUP_REPOSITORY_ID),
       motorFull: config.cloudMotorFull,
       baseUrl: conn.baseUrl ? maskedCloudHost(conn.baseUrl) : '',
       account: null,
@@ -1676,12 +1731,16 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       landingUrl: '',
       usage: null,
       connected: false,
+      // Cached account/plan fields below are display context only. This flag is
+      // true only after a live Cloud request validates the current credential.
+      authorizationVerified: false,
       error: null,
     }
     if (conn.baseUrl && conn.token) {
       const caps = await fetchCloudCapabilities(conn.baseUrl, conn.token)
       if (caps.ok) {
         payload.connected = true
+        payload.authorizationVerified = true
         account = {
           user: caps.data.user,
           subjectId: caps.data.subjectId,
@@ -1966,6 +2025,8 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       authMode: client.authMode,
       scanEnabled: config.scanEnabled,
       autoScan: config.autoScan,
+      scanMode: (process.env.SENTINEL_SCAN_MODE || 'local').toLowerCase(),
+      groupScanConfigured: !!(process.env.SENTINEL_GROUP_KEY && process.env.SENTINEL_MEMBER_KEY && process.env.SENTINEL_GROUP_REPOSITORY_ID),
       aiEnabled: config.aiEnabled,
       autoAnalyze: config.autoAnalyze,
       securityInbox: config.securityInbox,
@@ -2003,8 +2064,13 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         // Auto-scan new/updated PRs if autoScan is enabled
         if (config.autoScan && config.scanEnabled) {
           const pending = db.getPendingPRs()
+          let autoGroupScan: ReturnType<typeof resolveOracleGroupScanContext> = null
+          let autoScanModeReady = true
+          try { autoGroupScan = resolveOracleGroupScanContext(config) }
+          catch { autoScanModeReady = false; db.log('group_scan', null, 'Auto-scan skipped: group scan configuration is invalid') }
           for (const pr of pending) {
             try {
+              if (!autoScanModeReady || (String(process.env.SENTINEL_SCAN_MODE || '').toLowerCase() === 'group' && !autoGroupScan)) continue
               const existing = db.getLatestScanResult(pr.prNumber)
               if (existing) continue
               const files = await client.getPRFiles(pr.prNumber)
@@ -2012,11 +2078,37 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
               db.storePRFiles(pr.prNumber, files)
               const scanHash = computeScanHash(files, pr.sha)
               if (!db.hasScanHash(pr.prNumber, scanHash)) {
-                const sResult = await scanPRFiles(files, pr.prNumber, config.githubOwner, config.githubRepo, pr.sha)
+                const executionId = newOracleExecutionId()
+                const startedAt = Date.now()
+                const reservation = autoGroupScan
+                  ? await reserveOracleGroupScan(autoGroupScan, pr.prNumber, pr.sha, scanHash, `${config.githubOwner}/${config.githubRepo}`)
+                  : null
+                let sResult
+                try {
+                  sResult = await scanPRFiles(files, pr.prNumber, config.githubOwner, config.githubRepo, pr.sha, scanHash)
+                } catch (error) {
+                  if (autoGroupScan && reservation) {
+                    try {
+                      await settleOracleGroupScan(autoGroupScan, reservation.reservationId, 'FAILED', {
+                        executionId, commitSha: pr.sha, pullRequest: pr.prNumber, toolVersion: 'sentinel-oracle/1.0.2', durationMs: Date.now() - startedAt,
+                        findings: { critical: 0, high: 0, medium: 0, low: 0 },
+                      })
+                    } catch { /* Cloud will release an abandoned reservation after expiry */ }
+                  }
+                  throw error
+                }
+                if (autoGroupScan && reservation) {
+                  await settleOracleGroupScan(autoGroupScan, reservation.reservationId, 'COMPLETED', {
+                    executionId, commitSha: pr.sha, pullRequest: pr.prNumber, toolVersion: 'sentinel-oracle/1.0.2', durationMs: Date.now() - startedAt,
+                    findings: { critical: sResult.critical, high: sResult.high, medium: sResult.medium, low: sResult.low },
+                  })
+                }
                 db.saveScanResult(pr.prNumber, scanHash, sResult)
                 db.log('pr_scanned', pr.prNumber, `Auto-scan: risk ${sResult.riskScore} (${sResult.critical}C ${sResult.high}H ${sResult.medium}M ${sResult.low}L)`)
               }
-            } catch {}
+            } catch {
+              if (autoGroupScan) db.log('group_scan', pr.prNumber, 'Auto-scan failed after group authorization or settlement could not be completed')
+            }
           }
         }
         if (config.autoAnalyze && config.aiEnabled) {

@@ -4,6 +4,8 @@ import type { GitHubAppConfig } from './github/auth'
 import { scanPRFiles } from './scanner/index'
 import { applyConfiguredCloud } from './cloud/account'
 import { initHmacKey } from './crypto/signing'
+import { createHash } from 'node:crypto'
+import { newOracleExecutionId, resolveOracleGroupScanContext, reserveOracleGroupScan, settleOracleGroupScan } from './cloud/group-local-scan'
 
 function resolveCredentials(config: ReturnType<typeof loadConfig>): string | GitHubAppConfig {
   const hasPat = !!config.githubToken
@@ -31,9 +33,12 @@ export async function runScan(): Promise<void> {
 
   applyConfiguredCloud(config)
   initHmacKey(config.hmacSeed)
+  // Group mode is opt-in and fail-closed. With no group mode configured the
+  // existing local/offline workflow remains independent of Cloud billing.
+  const groupScan = resolveOracleGroupScanContext(config)
   const client = new GitHubClient(resolveCredentials(config), config.githubOwner, config.githubRepo, config.githubStatusContext)
 
-  console.log(`Scanning ${config.githubOwner}/${config.githubRepo}...`)
+  console.log(`Scanning ${config.githubOwner}/${config.githubRepo} (${groupScan ? 'group-authorized local' : 'independent local'} mode)...`)
 
   let scannedCount = 0
   let errorCount = 0
@@ -43,7 +48,36 @@ export async function runScan(): Promise<void> {
     try {
       console.log(`  PR #${pr.number}: ${pr.title}`)
       const files = await client.getPRFiles(pr.number)
-      const result = await scanPRFiles(files, pr.number, config.githubOwner, config.githubRepo, pr.sha)
+      const scanHash = createHash('sha256').update(pr.sha).update(JSON.stringify(files.map((file) => ({ filename: file.filename, patch: file.patch ?? '' })))).digest('hex')
+      const executionId = newOracleExecutionId()
+      const groupReservation = groupScan
+        ? await reserveOracleGroupScan(groupScan, pr.number, pr.sha, scanHash, `${config.githubOwner}/${config.githubRepo}`)
+        : null
+      const startedAt = Date.now()
+      let result
+      try {
+        result = await scanPRFiles(files, pr.number, config.githubOwner, config.githubRepo, pr.sha, scanHash)
+      } catch (error) {
+        if (groupScan && groupReservation) {
+          try {
+            await settleOracleGroupScan(groupScan, groupReservation.reservationId, 'FAILED', {
+              executionId, commitSha: pr.sha, pullRequest: pr.number, toolVersion: 'sentinel-oracle/1.0.2', durationMs: Date.now() - startedAt,
+              findings: { critical: 0, high: 0, medium: 0, low: 0 },
+            })
+          } catch { /* Cloud expires abandoned reservations if offline */ }
+        }
+        throw error
+      }
+      if (groupScan && groupReservation) {
+        try {
+          await settleOracleGroupScan(groupScan, groupReservation.reservationId, 'COMPLETED', {
+            executionId, commitSha: pr.sha, pullRequest: pr.number, toolVersion: 'sentinel-oracle/1.0.2', durationMs: Date.now() - startedAt,
+            findings: { critical: result.critical, high: result.high, medium: result.medium, low: result.low },
+          })
+        } catch {
+          throw new Error('Local scan completed, but Cloud quota/activity settlement failed; the result is not reported as group-settled.')
+        }
+      }
       scannedCount++
       console.log(`    State: ${result.state} — Risk: ${result.riskScore} (${result.findings.length} findings, ${Object.keys(result.intel || {}).length} intel modules)`)
       if (result.stateReasons.length > 0) {
