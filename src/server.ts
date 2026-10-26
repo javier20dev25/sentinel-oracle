@@ -782,7 +782,10 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           githubStatus: err.status,
         })
       }
-      res.status(500).json({ error: 'Failed to scan PR' })
+      res.status(500).json({
+        error: err instanceof Error ? err.message : 'Failed to scan PR',
+        code: 'SCAN_ERROR',
+      })
     }
   })
 

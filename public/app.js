@@ -1010,9 +1010,12 @@
       }
     } catch (err) {
       console.error('Scan failed for PR #' + prNumber + ':', err)
-      scanPanel.innerHTML = `<div class="scan-header scan-critical">Scan failed: ${escapeHtml(err.message)}</div>`;
+      const isNetErr = err.message && (err.message.includes('ETIMEDOUT') || err.message.includes('ENOTFOUND') || err.message.includes('timeout') || err.message.includes('Failed to fetch'));
+      const userMsg = isNetErr ? 'GitHub API temporarily unreachable (network timeout). Wait a few seconds and retry.' : escapeHtml(err.message);
+      const hint = isNetErr ? '<div style="font-size:0.72rem;margin-top:6px;opacity:0.8;">Tip: The local scanner is healthy — try again in a moment.</div>' : '';
+      scanPanel.innerHTML = '<div class="scan-header scan-critical" style="padding:1rem 1.25rem;"><strong>Scan error:</strong> ' + userMsg + hint + '</div>';
       scanPanel.classList.add('active');
-      btn.textContent = 'Scan';
+      btn.textContent = 'Retry Scan';
     } finally {
       btn.disabled = false;
     }
