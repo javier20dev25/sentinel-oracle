@@ -22,6 +22,7 @@ import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
 import { recommendAudit } from './audit/recommendation'
+import { runSentinelAudit } from './audit/runner'
 import { verifyScanAttestation } from './crypto/attestation'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
 import { analyzePR as aiAnalyzePR, analyzeScanResults, explainPR, explainScanFindings } from './ai/analyzer'
@@ -782,6 +783,42 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         })
       }
       res.status(500).json({ error: 'Failed to scan PR' })
+    }
+  })
+
+  // Sentinel Audit is an explicitly started evidence workflow. Its result is
+  // kept separate from Oracle's scan state and merge authorization.
+  app.post('/api/prs/:number/audit', requireAuth(), requireCSRF(), authRateLimiter(2, 60000), async (req, res) => {
+    const runnerPath = process.env.SENTINEL_AUDIT_RUNNER
+    if (!runnerPath) return res.status(503).json({ error: 'Sentinel Audit is not configured on this Oracle host.', code: 'AUDIT_NOT_CONFIGURED' })
+    const prNumber = parseInt(req.params.number as string, 10)
+    if (!Number.isInteger(prNumber) || prNumber < 1) return res.status(400).json({ error: 'Invalid pull request number.' })
+    const requestedSha = typeof req.body?.commitSha === 'string' ? req.body.commitSha : ''
+    const requestedHash = typeof req.body?.scanHash === 'string' ? req.body.scanHash : ''
+    if (!/^[a-f0-9]{40}$/i.test(requestedSha) || !requestedHash) return res.status(400).json({ error: 'A pinned PR SHA and current Oracle scan hash are required.' })
+    try {
+      const row = db.getLatestScanResult(prNumber)
+      if (!row || row.scanHash !== requestedHash) return res.status(409).json({ error: 'The Oracle scan changed. Run a fresh PR scan before starting Sentinel Audit.' })
+      const pr = await client.getPullRequest(prNumber)
+      const liveSha = String(pr?.head?.sha || '')
+      if (!liveSha || liveSha.toLowerCase() !== requestedSha.toLowerCase()) return res.status(409).json({ error: 'The PR head changed. Run a fresh Oracle scan before Sentinel Audit.', code: 'PR_HEAD_CHANGED' })
+      const liveFiles = await client.getPRFiles(prNumber)
+      if (!liveFiles.length || computeScanHash(liveFiles, liveSha) !== requestedHash) return res.status(409).json({ error: 'The PR files differ from the Oracle scan. Scan the latest revision before Sentinel Audit.', code: 'SCAN_IS_STALE' })
+      let findings: Array<{ severity?: string; category?: string }> = []
+      let buildIntel: { risk?: string; verdict?: string } | undefined
+      try { findings = JSON.parse(row.findingsJson || '[]') } catch {}
+      try { buildIntel = row.buildIntelJson ? JSON.parse(row.buildIntelJson) : undefined } catch {}
+      if (!recommendAudit({ findings, state: row.state, buildIntel, commitSha: requestedSha }).recommended) {
+        return res.status(409).json({ error: 'The current Oracle scan does not indicate a Sentinel Audit run.', code: 'AUDIT_NOT_INDICATED' })
+      }
+      const accessToken = await client.getAccessToken().catch(() => undefined)
+      const audit = await runSentinelAudit({ runnerPath, owner: config.githubOwner, repo: config.githubRepo, prNumber, commitSha: liveSha, dataDir: config.dataDir, accessToken })
+      db.log('pr_scanned', prNumber, `Sentinel Audit completed for pinned commit ${liveSha}: ${audit.pipelineStatus}; candidates=${audit.candidates.length}`)
+      return res.json({ audit, advisoryOnly: true, mergeStateChanged: false })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sentinel Audit execution failed.'
+      db.log('error', prNumber, `Sentinel Audit failed: ${message}`)
+      return res.status(502).json({ error: message, code: 'AUDIT_EXECUTION_FAILED' })
     }
   })
 

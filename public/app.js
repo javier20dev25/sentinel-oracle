@@ -886,7 +886,7 @@
         ? `<div class="scan-state-reasons">${result.stateReasons.map(r => `<div class="state-reason-item">${escapeHtml(r)}</div>`).join('')}</div>`
         : '';
       const auditRecommendationHtml = result.auditRecommendation && result.auditRecommendation.recommended
-        ? `<aside class="audit-recommendation" role="note"><strong>Sentinel Audit may help with this PR</strong><ul>${result.auditRecommendation.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>${result.auditRecommendation.command ? `<code>${escapeHtml(result.auditRecommendation.command)}</code>` : ''}<p>Advisory only. Audit runs separately on a pinned commit and does not change Oracle's scan result or merge authorization.</p></aside>`
+        ? `<section class="audit-workbench" aria-labelledby="audit-workbench-title"><div class="audit-workbench-heading"><div><span class="audit-kicker">SEPARATE EVIDENCE WORKFLOW</span><h3 id="audit-workbench-title">Sentinel Audit</h3></div><span class="audit-scope">PINNED PR COMMIT</span></div><p class="audit-intro">The Oracle scan found signals where broader analyzer coverage may help. Run Sentinel Audit against this exact revision to inspect tool health, coverage, and corroborated candidates.</p><ul class="audit-reasons">${result.auditRecommendation.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul><button type="button" class="audit-run-button" data-audit-pr="${prNumber}" data-audit-sha="${escapeHtml(result.auditRecommendation.commitSha || '')}" data-audit-hash="${escapeHtml(result.scanHash || '')}">Run Sentinel Audit</button><p class="audit-boundary">Audit evidence is displayed separately. It never changes Oracle findings, merge state, or authorization. Human review is required for candidates.</p><div class="audit-run-result" id="audit-result-${prNumber}" aria-live="polite"></div></section>`
         : '';
       // Cache intel data for checks drawer
       if (result.intel) _intelData[prNumber] = result.intel
@@ -998,6 +998,8 @@
       // Wire Full Report button
       const reportBtn = scanPanel.querySelector('.scan-report-open-btn');
       if (reportBtn) reportBtn.addEventListener('click', () => showScanReport(prNumber));
+      const auditBtn = scanPanel.querySelector('.audit-run-button');
+      if (auditBtn) auditBtn.addEventListener('click', () => runSentinelAuditForPr(auditBtn));
       // Auto-open checks drawer to show radar chart + intel
       var checksBtn = document.querySelector('#pr-card-' + prNumber + ' .checks-toggle-btn')
       if (checksBtn) {
@@ -1013,6 +1015,33 @@
       btn.textContent = 'Scan';
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  async function runSentinelAuditForPr(button) {
+    const prNumber = button.dataset.auditPr
+    const resultPanel = document.getElementById(`audit-result-${prNumber}`)
+    if (!resultPanel || button.disabled) return
+    button.disabled = true
+    button.textContent = 'Running pinned audit'
+    resultPanel.innerHTML = '<div class="audit-progress"><div class="audit-progress-track"><span></span></div><div class="audit-progress-copy">Preparing an isolated checkout, verifying the commit, then running configured analyzers. This can take several minutes.</div></div>'
+    try {
+      const response = await api(`/api/prs/${prNumber}/audit`, {
+        method: 'POST',
+        body: JSON.stringify({ commitSha: button.dataset.auditSha, scanHash: button.dataset.auditHash }),
+      })
+      const audit = response.audit
+      const verdictLabel = escapeHtml(`${audit.verdict} · ${audit.analysisState}`)
+      const toolsHtml = (audit.tools || []).map(tool => `<div class="audit-tool-row"><span>${escapeHtml(tool.name)}</span><span>${escapeHtml(tool.status)}</span><span>${tool.coverageKnown ? 'Coverage reported' : 'Coverage unknown'}</span><span>${Number(tool.findingCount) || 0} candidates</span></div>`).join('')
+      const candidatesHtml = (audit.candidates || []).length
+        ? audit.candidates.map(candidate => { const evidence = (candidate.evidence || []).map(signal => `<div class="audit-evidence"><strong>${escapeHtml(signal.tool)} · ${escapeHtml(signal.rule)}${signal.line ? ':' + Number(signal.line) : ''}</strong><p>${escapeHtml(signal.detail)}</p></div>`).join(''); return `<article class="audit-candidate"><div><strong>${escapeHtml(candidate.severity)}</strong><span>${escapeHtml(candidate.id)}</span></div><p>${escapeHtml(candidate.summary)}</p><code>${escapeHtml(candidate.file || 'Location unavailable')}${candidate.line ? ':' + Number(candidate.line) : ''}</code>${evidence ? `<details><summary>Evidence from ${candidate.evidence.length} signal${candidate.evidence.length === 1 ? '' : 's'}</summary>${evidence}</details>` : ''}</article>` }).join('')
+        : '<p class="audit-empty">No corroborated candidates were recorded. Check tool coverage and failures before interpreting this as a clean result.</p>'
+      resultPanel.innerHTML = `<div class="audit-result-summary"><div><span class="audit-kicker">AUDIT RESULT</span><strong>${verdictLabel}</strong></div><span>${audit.canClaimClean ? 'No open candidate under recorded coverage' : 'Evidence remains incomplete or unresolved'}</span></div><div class="audit-commit">Commit <code>${escapeHtml(audit.commitSha)}</code> · Preflight ${escapeHtml(audit.preflight.verdict)} · ${escapeHtml(audit.pipelineStatus)}</div><div class="audit-tool-list"><h4>Analyzer coverage</h4>${toolsHtml || '<p class="audit-empty">No analyzer records were produced.</p>'}</div><div class="audit-candidates"><h4>Corroborated candidates for human review</h4>${candidatesHtml}</div><p class="audit-boundary">A completed Audit is bounded by recorded analyzer coverage, not a guarantee of safety. Sentinel Audit did not adjudicate candidates as vulnerabilities. Oracle's original scan result and merge authorization remain unchanged.</p>`
+    } catch (error) {
+      resultPanel.innerHTML = `<div class="audit-run-error"><strong>Audit did not complete</strong><p>${escapeHtml(error.message || 'Unknown error')}</p><span>Oracle's scan and merge state are unchanged.</span></div>`
+    } finally {
+      button.disabled = false
+      button.textContent = 'Run Sentinel Audit again'
     }
   }
 
