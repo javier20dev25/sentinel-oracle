@@ -169,15 +169,33 @@ Sentinel Oracle includes a multi-layered security scanner that analyzes PR diffs
 
 When enabled in Settings (toggle switch), all PRs are scanned automatically on queue refresh. Manual SCAN button appears when auto-scan is OFF. Scans are cached per PR SHA and never re-executed for identical code.
 
-### Sentinel Audit advisory
+### Sentinel Audit in PR review
 
-After a local Oracle PR scan, the result may include an **Audit may help** note
-when a high/critical finding, a CI/CD or dependency signal, elevated Build
-Intelligence risk, or a review state without a specific finding suggests that
-more evidence is useful. The note offers a pinned-commit preflight command for
-the separate Sentinel Audit CLI. It is advisory only: it does not launch Audit,
-change Oracle findings, or affect merge authorization. Audit remains a
-terminal-first tool; see its [interactive workflow](https://github.com/javier20dev25/sentinel-audit#commands).
+When a high/critical finding, CI/CD or dependency signal, elevated Build
+Intelligence risk, or unresolved review state suggests that broader coverage
+could help, the PR scan shows a Sentinel Audit workbench. The operator can
+start a separate Audit run from that panel and inspect the pinned commit,
+preflight, analyzer status, coverage, and corroborated candidates with locations.
+Candidates remain unadjudicated evidence; a person decides whether they are
+valid vulnerabilities. Audit never changes Oracle's findings, scan state, or
+merge authorization.
+
+To enable the workbench, install Sentinel Audit and set
+`SENTINEL_AUDIT_RUNNER` in the Oracle server environment to the absolute path of
+its `audit-runner.js` entry point, then restart Oracle. For example:
+
+```powershell
+$env:SENTINEL_AUDIT_RUNNER = 'C:\tools\sentinel-audit\audit-runner.js'
+```
+
+Oracle creates a temporary Git checkout of the repository's pull-request head,
+verifies the full commit SHA, runs Audit preflight, and then invokes the Audit
+pipeline. The checkout is removed when the request finishes. Configure the
+analyzers and policies on the Oracle host as described in the
+[Sentinel Audit guide](https://github.com/javier20dev25/sentinel-audit#commands).
+The target repository's build scripts and packages are not run by this
+integration. If Audit is not installed or configured, Oracle reports that state
+in the PR panel instead of presenting a recommendation as an executed scan.
 
 ### Security Categories
 

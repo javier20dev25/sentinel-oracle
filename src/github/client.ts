@@ -105,6 +105,8 @@ export class GitHubClient {
   get authMode(): AuthMode { return this.mode }
   get appAuthInstance(): GitHubAppAuth | null { return this.appAuth }
 
+  async getAccessToken(): Promise<string> { return this.resolveToken() }
+
   private async resolveToken(): Promise<string> {
     if (this.mode === 'pat') {
       return this.patToken
