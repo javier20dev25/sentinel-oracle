@@ -84,24 +84,30 @@ function checkTailscale(): HealthCheck[] {
 
 async function checkGithub(): Promise<HealthCheck[]> {
   const checks: HealthCheck[] = []
-  try {
-    const controller = new AbortController()
-    const id = setTimeout(() => controller.abort(), 3000)
-    const res = await fetch('https://api.github.com', { signal: controller.signal, method: 'HEAD' })
-    clearTimeout(id)
-    checks.push({
-      label: 'GitHub API reachable',
-      ok: true,
-      detail: `HTTP ${res.status}`,
-    })
-  } catch (e: any) {
-    const msg = e?.cause?.code || e?.code || e?.message || 'timeout'
-    checks.push({
-      label: 'GitHub API reachable',
-      ok: false,
-      detail: msg === 'timeout' || e?.name === 'AbortError' ? 'Connection timed out (3s)' : msg,
-      fix: '❯ Run: tailscale set --accept-dns=false && ipconfig /flushdns',
-    })
+  const maxRetries = 2
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController()
+      const id = setTimeout(() => controller.abort(), 6000)
+      const res = await fetch('https://api.github.com', { signal: controller.signal, method: 'HEAD' })
+      clearTimeout(id)
+      checks.push({
+        label: 'GitHub API reachable',
+        ok: true,
+        detail: `HTTP ${res.status}`,
+      })
+      return checks
+    } catch (e: any) {
+      if (attempt === maxRetries) {
+        const msg = e?.cause?.code || e?.code || e?.message || 'timeout'
+        checks.push({
+          label: 'GitHub API reachable',
+          ok: false,
+          detail: msg === 'timeout' || e?.name === 'AbortError' ? 'Connection timed out (6s)' : msg,
+          fix: '❯ Run: tailscale set --accept-dns=false && ipconfig /flushdns',
+        })
+      }
+    }
   }
   return checks
 }
