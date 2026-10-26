@@ -21,6 +21,7 @@ import {
 import { hashPassword, verifyPassword } from './crypto/password'
 import { saveConfig } from './config'
 import { scanPRFiles } from './scanner/index'
+import { recommendAudit } from './audit/recommendation'
 import { verifyScanAttestation } from './crypto/attestation'
 import { analyzeWorkflowIntelligence } from './scanner/intel/index'
 import { analyzePR as aiAnalyzePR, analyzeScanResults, explainPR, explainScanFindings } from './ai/analyzer'
@@ -564,6 +565,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       try { stateReasons = row.stateReasonsJson ? JSON.parse(row.stateReasonsJson) : [] } catch { stateReasons = [] }
       let attestation: unknown
       try { attestation = row.attestationJson ? JSON.parse(row.attestationJson) : undefined } catch {}
+      const auditRecommendation = recommendAudit({ findings: findings as Array<{ severity?: string; category?: string }>, state: row.state, buildIntel: buildIntel as { risk?: string; verdict?: string } | undefined, commitSha: pr?.sha })
       const attestationVerified = attestation ? verifyScanAttestation(attestation).valid : null
       res.json({
         riskScore: row.riskScore,
@@ -577,6 +579,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
         buildIntel: buildIntel || undefined,
         state: row.state || 'PASS',
         stateReasons,
+        auditRecommendation,
         attestation: attestation || undefined,
         attestationVerified,
         scannedAt: row.scannedAt,
@@ -658,6 +661,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
           try { stateReasons = row.stateReasonsJson ? JSON.parse(row.stateReasonsJson) : [] } catch { stateReasons = [] }
           let attestation: unknown
           try { attestation = row.attestationJson ? JSON.parse(row.attestationJson) : undefined } catch {}
+          const auditRecommendation = recommendAudit({ findings: findings as Array<{ severity?: string; category?: string }>, state: row.state, buildIntel: buildIntel as { risk?: string; verdict?: string } | undefined, commitSha: sha })
           let groupActivity: unknown
           if (groupScan && groupReservation) {
             try {
@@ -682,6 +686,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
             buildIntel: buildIntel || undefined,
             state: row.state || 'PASS',
             stateReasons,
+            auditRecommendation,
             attestation: attestation || undefined,
             scannedAt: row.scannedAt,
             files: prFiles,
@@ -728,6 +733,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) buildIntel=${!!result.buildIntel} in ${scanDuration}ms`)
       // Persist scan result
       db.saveScanResult(prNumber, scanHash, result)
+      const auditRecommendation = recommendAudit({ findings: result.findings, state: result.state, buildIntel: result.buildIntel, commitSha: sha })
       db.log('pr_scanned', prNumber, `Scan: risk ${result.riskScore} (${result.critical}C ${result.high}H ${result.medium}M ${result.low}L) in ${scanDuration}ms`)
       // Auto-analyze with AI if enabled
       if (config.autoAnalyze && config.aiEnabled) {
@@ -751,6 +757,7 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       const prFiles = db.getPRFiles(prNumber)
       res.json({
         ...result,
+        auditRecommendation,
         scanHash,
         files: prFiles,
         prNumber,

@@ -8,6 +8,7 @@ export default defineConfig({
       'test/regression/encryption.test.ts',
       'test/regression/verdict.test.ts',
       'test/regression/attestation.test.ts',
+      'test/regression/audit-recommendation.test.ts',
       'test/regression/intel/tarball-scan.test.ts',
       'test/regression/intel/content-intel.test.ts',
       'test/integration/**',

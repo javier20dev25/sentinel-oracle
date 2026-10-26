@@ -885,6 +885,9 @@
       const stateReasonsHtml = (result.state === 'REVIEW' || result.state === 'BLOCK') && (result.stateReasons || []).length > 0
         ? `<div class="scan-state-reasons">${result.stateReasons.map(r => `<div class="state-reason-item">${escapeHtml(r)}</div>`).join('')}</div>`
         : '';
+      const auditRecommendationHtml = result.auditRecommendation && result.auditRecommendation.recommended
+        ? `<aside class="audit-recommendation" role="note"><strong>Sentinel Audit may help with this PR</strong><ul>${result.auditRecommendation.reasons.map(reason => `<li>${escapeHtml(reason)}</li>`).join('')}</ul>${result.auditRecommendation.command ? `<code>${escapeHtml(result.auditRecommendation.command)}</code>` : ''}<p>Advisory only. Audit runs separately on a pinned commit and does not change Oracle's scan result or merge authorization.</p></aside>`
+        : '';
       // Cache intel data for checks drawer
       if (result.intel) _intelData[prNumber] = result.intel
       scanPanel.innerHTML = `
@@ -905,6 +908,7 @@
         </div>
         ${stateBanner}
         ${stateReasonsHtml}
+        ${auditRecommendationHtml}
         <div style="text-align:right;margin-bottom:0.75rem;">
           <button class="scan-report-open-btn" data-pr="${prNumber}">FULL REPORT</button>
         </div>

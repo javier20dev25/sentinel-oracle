@@ -169,6 +169,16 @@ Sentinel Oracle includes a multi-layered security scanner that analyzes PR diffs
 
 When enabled in Settings (toggle switch), all PRs are scanned automatically on queue refresh. Manual SCAN button appears when auto-scan is OFF. Scans are cached per PR SHA and never re-executed for identical code.
 
+### Sentinel Audit advisory
+
+After a local Oracle PR scan, the result may include an **Audit may help** note
+when a high/critical finding, a CI/CD or dependency signal, elevated Build
+Intelligence risk, or a review state without a specific finding suggests that
+more evidence is useful. The note offers a pinned-commit preflight command for
+the separate Sentinel Audit CLI. It is advisory only: it does not launch Audit,
+change Oracle findings, or affect merge authorization. Audit remains a
+terminal-first tool; see its [interactive workflow](https://github.com/javier20dev25/sentinel-audit#commands).
+
 ### Security Categories
 
 | Severity | Score Range | Examples |
