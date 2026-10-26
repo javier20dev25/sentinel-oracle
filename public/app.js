@@ -487,12 +487,28 @@
               badges[2].className = 'badge ' + pr.authStatus
               badges[2].textContent = 'Auth: ' + pr.authStatus
             }
+            if (!existing.querySelector('.card-fullscreen-btn')) {
+              const fsBtn = document.createElement('button')
+              fsBtn.className = 'card-fullscreen-btn'
+              fsBtn.dataset.pr = pr.prNumber
+              fsBtn.title = 'Expandir tarjeta a pantalla completa'
+              fsBtn.setAttribute('aria-label', 'Expandir tarjeta')
+              fsBtn.innerHTML = '<span class="fs-icon">⛶</span> <span class="fs-label">EXPANDIR TARJETA</span>'
+              fsBtn.addEventListener('click', function (e) {
+                e.stopPropagation()
+                toggleCardFullscreen(pr.prNumber)
+              })
+              existing.prepend(fsBtn)
+            }
             continue
           }
           const card = document.createElement('div');
           card.id = 'pr-card-' + pr.prNumber;
           card.className = 'pr-card';
           card.innerHTML = `
+            <button class="card-fullscreen-btn" data-pr="${pr.prNumber}" title="Expandir tarjeta a pantalla completa" aria-label="Expandir tarjeta">
+              <span class="fs-icon">⛶</span> <span class="fs-label">EXPANDIR TARJETA</span>
+            </button>
             <div class="pr-card-split">
               <div class="pr-card-info">
                 <div class="pr-card-header">
@@ -542,6 +558,12 @@
 
         if (newCards.length > 0) {
           newCards.forEach(card => {
+            card.querySelectorAll('.card-fullscreen-btn').forEach(btn => {
+              btn.addEventListener('click', function (e) {
+                e.stopPropagation()
+                toggleCardFullscreen(this.dataset.pr)
+              })
+            })
             card.querySelectorAll('.auth-btn').forEach(btn => btn.addEventListener('click', authorizePR))
             card.querySelectorAll('.direct-auth-btn').forEach(btn => btn.addEventListener('click', authorizeDirectPR))
             card.querySelectorAll('.reject-btn').forEach(btn => btn.addEventListener('click', rejectPR))
@@ -3070,6 +3092,64 @@
       el.innerHTML = '<p class="empty">Failed to load configuration</p>';
     }
   }
+
+  // Fullscreen card expansion handler
+  function toggleCardFullscreen(prNumber) {
+    const card = document.getElementById('pr-card-' + prNumber);
+    if (!card) return;
+    const isFS = card.classList.contains('is-fullscreen');
+
+    if (isFS) {
+      card.classList.remove('is-fullscreen');
+      document.body.classList.remove('body-card-fullscreen');
+      const btn = card.querySelector('.card-fullscreen-btn');
+      if (btn) {
+        btn.innerHTML = '<span class="fs-icon">⛶</span> <span class="fs-label">EXPANDIR TARJETA</span>';
+        btn.title = 'Expandir tarjeta a pantalla completa';
+      }
+    } else {
+      document.querySelectorAll('.pr-card.is-fullscreen').forEach(function (c) {
+        c.classList.remove('is-fullscreen');
+        const b = c.querySelector('.card-fullscreen-btn');
+        if (b) {
+          b.innerHTML = '<span class="fs-icon">⛶</span> <span class="fs-label">EXPANDIR TARJETA</span>';
+          b.title = 'Expandir tarjeta a pantalla completa';
+        }
+      });
+
+      card.classList.add('is-fullscreen');
+      document.body.classList.add('body-card-fullscreen');
+      const btn = card.querySelector('.card-fullscreen-btn');
+      if (btn) {
+        btn.innerHTML = '<span class="fs-icon">✕</span> <span class="fs-label">REDUCIR TARJETA</span>';
+        btn.title = 'Salir de pantalla completa (Esc)';
+      }
+
+      if (typeof _intelData !== 'undefined' && _intelData[prNumber]) {
+        const rc = document.getElementById('radar-chart-' + prNumber);
+        if (rc && typeof renderRadarChart === 'function') {
+          try { renderRadarChart(rc, _intelData[prNumber]); } catch (e) {}
+        }
+      }
+
+      card.scrollTop = 0;
+    }
+  }
+
+  // Escape key handler for fullscreen card
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      const fsCard = document.querySelector('.pr-card.is-fullscreen');
+      if (fsCard) {
+        const reportModal = document.getElementById('scan-report-modal');
+        if (reportModal && reportModal.style.display && reportModal.style.display !== 'none') {
+          return;
+        }
+        const num = fsCard.id.replace('pr-card-', '');
+        toggleCardFullscreen(num);
+      }
+    }
+  });
 
   // PR Detail expand
   async function expandPRDetail(prNumber) {
