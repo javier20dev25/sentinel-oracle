@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import * as cloudKeyManager from './cloud-keys'
 import * as fs from 'fs'
 import express from 'express'
 import cookieParser from 'cookie-parser'
@@ -2036,6 +2037,42 @@ export function createApp(config: Config, db: DatabaseStore, client: GitHubClien
       res.status(500).json({ error: message })
     }
   })
+
+  // ----- Cloud API Keys Management (Multi-Key) -----
+  app.get('/api/cloud-keys', requireAuth(), apiRateLimiter(30, 60000), (_req, res) => {
+    try {
+      const keys = cloudKeyManager.listKeys()
+      res.json({ keys, disclaimer: cloudKeyManager.DISCLAIMER_TEXT })
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : 'Failed to list keys' })
+    }
+  })
+
+  app.post('/api/cloud-keys', requireAuth(), requireCSRF(), authRateLimiter(10, 60000), (req, res) => {
+    try {
+      const { token, name } = req.body || {}
+      if (!token || typeof token !== 'string' || token.trim().length < 6) {
+        return res.status(400).json({ error: 'Token inválido o demasiado corto' })
+      }
+      const added = cloudKeyManager.addKey(token, name)
+      db.log('cloud_key_added', null, `Cloud key added: ${added.name} (${added.maskedToken})`)
+      res.json({ success: true, key: added })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to add key' })
+    }
+  })
+
+  app.delete('/api/cloud-keys/:id', requireAuth(), requireCSRF(), authRateLimiter(10, 60000), (req, res) => {
+    try {
+      const { id } = req.params
+      const result = cloudKeyManager.revokeKey(id as string)
+      db.log('cloud_key_revoked', null, `Cloud key revoked from local machine: ${id}`)
+      res.json({ success: true, ...result })
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : 'Failed to revoke key' })
+    }
+  })
+
 
   // ----- Security DNA -----
   app.get('/api/dna', requireAuth(), async (_req, res) => {

@@ -65,6 +65,7 @@
     <div class="nav-group">
       <div class="nav-group-label">09 // SENTINEL CLOUD</div>
       <a class="nav-item" data-target="cloud-section">Sentinel Cloud</a>
+      <a class="nav-item" data-target="cloud-keys-section">Claves Cloud</a>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">00 // REFERENCE</div>
@@ -373,6 +374,61 @@
     <h2>Sentinel Cloud <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">Motor Full y suscripción de pulsos</span></h2>
     <div id="cloud-display">
       <p class="empty">Cargando conexión con Sentinel Cloud...</p>
+    </div>
+  </section>
+
+  <!-- Sentinel Cloud Keys Management Section -->
+  <section id="cloud-keys-section" class="section panel" style="display:none">
+    <h2>Claves de Sentinel Cloud <span style="font-size:0.6rem;font-weight:400;color:var(--text-dark);margin-left:0.5rem">Almacenadas localmente en este servidor</span></h2>
+    
+    <!-- Box: Add Key -->
+    <div style="background:var(--bg-sidebar);border:1px solid var(--border-color);padding:1.25rem;margin-bottom:1.5rem;">
+      <h3 style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.75rem;color:var(--text-bright);">+ Registrar Nueva Clave Cloud</h3>
+      <p style="font-size:0.65rem;color:var(--text-dark);line-height:1.5;margin-bottom:1rem;">
+        Pega tu API Token obtenido en el panel de Sentinel Cloud. Se guardará de forma segura en <code>~/.sentinel/cloud_keys.json</code> y se utilizará para autorizaciones y escaneo de PRs mediante pulsos.
+      </p>
+      <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:2;min-width:240px;">
+          <label style="font-size:0.6rem;color:var(--text-dark);display:block;margin-bottom:0.3rem;">API TOKEN DE CLOUD</label>
+          <input type="password" id="new-cloud-key-token" placeholder="sntl_live_..." autocomplete="off" spellcheck="false" style="width:100%;padding:0.4rem 0.6rem;background:var(--bg-primary);border:1px solid var(--border-color);color:var(--text-main);font-family:var(--font-mono);font-size:0.7rem;box-sizing:border-box;">
+        </div>
+        <div style="flex:1;min-width:160px;">
+          <label style="font-size:0.6rem;color:var(--text-dark);display:block;margin-bottom:0.3rem;">NOMBRE IDENTIFICADOR (OPCIONAL)</label>
+          <input type="text" id="new-cloud-key-name" placeholder="Ej: Clave Prod / Equipo A" spellcheck="false" style="width:100%;padding:0.4rem 0.6rem;background:var(--bg-primary);border:1px solid var(--border-color);color:var(--text-main);font-family:var(--font-mono);font-size:0.7rem;box-sizing:border-box;">
+        </div>
+        <div>
+          <button type="button" id="btn-save-cloud-key" class="auth-btn" style="padding:0.45rem 1.25rem;font-size:0.7rem;">GUARDAR CLAVE</button>
+        </div>
+      </div>
+      <div id="save-key-status" style="font-size:0.65rem;margin-top:0.6rem;"></div>
+    </div>
+
+    <!-- Box: List Keys -->
+    <div style="background:var(--bg-sidebar);border:1px solid var(--border-color);padding:1.25rem;margin-bottom:1.5rem;">
+      <h3 style="font-size:0.8rem;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:0.75rem;color:var(--text-bright);">Claves Activas en este Servidor</h3>
+      <div id="cloud-keys-table-container">
+        <p class="loading-msg">Cargando claves registradas...</p>
+      </div>
+    </div>
+
+    <!-- Box: Revocation Warning -->
+    <div style="background:rgba(255,165,0,0.06);border:1px solid #d29922;padding:1rem 1.25rem;margin-bottom:1.5rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;color:#d29922;font-size:0.75rem;font-weight:700;margin-bottom:0.35rem;">
+        <span>⚠</span> <span>ADVERTENCIA DE REVOCACIÓN</span>
+      </div>
+      <p style="font-size:0.65rem;color:var(--text-main);line-height:1.5;margin:0;">
+        Revocar una clave desde este servidor <strong>solo la elimina del almacenamiento de esta máquina local</strong>. Si deseas invalidarla permanentemente para impedir que cualquier otro agente o sistema la utilice, debes eliminarla directamente desde la consola web de Sentinel Cloud.
+      </p>
+    </div>
+
+    <!-- Box: User Legal Disclaimer -->
+    <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-color);padding:1rem 1.25rem;">
+      <div style="display:flex;align-items:center;gap:0.5rem;color:var(--text-dark);font-size:0.7rem;font-weight:700;margin-bottom:0.35rem;">
+        <span>⚖</span> <span>AVISO DE RESPONSABILIDAD DEL USUARIO</span>
+      </div>
+      <p style="font-size:0.62rem;color:var(--text-dark);line-height:1.6;margin:0;">
+        El usuario es el único responsable del uso de esta herramienta y de las decisiones de seguridad, fusión de código o despliegue tomadas con base en sus resultados. El desarrollador y los mantenedores de Sentinel no se hacen responsables de daños directos o indirectos, fallas de seguridad, código malicioso o vulnerabilidades que el motor no haya podido detectar. Ningún sistema de análisis estático o heurístico garantiza la detección del 100% de las amenazas.
+      </p>
     </div>
   </section>
 

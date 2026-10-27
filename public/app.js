@@ -4104,6 +4104,119 @@ sentinel-oracle/
   // Panel navigation
   let currentPanel = null
   let panelsLoaded = {}
+
+  // ----- Cloud API Keys Panel -----
+  async function loadCloudKeys() {
+    const container = document.getElementById('cloud-keys-table-container');
+    if (!container) return;
+
+    try {
+      container.innerHTML = '<p class="loading-msg">Consultando claves en la máquina...</p>';
+      const res = await api('/api/cloud-keys');
+      const keys = (res && res.keys) || [];
+
+      if (keys.length === 0) {
+        container.innerHTML = '<p class="empty">No hay claves de Sentinel Cloud registradas en esta máquina todavía.</p>';
+      } else {
+        let html = '<div class="checks-table" style="margin-top:0.5rem;">';
+        html += '<table style="width:100%;border-collapse:collapse;">';
+        html += '<thead><tr>';
+        html += '<th style="text-align:left;padding:0.4rem 0.5rem;color:var(--text-dark);font-size:0.6rem;text-transform:uppercase;">#</th>';
+        html += '<th style="text-align:left;padding:0.4rem 0.5rem;color:var(--text-dark);font-size:0.6rem;text-transform:uppercase;">Nombre</th>';
+        html += '<th style="text-align:left;padding:0.4rem 0.5rem;color:var(--text-dark);font-size:0.6rem;text-transform:uppercase;">Clave (Censurada)</th>';
+        html += '<th style="text-align:left;padding:0.4rem 0.5rem;color:var(--text-dark);font-size:0.6rem;text-transform:uppercase;">Fecha Registro</th>';
+        html += '<th style="text-align:right;padding:0.4rem 0.5rem;color:var(--text-dark);font-size:0.6rem;text-transform:uppercase;">Acción</th>';
+        html += '</tr></thead><tbody>';
+
+        keys.forEach(k => {
+          const dateStr = k.addedAt ? new Date(k.addedAt).toLocaleDateString() : '-';
+          html += '<tr style="border-bottom:1px solid var(--border-color);">';
+          html += `<td style="padding:0.5rem;font-size:0.68rem;color:var(--text-dark);">${k.index}</td>`;
+          html += `<td style="padding:0.5rem;font-size:0.68rem;color:var(--text-bright);font-weight:600;">${escapeHtml(k.name)}</td>`;
+          html += `<td style="padding:0.5rem;font-size:0.68rem;color:var(--accent-cyan);font-family:var(--font-mono);">${escapeHtml(k.maskedToken)}</td>`;
+          html += `<td style="padding:0.5rem;font-size:0.65rem;color:var(--text-dark);">${dateStr}</td>`;
+          html += `<td style="padding:0.5rem;text-align:right;">
+            <button class="btn-small revoke-key-btn" data-id="${k.id}" data-name="${escapeHtml(k.name)}" style="background:transparent;border:1px solid var(--accent-red);color:var(--accent-red);padding:0.2rem 0.6rem;font-size:0.6rem;cursor:pointer;border-radius:2px;font-family:var(--font-mono);text-transform:uppercase;">
+              Revocar
+            </button>
+          </td>`;
+          html += '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        // Wire revoke buttons
+        container.querySelectorAll('.revoke-key-btn').forEach(btn => {
+          btn.addEventListener('click', async function () {
+            const keyId = this.dataset.id;
+            const keyName = this.dataset.name;
+            const confirmMsg = `ADVERTENCIA:\n\nRevocar "${keyName}" solo la eliminará de esta máquina local.\nPara invalidarla permanentemente, debes revocarla en Sentinel Cloud.\n\n¿Deseas continuar y eliminarla de este equipo?`;
+            if (!confirm(confirmMsg)) return;
+
+            try {
+              this.disabled = true;
+              this.textContent = 'Eliminando...';
+              await api('/api/cloud-keys/' + encodeURIComponent(keyId), { method: 'DELETE' });
+              loadCloudKeys();
+            } catch (err) {
+              alert('Error al revocar clave: ' + err.message);
+              this.disabled = false;
+              this.textContent = 'Revocar';
+            }
+          });
+        });
+      }
+    } catch (err) {
+      container.innerHTML = `<p class="empty">Error al cargar claves: ${escapeHtml(err.message)}</p>`;
+    }
+  }
+
+  // Wire Add Key button once
+  function setupCloudKeysUI() {
+    const btnSave = document.getElementById('btn-save-cloud-key');
+    const inputToken = document.getElementById('new-cloud-key-token');
+    const inputName = document.getElementById('new-cloud-key-name');
+    const statusEl = document.getElementById('save-key-status');
+
+    if (!btnSave || btnSave.dataset.wired) return;
+    btnSave.dataset.wired = '1';
+
+    btnSave.addEventListener('click', async function () {
+      const token = (inputToken?.value || '').trim();
+      const name = (inputName?.value || '').trim();
+
+      if (!token) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent-red)">Por favor pega un token de Sentinel Cloud válido.</span>';
+        return;
+      }
+
+      btnSave.disabled = true;
+      btnSave.textContent = 'Guardando...';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--text-dark)">Registrando clave en la máquina...</span>';
+
+      try {
+        await api('/api/cloud-keys', {
+          method: 'POST',
+          body: JSON.stringify({ token, name })
+        });
+        if (inputToken) inputToken.value = '';
+        if (inputName) inputName.value = '';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent-green)">✓ Clave registrada y protegida exitosamente.</span>';
+        setTimeout(() => { if (statusEl) statusEl.innerHTML = ''; }, 4000);
+        loadCloudKeys();
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--accent-red)">Error: ${escapeHtml(err.message)}</span>`;
+      } finally {
+        btnSave.disabled = false;
+        btnSave.textContent = 'GUARDAR CLAVE';
+      }
+    });
+  }
+
+  // Call setup when script loads
+  setTimeout(setupCloudKeysUI, 500);
+
   function showPanel(id) {
     document.querySelectorAll('.panel').forEach(function (p) { p.style.display = 'none' })
     if (!id) return
@@ -4138,6 +4251,7 @@ sentinel-oracle/
           case 'scans-section': loadScans(); break
           case 'blacklist-section': loadBlacklist(); break
           case 'cloud-section': loadCloudPanel(); break
+          case 'cloud-keys-section': loadCloudKeys(); break
         }
       }
     }
@@ -4327,6 +4441,7 @@ sentinel-oracle/
   }, 60000);
   setInterval(function () {
     if (currentPanel === 'cloud-section') loadCloudPanel()
+    if (currentPanel === 'cloud-keys-section') loadCloudKeys()
   }, 60000);
   wireCloudLinkModal();
 
