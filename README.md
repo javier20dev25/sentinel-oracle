@@ -13,6 +13,62 @@ Oracle's controls.
 ---
 
 
+## ⚡ Comandos para Encender y Ejecutar Sentinel Oracle
+
+Para levantar el servidor de autorización física y enclave aislado:
+
+```bash
+# 1. Clonar e instalar dependencias
+git clone https://github.com/javier20dev25/sentinel-oracle.git
+cd sentinel-oracle
+npm install
+
+# 2. Compilar TypeScript
+npm run build
+
+# 3. Iniciar el servidor (Modo Producción)
+npm start
+```
+
+> **Nota:** También puedes arrancarlo en modo desarrollo con recarga automática:
+> ```bash
+> npm run dev
+> ```
+> O como comando global de sistema:
+> ```bash
+> npm install -g .
+> sentinel-oracle
+> ```
+> Una vez encendido, el servidor imprimirá su URL HTTPS en Tailscale (por ejemplo `https://<tu-nodo>.ts.net:3443` o `https://localhost:3443`).
+
+---
+
+## 📸 Galería Visual de la Interfaz y Telemetría Operativa
+
+| Vista | Captura | Descripción |
+|---|---|---|
+| **Dashboard Zero-Trust** | ![Dashboard Overview](docs/screenshots/oracle-dashboard-overview.png) | Monitor principal sobre Tailscale con estado del enclave, dispositivos biométricos enlazados y cola de PRs. |
+| **Cola de Pull Requests** | ![Pull Requests Queue](docs/screenshots/oracle-pull-requests.png) | Cola activa de PRs sincronizados en tiempo real con veredicto preliminar de seguridad. |
+| **Tarjeta en Pantalla Completa** | ![Fullscreen PR Card](docs/screenshots/oracle-fullscreen-pr-card.png) | Modo expandido para maximizar la visibilidad del diff y reducir scroll en auditorías complejas. |
+| **Radar Multidimensional** | ![Security Radar Diff](docs/screenshots/oracle-security-radar-diff.png) | Gráfico de vectores de riesgo junto a métricas de líneas añadidas/eliminadas antes de autorizar el merge. |
+| **Hallazgos Críticos** | ![Audit Findings](docs/screenshots/oracle-audit-findings.png) | Desglose forense de patrones maliciosos (RCE, sockets, exfiltración, tampering de CI). |
+| **Dispositivos WebAuthn** | ![Passkey Devices](docs/screenshots/oracle-passkey-devices.png) | Gestión de credenciales FIDO2 biométricas (Face ID, Touch ID, YubiKey) vinculadas al enclave. |
+| **Nodo de Aislamiento** | ![Isolation Node](docs/screenshots/oracle-isolation-node.png) | Verificación física de que las credenciales de merge nunca tocan la estación de trabajo. |
+| **Telemetría Operativa** | ![Telemetry Metrics](docs/screenshots/oracle-telemetry-metrics.png) | Latencias de respuesta, tiempos de decisión y contadores globales en tiempo real. |
+| **Registro Inmutable** | ![Audit Log](docs/screenshots/oracle-audit-log.png) | Historial criptográfico append-only de fusiones autorizadas y bloqueadas. |
+| **Analítica de Tendencias** | ![Trend Analytics](docs/screenshots/oracle-trend-analytics.png) | Gráficos históricos de riesgo y severidades detectadas a lo largo del tiempo. |
+| **Historial de Escaneos** | ![Scan History](docs/screenshots/oracle-scan-history.png) | Registro estructurado de auditorías previas para trazabilidad y cumplimiento. |
+| **Configuración GitHub** | ![GitHub Settings](docs/screenshots/oracle-github-settings.png) | Parámetros de GitHub App, Webhooks HMAC y validación de Branch Protection. |
+| **Informe Forense Completo** | ![Full Report Modal](docs/screenshots/oracle-full-report-modal.png) | Modal detallado con evidencia técnica por archivo, bloque de código y opciones de exportación. |
+
+---
+
+## ⚖️ Aviso Legal y de Responsabilidad
+
+> **AVISO DE RESPONSABILIDAD:** El usuario es el único responsable del uso de esta herramienta y de las decisiones de seguridad, fusión o despliegue tomadas con base en sus resultados. El desarrollador y los mantenedores no se hacen responsables de daños directos o indirectos, fallas de seguridad, código malicioso o vulnerabilidades no detectadas por Sentinel. Ningún motor de análisis estático o heurístico garantiza la detección del 100% de las amenazas.
+
+---
+
 ## Part of the Sentinel platform
 
 | Product | Purpose | When to use |
